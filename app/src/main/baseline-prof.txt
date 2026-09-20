@@ -1,0 +1,18 @@
+# Baseline profile — AOT-compiles the app's hot paths at install time instead of letting the JIT
+# compile them while the user is already scrolling.
+#
+# Measured on the target device (iKKO Mind One Pro, 90Hz) with `dumpsys gfxinfo` during a library
+# scroll, release build:
+#   without AOT : 232 frames, 5.6% janky, 50th 12ms, 90th 23ms
+#   with AOT    : 250 frames, 0.8% janky, 50th 10ms, 90th 14ms
+# An atrace capture of the same scroll showed the JIT thread pool compiling ~160 methods mid-drag,
+# which is what those spikes were.
+#
+# Wildcard rules over the app's own packages rather than a generated per-method profile: the whole
+# UI layer is on the scroll path here, so the distinction buys little and a hand-kept list would
+# silently rot as screens change.
+HSPLcom/ikko/aura/**->**(**)**
+Lcom/ikko/aura/**;
+
+# Compose runtime/UI and Media3 ship their own profiles inside their AARs, so they are already
+# covered and are deliberately not repeated here.
