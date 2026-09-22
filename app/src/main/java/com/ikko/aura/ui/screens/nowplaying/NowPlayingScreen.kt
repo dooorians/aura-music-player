@@ -50,10 +50,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.data.lyrics.LyricLine
 import com.ikko.aura.data.model.AudioOutput
+import com.ikko.aura.data.model.AudioOutputState
 import com.ikko.aura.data.model.AudioOutputType
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
@@ -78,7 +82,8 @@ import com.ikko.aura.ui.components.rememberLyricClock
 import com.ikko.aura.ui.components.LiquidGlassPanel
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraMotion
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.components.FillableIcon
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.LyricsUiState
 import com.ikko.aura.viewmodel.LyricsViewModel
 import com.ikko.aura.viewmodel.PlayerUiState
@@ -108,14 +113,29 @@ private val PlayTint = Color(0xFFF3C7D5)
 private val PlayGlyph = Color(0xFF6E1B36)
 private val NeutralGlassTint = Color(0xFF121212)
 
+/** The card's face while it is a card: the dark grey Apple's is. */
+private val SheetFaceColor = Color(0xFF2C2B2C)
+
 @Composable
 fun NowPlayingScreen(
     navController: NavHostController,
     viewModel: PlayerViewModel = hiltViewModel(),
     lyricsViewModel: LyricsViewModel = hiltViewModel(),
+    /** True when this screen is being opened from the mini player, so its card should rise into place. */
+    sheetOpening: Boolean = false,
+    /** True while it is being closed back to the mini player, so its card should sink to it. */
+    sheetClosing: Boolean = false,
+    /** True while it leaves for a page of its own rather than for the mini player. */
+    leavingSideways: Boolean = false,
+    /** The shared position of the card's top edge; see below. */
+    sheetCard: androidx.compose.runtime.MutableFloatState = androidx.compose.runtime.mutableFloatStateOf(1f),
+    /** The record's own deep colour, for the card's face. */
+    faceTint: Color = SheetFaceColor,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
+    val positionMs by viewModel.positionMs.collectAsStateWithLifecycle()
+    val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
 
     var showOutputPicker by remember { mutableStateOf(false) }
 
@@ -136,7 +156,84 @@ fun NowPlayingScreen(
         )
     }
 
-    GradientScreenScaffold {
+    // The player as a card, in Apple's way (see AuraMotion). [sheetCard] is how far below the top of the
+    // screen the card's top edge is, as a fraction of the screen's height — 0 when it is up, 1 when there
+    // is no card at all — and it is shared with the rest of the app: the page under the card is drawn only
+    // above that edge, and the mini player and the tab capsule stay away while it is over them.
+    //
+    // It is driven from here and not by the navigation transition, and started only once this screen has
+    // drawn its first frames: composing the player takes several of them, and a transition that had begun
+    // in the meantime spent its first moves unseen and then jumped.
+    remember {
+        if (sheetOpening) sheetCard.floatValue = AuraMotion.SHEET_START_FRACTION
+        sheetOpening
+    }
+    LaunchedEffect(Unit) {
+        if (sheetOpening) {
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.animation.core.animate(
+                initialValue = sheetCard.floatValue,
+                targetValue = 0f,
+                animationSpec = androidx.compose.animation.core.spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
+            ) { value, _ -> sheetCard.floatValue = value }
+        }
+    }
+    // Closing starts from the top when there was no card (the player was reached sideways), from wherever
+    // it is when there was.
+    val closedDone = remember { mutableStateOf(false) }
+    androidx.compose.runtime.SideEffect {
+        if (sheetClosing && sheetCard.floatValue >= 1f) sheetCard.floatValue = 0f
+        // Left for a page of its own (an album, the queue): the card is over, and the pages must be seen whole.
+        if (leavingSideways) sheetCard.floatValue = 1f
+    }
+    LaunchedEffect(sheetClosing) {
+        if (sheetClosing) {
+            androidx.compose.animation.core.animate(
+                initialValue = sheetCard.floatValue.coerceAtMost(AuraMotion.SHEET_PILL_TOP_FRACTION),
+                targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
+                animationSpec = tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
+            ) { value, _ -> sheetCard.floatValue = value }
+            // Gone: hidden for good before the shared position is reset. Reset alone put the card back at
+            // the top for the rest of the navigation transition — the whole player, over the page, for a
+            // few frames after it had sunk into the pill: the flash on closing.
+            closedDone.value = true
+            sheetCard.floatValue = 1f
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                if (closedDone.value) {
+                    alpha = 0f
+                    return@graphicsLayer
+                }
+                val o = sheetCard.floatValue.let { if (it >= 1f) 0f else it }
+                translationY = o * size.height
+                val s = 1f - AuraMotion.SHEET_NARROWING * o
+                scaleX = s
+                scaleY = s
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                // Top corners: rounded while it is a card, straightening as it comes up; on the way down they
+                // settle to the pill's own.
+                val corner = AuraMotion.cornerAt(o).toPx()
+                shape = RoundedCornerShape(topStart = corner, topEnd = corner)
+                clip = o > 0.0005f
+                // Near the pill the card clears, to let the pill and the page show.
+                alpha = 1f - ((o - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)).coerceIn(0f, 1f)
+            }
+            // The card's face: opaque while it is away from full screen — it hides what is under it — grey where
+            // it is furthest down and the record's own deep colour as it nears the top, and clearing only in
+            // the last of the way, when the player's own backdrop has long since come in behind it.
+            .drawBehind {
+                val o = sheetCard.floatValue.let { if (it >= 1f) 0f else it }
+                val alpha = (o / AuraMotion.SHEET_FACE_CLEARS_BELOW).coerceIn(0f, 1f)
+                val grey = (o / AuraMotion.SHEET_START_FRACTION).coerceIn(0f, 1f)
+                drawRect(androidx.compose.ui.graphics.lerp(faceTint, SheetFaceColor, grey).copy(alpha = alpha))
+            },
+    ) {
+    GradientScreenScaffold(applyContentInsets = true) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -173,12 +270,13 @@ fun NowPlayingScreen(
         ) {
             LyricCapsule(
                 lyricsState = lyricsState,
-                positionMs = uiState.positionMs,
+                positionMs = positionMs,
                 isPlaying = uiState.isPlaying,
             )
 
             HeroPanel(
-                uiState = uiState,
+                currentTrack = uiState.currentTrack,
+                queueIndex = uiState.queueIndex,
                 onOpenLyrics = { navController.navigate(AuraDestination.Lyrics.route) },
                 onOpenAlbum = { albumId ->
                     navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
@@ -189,8 +287,8 @@ fun NowPlayingScreen(
             )
 
             WavyProgressBar(
-                positionMs = uiState.positionMs,
-                durationMs = uiState.durationMs,
+                positionMs = positionMs,
+                durationMs = durationMs,
                 isPlaying = uiState.isPlaying,
                 onSeek = viewModel::seekTo,
             )
@@ -203,7 +301,11 @@ fun NowPlayingScreen(
             )
 
             UtilityRow(
-                uiState = uiState,
+                isFavorite = uiState.isFavorite,
+                automixEnabled = uiState.automixEnabled,
+                shuffleEnabled = uiState.shuffleEnabled,
+                repeatMode = uiState.repeatMode,
+                audioOutput = uiState.audioOutput,
                 onFavoriteToggle = viewModel::toggleFavorite,
                 onAutomixToggle = viewModel::toggleAutomix,
                 onShuffleToggle = viewModel::toggleShuffle,
@@ -212,11 +314,13 @@ fun NowPlayingScreen(
             )
 
             UpNextPanel(
-                uiState = uiState,
+                queue = uiState.queue,
+                queueIndex = uiState.queueIndex,
                 onOpenQueue = { navController.navigate(AuraDestination.Queue.route) },
                 onJumpTo = viewModel::jumpToQueueIndex,
             )
         }
+    }
     }
 }
 
@@ -324,10 +428,11 @@ private val LYRIC_SLOT_HEIGHT = 36.dp
 private fun List<LyricLine>.currentLineAt(positionMs: Long): LyricLine? =
     lastOrNull { it.timeMs <= positionMs }
 
-/** Cover, "Now Playing" chip, title and artist — the mockup's dominant block. */
+/** Cover, "En lecture" chip, title and artist — the mockup's dominant block. */
 @Composable
 private fun HeroPanel(
-    uiState: PlayerUiState,
+    currentTrack: Track?,
+    queueIndex: Int,
     onOpenLyrics: () -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
@@ -343,7 +448,7 @@ private fun HeroPanel(
         // The cover is the way into the full lyrics, with or without an `.lrc` — the lyrics screen
         // says so itself when there are none, which is more use than a dead tap target.
         AnimatedContent(
-            targetState = uiState.queueIndex to uiState.currentTrack,
+            targetState = queueIndex to currentTrack,
             transitionSpec = {
                 AuraMotion.queueSlide(forward = targetState.first >= initialState.first)
             },
@@ -372,14 +477,14 @@ private fun HeroPanel(
                     .padding(horizontal = 10.dp, vertical = 3.dp),
             ) {
                 Text(
-                    text = "Now Playing",
+                    text = "En lecture",
                     style = MaterialTheme.typography.labelSmall,
                     color = AuraColors.TextSecondary,
                 )
             }
             Spacer(Modifier.height(6.dp))
             AnimatedContent(
-                targetState = uiState.queueIndex to uiState.currentTrack,
+                targetState = queueIndex to currentTrack,
                 transitionSpec = {
                     AuraMotion.queueSlide(forward = targetState.first >= initialState.first)
                 },
@@ -444,13 +549,13 @@ private fun TransportRow(
     ) {
         TransportTile(
             weight = 1f,
-            icon = PhosphorIcons.SkipPrevious,
+            icon = CupertinoIcons.SkipPrevious,
             contentDescription = "Précédent",
             onClick = onPrevious,
         )
         TransportTile(
             weight = 1.25f,
-            icon = if (isPlaying) PhosphorIcons.Pause else PhosphorIcons.Play,
+            icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
             tint = PlayTint,
             tintAlpha = 0.82f,
@@ -462,7 +567,7 @@ private fun TransportRow(
         )
         TransportTile(
             weight = 1f,
-            icon = PhosphorIcons.SkipNext,
+            icon = CupertinoIcons.SkipNext,
             contentDescription = "Suivant",
             onClick = onNext,
         )
@@ -490,6 +595,7 @@ private fun RowScope.TransportTile(
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessVeryLow,
+            visibilityThreshold = 0.0004f,
         ),
         label = "transport-press-depth",
     )
@@ -525,7 +631,11 @@ private fun RowScope.TransportTile(
 /** Audio source on the left, favourite / shuffle / repeat on the right. */
 @Composable
 private fun UtilityRow(
-    uiState: PlayerUiState,
+    isFavorite: Boolean,
+    automixEnabled: Boolean,
+    shuffleEnabled: Boolean,
+    repeatMode: RepeatMode,
+    audioOutput: AudioOutputState,
     onFavoriteToggle: () -> Unit,
     onAutomixToggle: () -> Unit,
     onShuffleToggle: () -> Unit,
@@ -545,14 +655,14 @@ private fun UtilityRow(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
         ) {
             Icon(
-                imageVector = PhosphorIcons.Headphones,
+                imageVector = CupertinoIcons.Headphones,
                 contentDescription = "Changer la sortie audio",
                 tint = AuraColors.TextSecondary,
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = uiState.audioOutput.deviceName ?: uiState.audioOutput.type.label(),
+                text = audioOutput.deviceName ?: audioOutput.type.label(),
                 style = MaterialTheme.typography.labelMedium,
                 color = AuraColors.TextSecondary,
                 maxLines = 1,
@@ -560,7 +670,7 @@ private fun UtilityRow(
                 modifier = Modifier.widthIn(max = 130.dp),
             )
             Icon(
-                imageVector = PhosphorIcons.ChevronDown,
+                imageVector = CupertinoIcons.ChevronDown,
                 contentDescription = null,
                 tint = AuraColors.TextTertiary,
                 modifier = Modifier.size(16.dp),
@@ -569,28 +679,29 @@ private fun UtilityRow(
 
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             UtilityIcon(
-                icon = PhosphorIcons.Heart,
+                icon = CupertinoIcons.Heart,
+                filledIcon = CupertinoIcons.HeartFilled,
                 contentDescription = "Favori",
-                active = uiState.isFavorite,
+                active = isFavorite,
                 activeTint = AuraColors.AccentPink,
                 onClick = onFavoriteToggle,
             )
             UtilityIcon(
-                icon = PhosphorIcons.AutoAwesome,
+                icon = CupertinoIcons.AutoAwesome,
                 contentDescription = "Automix",
-                active = uiState.automixEnabled,
+                active = automixEnabled,
                 onClick = onAutomixToggle,
             )
             UtilityIcon(
-                icon = PhosphorIcons.Shuffle,
+                icon = CupertinoIcons.Shuffle,
                 contentDescription = "Lecture aléatoire",
-                active = uiState.shuffleEnabled,
+                active = shuffleEnabled,
                 onClick = onShuffleToggle,
             )
             UtilityIcon(
-                icon = PhosphorIcons.Repeat,
+                icon = if (repeatMode == RepeatMode.ONE) CupertinoIcons.RepeatOne else CupertinoIcons.Repeat,
                 contentDescription = "Répéter",
-                active = uiState.repeatMode != RepeatMode.OFF,
+                active = repeatMode != RepeatMode.OFF,
                 onClick = onRepeatCycle,
             )
         }
@@ -604,6 +715,7 @@ private fun UtilityIcon(
     active: Boolean,
     onClick: () -> Unit,
     activeTint: Color = AuraColors.TextPrimary,
+    filledIcon: ImageVector = icon,
 ) {
     Box(
         modifier = Modifier
@@ -612,8 +724,10 @@ private fun UtilityIcon(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
+        FillableIcon(
+            outline = icon,
+            filled = filledIcon,
+            active = active,
             contentDescription = contentDescription,
             tint = if (active) activeTint else AuraColors.TextTertiary,
             modifier = Modifier.size(20.dp),
@@ -624,12 +738,13 @@ private fun UtilityIcon(
 /** The queue preview along the bottom edge: a label, then the covers that come after this one. */
 @Composable
 private fun UpNextPanel(
-    uiState: PlayerUiState,
+    queue: List<Track>,
+    queueIndex: Int,
     onOpenQueue: () -> Unit,
     onJumpTo: (Int) -> Unit,
 ) {
-    val upcoming = remember(uiState.queue, uiState.queueIndex) {
-        if (uiState.queueIndex < 0) emptyList() else uiState.queue.drop(uiState.queueIndex + 1)
+    val upcoming = remember(queue, queueIndex) {
+        if (queueIndex < 0) emptyList() else queue.drop(queueIndex + 1)
     }
 
     LiquidGlassPanel(
@@ -645,7 +760,7 @@ private fun UpNextPanel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Playing Next",
+            text = "À suivre",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = AuraColors.TextPrimary,
@@ -671,7 +786,7 @@ private fun UpNextPanel(
                 itemsIndexed(upcoming, key = { _, track -> track.id }) { index, track ->
                     UpNextItem(
                         track = track,
-                        onClick = { onJumpTo(uiState.queueIndex + 1 + index) },
+                        onClick = { onJumpTo(queueIndex + 1 + index) },
                     )
                 }
             }

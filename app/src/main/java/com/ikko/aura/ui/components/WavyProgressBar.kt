@@ -10,6 +10,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -101,24 +103,28 @@ fun WavyProgressBar(
                 .fillMaxWidth()
                 .height(TRACK_HEIGHT)
                 .pointerInput(safeDuration) {
-                    detectTapGestures { offset ->
-                        onSeek(((offset.x / size.width).coerceIn(0f, 1f) * safeDuration).toLong())
-                    }
-                }
-                .pointerInput(safeDuration) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            dragFraction?.let { onSeek((it * safeDuration).toLong()) }
-                            dragFraction = null
-                        },
-                        onDragCancel = { dragFraction = null },
-                    ) { change, dragAmount ->
-                        val current = dragFraction ?: (change.position.x / size.width)
-                        dragFraction = (current + dragAmount / size.width).coerceIn(0f, 1f)
-                        change.consume()
+                    coroutineScope {
+                        launch {
+                            detectTapGestures { offset ->
+                                onSeek(((offset.x / size.width).coerceIn(0f, 1f) * safeDuration).toLong())
+                            }
+                        }
+                        launch {
+                            detectHorizontalDragGestures(
+                                onDragStart = { offset ->
+                                    dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                                },
+                                onDragEnd = {
+                                    dragFraction?.let { onSeek((it * safeDuration).toLong()) }
+                                    dragFraction = null
+                                },
+                                onDragCancel = { dragFraction = null },
+                            ) { change, dragAmount ->
+                                val current = dragFraction ?: (change.position.x / size.width)
+                                dragFraction = (current + dragAmount / size.width).coerceIn(0f, 1f)
+                                change.consume()
+                            }
+                        }
                     }
                 },
         ) {
@@ -186,12 +192,12 @@ fun WavyProgressBar(
         ) {
             Text(
                 text = formatDuration(displayedMs),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS),
                 color = AuraColors.TextSecondary,
             )
             Text(
                 text = "-" + formatDuration((safeDuration - displayedMs).coerceAtLeast(0L)),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS),
                 color = AuraColors.TextSecondary,
             )
         }

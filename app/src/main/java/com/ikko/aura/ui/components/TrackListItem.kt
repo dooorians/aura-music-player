@@ -17,10 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
+
+private val ROW_PRESS_SHAPE = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -35,6 +38,9 @@ fun TrackListItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            // The press highlight is cut to a rounded shape: uncut, it is the row's own rectangle, a dark
+            // square with sharp corners behind two rounded thumbnails.
+            .clip(ROW_PRESS_SHAPE)
             // combinedClickable only where a long press is actually handled: it makes every tap
             // wait out the long-press timeout before it reports, and a row with no menu behind it
             // has no reason to pay that.

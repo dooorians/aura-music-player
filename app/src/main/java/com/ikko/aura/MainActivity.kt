@@ -1,7 +1,9 @@
 package com.ikko.aura
 
 import android.os.Bundle
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
@@ -16,7 +18,14 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Both bars fully transparent with light icons, whatever the system theme: the app is dark
+        // throughout. Contrast enforcement is off too, or a 3-button navigation bar gets a
+        // translucent scrim painted over the bottom of every page.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
+        window.isNavigationBarContrastEnforced = false
         setContent {
             AuraApp()
         }
@@ -27,7 +36,7 @@ class MainActivity : ComponentActivity() {
 private fun AuraApp() {
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    AuraTheme(colorMode = settings.colorMode, batterySaver = settings.batterySaverEnabled) {
+    AuraTheme(batterySaver = settings.batterySaverEnabled) {
         MainLayout()
     }
 }

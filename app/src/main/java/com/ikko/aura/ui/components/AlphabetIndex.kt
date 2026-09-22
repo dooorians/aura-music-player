@@ -44,6 +44,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikko.aura.ui.theme.AuraColors
 import kotlin.math.roundToInt
+import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.LibraryTypography
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.PaddingValues
 
 /**
  * The one thing a long list and a long grid are asked for identically — where am I, and take me
@@ -122,12 +127,14 @@ val INDEX_LETTERS: List<Char> = listOf(INDEX_OTHER) + ('A'..'Z')
 @Composable
 fun AlphabetIndex(
     available: Set<Char>,
+    current: Char?,
     onLetterPicked: (Char) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
     var stripHeightPx by remember { mutableIntStateOf(0) }
     var activeIndex by remember { mutableStateOf<Int?>(null) }
+    val cover = LocalCoverColors.current
 
     fun pick(y: Float) {
         if (stripHeightPx <= 0) return
@@ -148,30 +155,20 @@ fun AlphabetIndex(
     // once and drawn into slots computed from the height actually available, it always fits,
     // and it costs one node instead of twenty-seven.
     val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    // Sized from the height the strip actually got, not from a constant. The list area shrinks
-    // when the player pill appears, and letters measured for the taller version then overlapped
-    // each other — an index you cannot read is not an index.
-    val letterSize = remember(stripHeightPx, density) {
-        val slotDp = with(density) { (stripHeightPx.toFloat() / INDEX_LETTERS.size).toDp() }
-        (slotDp.value * LETTER_HEIGHT_FRACTION).coerceIn(MIN_LETTER_SP, MAX_LETTER_SP).sp
+    val glyphs = remember(measurer) {
+        INDEX_LETTERS.map { measurer.measure(AnnotatedString(it.toString()), LibraryTypography.IndexLetter) }
     }
-    val glyphs = remember(measurer, letterSize) {
-        INDEX_LETTERS.map {
-            measurer.measure(
-                AnnotatedString(it.toString()),
-                TextStyle(fontSize = letterSize, fontWeight = FontWeight.Medium),
-            )
-        }
+    val currentGlyphs = remember(measurer) {
+        INDEX_LETTERS.map { measurer.measure(AnnotatedString(it.toString()), LibraryTypography.IndexLetterCurrent) }
     }
 
-    Box(modifier = modifier.fillMaxHeight(), contentAlignment = Alignment.CenterEnd) {
+    // The touch zone is the strip's own height and 40 dp wide: the strip drawn inside it, a hand's breadth
+    // narrower than the finger that scrubs it.
+    Box(modifier = modifier, contentAlignment = Alignment.TopEnd) {
         Canvas(
             modifier = Modifier
-                .width(STRIP_WIDTH)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(50))
-                .background(AuraColors.GlassFill)
+                .width(TOUCH_WIDTH)
+                .height(STRIP_HEIGHT)
                 .onSizeChanged { stripHeightPx = it.height }
                 .pointerInput(available) {
                     detectTapGestures(
@@ -192,18 +189,28 @@ fun AlphabetIndex(
                     }
                 },
         ) {
+            val stripWidth = STRIP_WIDTH.toPx()
+            val stripLeft = size.width - STRIP_MARGIN.toPx() - stripWidth
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.07f),
+                topLeft = Offset(stripLeft, 0f),
+                size = androidx.compose.ui.geometry.Size(stripWidth, size.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(stripWidth / 2f),
+            )
             val slot = size.height / INDEX_LETTERS.size
-            glyphs.forEachIndexed { index, glyph ->
-                val letter = INDEX_LETTERS[index]
+            val tint = cover.tint
+            INDEX_LETTERS.forEachIndexed { index, letter ->
+                val isCurrent = index == activeIndex || (activeIndex == null && letter == current)
+                val glyph = if (isCurrent) currentGlyphs[index] else glyphs[index]
                 drawText(
                     textLayoutResult = glyph,
                     color = when {
-                        index == activeIndex -> AuraColors.TextPrimary
-                        letter in available -> AuraColors.TextSecondary
-                        else -> AuraColors.TextTertiary.copy(alpha = 0.35f)
+                        isCurrent -> cover.accent
+                        letter in available -> tint.copy(alpha = 0.90f)
+                        else -> tint.copy(alpha = 0.36f)
                     },
                     topLeft = Offset(
-                        x = (size.width - glyph.size.width) / 2f,
+                        x = stripLeft + (stripWidth - glyph.size.width) / 2f,
                         y = slot * index + (slot - glyph.size.height) / 2f,
                     ),
                 )
@@ -220,8 +227,8 @@ fun AlphabetIndex(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            x = -(STRIP_WIDTH + BUBBLE_GAP).roundToPx(),
-                            y = (slotHeight * (shown + 0.5f) - stripHeightPx / 2f).roundToInt(),
+                            x = -(STRIP_WIDTH + STRIP_MARGIN + BUBBLE_GAP).roundToPx(),
+                            y = (slotHeight * (shown + 0.5f) - BUBBLE_SIZE.toPx() / 2f).roundToInt(),
                         )
                     }
                     .size(BUBBLE_SIZE)
@@ -233,20 +240,26 @@ fun AlphabetIndex(
                     text = INDEX_LETTERS[shown].toString(),
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
-                    color = AuraColors.TextPrimary,
+                    color = Color.White,
                 )
             }
         }
     }
 }
 
-private val STRIP_WIDTH = 16.dp
+/** 13 dp wide and 253 tall, 10 dp in from the screen's edge. */
+private val STRIP_WIDTH = 13.dp
+private val STRIP_HEIGHT = 253.dp
+private val STRIP_MARGIN = 10.dp
+private val TOUCH_WIDTH = 40.dp
 private val BUBBLE_SIZE = 62.dp
 private val BUBBLE_GAP = 10.dp
-/** Share of a slot a letter fills, leaving enough air that neighbours never touch. */
-private const val LETTER_HEIGHT_FRACTION = 0.72f
-private const val MIN_LETTER_SP = 5f
-private const val MAX_LETTER_SP = 9f
+
+/**
+ * How far to move the strip down from the top of the list it is laid over, in px: read where it is laid
+ * out, so the strip can hold still on the screen while the header above the list folds away.
+ */
+val LocalIndexStripShift = androidx.compose.runtime.compositionLocalOf<() -> Float> { { 0f } }
 
 /**
  * Appears once a list is more than half scrolled and takes it back to the top.
@@ -256,18 +269,15 @@ private const val MAX_LETTER_SP = 9f
  */
 @Composable
 fun ScrollToTopButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(AuraColors.PillScrim)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
+    AuraButton(
+        onClick = onClick,
+        modifier = modifier,
+        minHeight = 36.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp),
     ) {
         Text(
             text = "↑  Haut de la liste",
             style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-            color = AuraColors.TextPrimary,
         )
     }
 }

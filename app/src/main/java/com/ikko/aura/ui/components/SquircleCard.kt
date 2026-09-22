@@ -1,6 +1,5 @@
 package com.ikko.aura.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -27,7 +26,7 @@ fun SquircleCard(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(background)
+            .groundFill(background, shape)
             .let { base ->
                 when {
                     onClick == null -> base

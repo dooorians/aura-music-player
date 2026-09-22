@@ -37,10 +37,11 @@ import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SweepLyricLine
 import com.ikko.aura.ui.components.rememberLyricClock
 import com.ikko.aura.ui.theme.AuraColors
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.LyricsUiState
 import com.ikko.aura.viewmodel.LyricsViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.ui.components.AuraIconButton
 
 @Composable
 fun LyricsScreen(
@@ -49,6 +50,7 @@ fun LyricsScreen(
     lyricsViewModel: LyricsViewModel = hiltViewModel(),
 ) {
     val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
+    val positionMs by playerViewModel.positionMs.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
     val currentTrack = playerState.currentTrack
 
@@ -61,8 +63,8 @@ fun LyricsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(onClick = { navController.popBackStack() }) {
-                    Icon(PhosphorIcons.ChevronLeft, contentDescription = "Retour", tint = AuraColors.TextPrimary)
+                AuraIconButton(onClick = { navController.popBackStack() }, size = 42.dp) {
+                    Icon(CupertinoIcons.ChevronLeft, contentDescription = "Retour", modifier = Modifier.size(20.dp))
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Paroles", style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
@@ -75,8 +77,8 @@ fun LyricsScreen(
                         Text(it, style = MaterialTheme.typography.bodySmall, color = AuraColors.TextSecondary, maxLines = 1)
                     }
                 }
-                IconButton(onClick = { lyricsViewModel.refetch(currentTrack) }) {
-                    Icon(PhosphorIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", tint = AuraColors.TextSecondary, modifier = Modifier.size(20.dp))
+                AuraIconButton(onClick = { lyricsViewModel.refetch(currentTrack) }, size = 42.dp) {
+                    Icon(CupertinoIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", modifier = Modifier.size(18.dp))
                 }
             }
 
@@ -95,7 +97,7 @@ fun LyricsScreen(
                 }
                 is LyricsUiState.Available -> SyncedLyrics(
                     lines = state.lines,
-                    positionMs = playerState.positionMs,
+                    positionMs = positionMs,
                     isPlaying = playerState.isPlaying,
                     onSeek = playerViewModel::seekTo,
                 )

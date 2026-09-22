@@ -3,6 +3,13 @@ package com.ikko.aura.ui.screens.home
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import com.ikko.aura.ui.theme.CupertinoIcons
+import com.ikko.aura.ui.components.AuraIconButton
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,10 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,11 +38,15 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AlbumArt
+import com.ikko.aura.ui.components.clipOnce
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.theme.AuraColors
+import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.viewmodel.HomeViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.ui.components.AuraButton
+import com.ikko.aura.ui.components.ButtonTone
 
 @Composable
 fun HomeScreen(
@@ -88,7 +96,7 @@ fun HomeScreen(
             )
             AlbumCarousel(albums = uiState.rediscoverAlbums, navController = navController)
 
-            Spacer(Modifier.height(110.dp))
+            Spacer(Modifier.height(LocalPlayerPillHeight.current + 24.dp))
         }
     }
 }
@@ -109,102 +117,80 @@ private fun SectionHeader(title: String, onSeeAll: () -> Unit, modifier: Modifie
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = title, style = MaterialTheme.typography.headlineLarge, color = AuraColors.TextPrimary)
-        TextButton(onClick = onSeeAll) {
-            Text("Tout voir", style = MaterialTheme.typography.labelLarge, color = AuraColors.TextSecondary)
+        AuraIconButton(onClick = onSeeAll, size = 38.dp) {
+            Icon(CupertinoIcons.ChevronRight, contentDescription = "Tout voir", modifier = Modifier.size(15.dp))
         }
     }
 }
 
 /**
- * Material 3's multi-browse carousel, which is what gives the rows their shape.
- *
- * Items are *masked* rather than scaled as they reach the edges: an album leaving the screen
- * narrows to a sliver with its cover cropped, not squashed, and grows back into a full square as
- * it returns. A LazyRow can only slide rectangles past a clip, which is what this used to do.
- *
- * The title sits inside the card over a scrim rather than under it, because a label outside the
- * mask would keep its full width while the artwork above it narrowed — the one arrangement that
- * makes the effect look broken.
+ * A plain row of album cards. Each card is a square cover with its title and artist over a scrim at
+ * the bottom, laid out at one fixed size and scrolled with an ordinary fling.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AlbumCarousel(albums: List<Album>, navController: NavHostController) {
     if (albums.isEmpty()) return
-    val state = rememberCarouselState { albums.size }
-
-    HorizontalMultiBrowseCarousel(
-        state = state,
-        preferredItemWidth = CAROUSEL_ITEM_WIDTH,
-        itemSpacing = 10.dp,
+    LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(CAROUSEL_ITEM_WIDTH),
-    ) { index ->
-        val album = albums[index]
-        Box(
-            modifier = Modifier
-                .height(CAROUSEL_ITEM_WIDTH)
-                .maskClip(AuraShapes.SquircleMedium)
-                .clickable {
-                    navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString()))
-                },
-        ) {
-            AlbumArt(
-                uri = album.artworkUri,
-                contentDescription = album.title,
-                shape = AuraShapes.SquircleMedium,
-                modifier = Modifier.fillMaxSize(),
-                targetSizeDp = CAROUSEL_ITEM_WIDTH,
-                cacheKey = album.id.toString(),
-            )
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        items(albums, key = { it.id }) { album ->
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(CAROUSEL_LABEL_HEIGHT)
-                    .align(Alignment.BottomStart)
-                    // Three stops rather than two: a straight ramp from nothing to black leaves
-                    // the text sitting on the pale middle of it, which a light cover wins.
-                    //
-                    // Built per card rather than shared at file scope, which is the opposite of
-                    // the usual advice and is what this carousel needs: multi-browse lays its
-                    // items out at different widths as they approach the edges, and a ShaderBrush
-                    // caches one shader against the last size it was asked for — so a single
-                    // instance across cards of changing width rebuilds its gradient on nearly
-                    // every draw. Measured on the home page, sharing one took the 90th-percentile
-                    // GPU time from 10ms to 15ms.
-                    .background(
-                        Brush.verticalGradient(
-                            0.0f to Color.Transparent,
-                            0.45f to AuraColors.Black.copy(alpha = 0.45f),
-                            1.0f to AuraColors.Black.copy(alpha = 0.88f),
-                        ),
-                    ),
-            )
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .size(CAROUSEL_ITEM_WIDTH)
+                    .clipOnce(AuraShapes.SquircleMedium)
+                    .clickable {
+                        navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString()))
+                    },
             ) {
-                Text(
-                    text = album.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = AuraColors.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                AlbumArt(
+                    uri = album.artworkUri,
+                    contentDescription = album.title,
+                    shape = AuraShapes.SquircleMedium,
+                    modifier = Modifier.fillMaxSize(),
+                    targetSizeDp = CAROUSEL_ITEM_WIDTH,
+                    cacheKey = album.id.toString(),
                 )
-                Text(
-                    text = album.artist,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AuraColors.TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(CAROUSEL_LABEL_HEIGHT)
+                        .align(Alignment.BottomStart)
+                        // Three stops rather than two: a straight ramp from nothing to black leaves
+                        // the text sitting on the pale middle of it, which a light cover wins.
+                        .background(CARD_SCRIM),
                 )
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = album.title,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = AuraColors.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = album.artist,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AuraColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
 }
 
-/** Square cards, so the width is also the row's height. */
-private val CAROUSEL_ITEM_WIDTH = 146.dp
+private val CARD_SCRIM = Brush.verticalGradient(
+    0.0f to Color.Transparent,
+    0.45f to AuraColors.Black.copy(alpha = 0.45f),
+    1.0f to AuraColors.Black.copy(alpha = 0.88f),
+)
+
+private val CAROUSEL_ITEM_WIDTH = 150.dp
 private val CAROUSEL_LABEL_HEIGHT = 68.dp

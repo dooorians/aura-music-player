@@ -203,7 +203,6 @@ fun SearchPanel(
                                 onClick = {
                                     onNavigate()
                                     playerViewModel.playQueue(uiState.tracks, index)
-                                    navController.navigate(AuraDestination.NowPlaying.route)
                                 },
                                 onLongClick = { menu.show(track) },
                                 modifier = Modifier.padding(horizontal = 20.dp),

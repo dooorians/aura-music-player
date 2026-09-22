@@ -103,8 +103,6 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.palette)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.haze)
-    implementation(libs.haze.materials)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

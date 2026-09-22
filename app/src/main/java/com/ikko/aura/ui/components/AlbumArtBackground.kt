@@ -35,10 +35,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import com.ikko.aura.ui.theme.AuraColorMode
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalAuraBatterySaver
-import com.ikko.aura.ui.theme.LocalAuraColorMode
 import com.ikko.aura.ui.theme.AuraMotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -58,8 +56,6 @@ fun AlbumArtBackground(
     // every track change. Keyed by album, the backdrop only changes when the cover actually does.
     artworkKey: String?,
     fallbackColors: List<Color>,
-    /** The cover's own colour, for the tint at the top of the screen. */
-    primaryColor: Color = AuraColors.DefaultPrimary,
     modifier: Modifier = Modifier,
     // The AMOLED setting is for the rest of the app. The player is designed around the blurred
     // cover sitting behind its glass panels — with the backdrop blacked out there is nothing for
@@ -84,7 +80,6 @@ fun AlbumArtBackground(
      */
     settledModifier: Modifier = Modifier,
 ) {
-    val colorMode = LocalAuraColorMode.current
     val batterySaver = LocalAuraBatterySaver.current
     val context = LocalContext.current
     // Deliberately not keyed on the artwork: resetting to null while the next cover decodes is
@@ -113,10 +108,14 @@ fun AlbumArtBackground(
         bitmap = source?.let { withContext(Dispatchers.Default) { boxBlurred(it) } }
     }
 
-    val blackedOut = colorMode == AuraColorMode.MONOCHROME && !forceArtwork
+    // The cover is for the player alone. Everywhere else the background is the atmosphere, and this
+    // stops being drawn (and its pan stops costing anything) once the atmosphere has covered it.
+    val blackedOut = !forceArtwork
     val blackAlpha = animateFloatAsState(
         targetValue = if (blackedOut) 1f else 0f,
-        animationSpec = tween(AuraMotion.SHEET_MS),
+        // Quicker going than coming: the artwork is what is left behind as the player clears, and
+        // it lingered for the whole 320ms after the page it sat behind had already returned.
+        animationSpec = tween(if (blackedOut) AuraMotion.SHEET_EXIT_MS else AuraMotion.SHEET_ARTWORK_IN_MS),
         label = "aura-backdrop-amoled",
     )
     // Composed until the black has finished covering it rather than the instant the setting says
@@ -125,20 +124,18 @@ fun AlbumArtBackground(
     // full-screen draw stop costing anything — which is the whole point of the setting.
     val artComposed = !blackedOut || blackAlpha.value < 1f
 
-    // Cross-faded rather than swapped: the wash is a large, flat area of colour, and a cut
-    // between two of them is the most visible change the screen can make.
-    val topTint = animateColorAsState(
-        targetValue = if (blackedOut) primaryColor.asTopTint() else Color.Transparent,
-        animationSpec = tween(TINT_CROSSFADE_MS),
-        label = "aura-top-tint",
-    )
-
     // Frozen under the player. The pan is a slow drift nobody watches directly, but every frame
     // of it re-records the backdrop layer, and the player has six liquid glass surfaces sampling
     // that layer through a blur and a lens shader — so the drift was costing six shader chains at
     // 90Hz. Measured on the device: 12.6% janky frames sitting still on the player with it on, 0%
     // with it off. The mockup's backdrop is static anyway; everywhere else it keeps moving.
-    val panning = !batterySaver && !forceArtwork
+    //
+    // And only while the cover is drawn at all. Everywhere but the player it is covered by the atmosphere
+    // (see [artComposed]) and nothing reads the pan — but an infinite animation runs whether or not
+    // anything reads it, and this one asked for a frame every vsync, 96 times a second, on every page of
+    // the app while nothing was moving. The main thread woke, the compositor was asked for frames, the
+    // aurora's surface was re-posted: an idle screen was never idle.
+    val panning = !batterySaver && !forceArtwork && artComposed
     val transition = rememberInfiniteTransition(label = "aura-art-pan")
     val pan = if (panning) {
         transition.animateFloat(
@@ -177,7 +174,9 @@ fun AlbumArtBackground(
 
     val settled = shown
 
-    Box(modifier.fillMaxSize()) {
+    // The whole cover layer fades over the aurora behind it: in as the player opens, out as it closes.
+    // The glass records the cover inside this, at full strength, so the fade never reaches it.
+    Box(modifier.fillMaxSize().graphicsLayer { alpha = 1f - blackAlpha.value }) {
         // Everything the glass samples, and nothing that is mid-animation.
         Box(Modifier.fillMaxSize().then(settledModifier)) {
             if (artComposed) {
@@ -213,79 +212,8 @@ fun AlbumArtBackground(
                 Box(Modifier.fillMaxSize().background(AuraColors.GlassScrim))
             }
         }
-
-        // The AMOLED ground, and the one thing drawn on it: a wash of the cover's own colour
-        // falling out of the top of the screen.
-        //
-        // A gradient rather than the blurred cover, and only over the top two fifths, because
-        // that is what the setting is for — a full-screen bitmap re-sampled every frame is the
-        // thing it exists to avoid, while this is one rect and costs nothing to hold on screen.
-        // The colour cross-fades between tracks: read inside the draw block, so a change repaints
-        // this one rect and nothing recomposes.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = blackAlpha.value }
-                .background(AuraColors.Black)
-                .drawBehind {
-                    val tint = topTint.value
-                    if (tint.alpha == 0f) return@drawBehind
-                    // A zero-height measure would give the brush a degenerate range, and Skia
-                    // paints the first stop across the whole rect when that happens — a flat band
-                    // of colour with a hard edge where the fade should be. It is the one way this
-                    // can come out cut rather than diffuse, and it costs one comparison to refuse.
-                    if (size.height <= 1f) return@drawBehind
-                    val fadeTo = size.height * TINT_FADE_END
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            // Three stops rather than two: a straight ramp to nothing leaves a
-                            // faint but visible line where it lands, because the eye finds the
-                            // end of a linear fade. Easing the last third out puts the end below
-                            // the threshold where it can be located at all.
-                            0.0f to tint,
-                            0.55f to tint.copy(alpha = tint.alpha * 0.35f),
-                            1.0f to Color.Transparent,
-                            startY = 0f,
-                            endY = fadeTo,
-                        ),
-                        size = Size(size.width, fadeTo),
-                    )
-                },
-        )
     }
 }
-
-/**
- * The cover's colour, made safe to put white text on.
- *
- * A sleeve whose vibrant swatch is near-white — and there are plenty — would otherwise put a pale
- * band across the top of the screen with the screen's title written on it in white. Anything
- * above [MAX_TINT_LUMINANCE] is walked down towards black until it sits under that ceiling, which
- * keeps the hue and takes the brightness: the wash still reads as "this record is yellow", it
- * just reads as a dark yellow.
- */
-private fun Color.asTopTint(): Color {
-    val level = luminance()
-    val scaled = if (level <= MAX_TINT_LUMINANCE) {
-        this
-    } else {
-        val factor = (MAX_TINT_LUMINANCE / level).coerceIn(0.05f, 1f)
-        Color(red * factor, green * factor, blue * factor, alpha = 1f)
-    }
-    return scaled.copy(alpha = TINT_STRENGTH)
-}
-
-/** Where the wash has faded to nothing, as a fraction of the screen's height. */
-private const val TINT_FADE_END = 0.42f
-
-/** How present the colour is at the very top. Enough to read as a tint, not as a background. */
-private const val TINT_STRENGTH = 0.55f
-
-/**
- * Bright enough to sit behind white text and still lose. Chosen against the screen titles, which
- * are the largest and lightest thing the wash ever sits behind.
- */
-private const val MAX_TINT_LUMINANCE = 0.16f
 
 /**
  * One cover under the slow pan. [progress] is read inside the [graphicsLayer] block, so a frame of
@@ -344,8 +272,6 @@ private const val ARTWORK_CROSSFADE_MS = 280
 private const val BACKDROP_SETTLE_MS = 320L
 private const val PAN_DURATION_MS = 14_000
 
-/** Long enough that the colour change reads as a wash turning, not as a light being switched. */
-private const val TINT_CROSSFADE_MS = 650
 
 private fun boxBlurred(src: Bitmap): Bitmap {
     val w = src.width

@@ -7,12 +7,24 @@ import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.FavoritesStore
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.model.Track
+import android.content.Context
+import android.media.MediaMetadataRetriever
+import com.ikko.aura.ui.components.AlbumTheme
+import com.ikko.aura.ui.components.buildAlbumTheme
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
@@ -25,31 +37,108 @@ data class AlbumUiState(
     val isFavorite: Boolean = false,
 )
 
+/** Everything the album page needs before it can be drawn in one go. See [AlbumViewModel.page]. */
+@Immutable
+data class AlbumPage(val theme: AlbumTheme, val tags: FileTags)
+
+/** Pages already worked out, so opening an album a second time is instant. */
+private object AlbumPageCache {
+    private val cache = android.util.LruCache<Long, AlbumPage>(32)
+    fun get(albumId: Long): AlbumPage? = cache.get(albumId)
+    fun put(albumId: Long, page: AlbumPage) { cache.put(albumId, page) }
+}
+
 @HiltViewModel
 class AlbumViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     repository: MusicRepository,
     private val favoritesStore: FavoritesStore,
+    @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val albumId: Long = savedStateHandle.get<String>("albumId")?.toLongOrNull() ?: -1L
 
-    val uiState: StateFlow<AlbumUiState> = combine(
-        repository.tracks,
-        favoritesStore.favoriteAlbumIds,
-    ) { tracks, favoriteIds ->
+    private fun stateFor(tracks: List<Track>, favoriteIds: Set<Long>): AlbumUiState {
         val albumTracks = tracks
             .filter { it.albumId == albumId }
             .sortedBy { it.trackNumber }
-        AlbumUiState(
+        return AlbumUiState(
             title = albumTracks.firstOrNull()?.album ?: "",
             artist = albumTracks.firstOrNull()?.artist ?: "",
             tracks = albumTracks,
             isFavorite = albumId in favoriteIds,
         )
     }
+
+    /**
+     * Seeded from what the repository already holds rather than from an empty state: the album's
+     * tracks are in memory, so the page's first frame can have its list, and starting empty made the
+     * rows arrive a beat after the header — the page assembling itself in front of you.
+     */
+    val uiState: StateFlow<AlbumUiState> = combine(
+        repository.tracks,
+        favoritesStore.favoriteAlbumIds,
+    ) { tracks, favoriteIds -> stateFor(tracks, favoriteIds) }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumUiState())
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            stateFor(repository.tracks.value, favoritesStore.favoriteAlbumIds.value),
+        )
+
+    /**
+     * The album's colours and its file tags, worked out together and handed over only when both are
+     * ready — null until then, and the screen draws nothing of the page until it is not. The colours
+     * and the genre line were arriving separately, a fraction of a second after the page, and every
+     * one of those arrivals was a visible change: the buttons changing colour, a caption appearing
+     * and pushing the list down. Held as a unit, the page appears complete.
+     *
+     * Read off the cover once and cached; keyed on the cover rather than on the track list, which is
+     * re-emitted every time the background scan finishes another file. Genre and year come from the
+     * first file itself — MediaStore's own genre column is a sub-query per row and slowed the whole
+     * library scan for the sake of one line on one page.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val page: StateFlow<AlbumPage?> = uiState
+        .map { it.tracks.firstOrNull() }
+        .distinctUntilChangedBy { it?.albumId to it?.artworkUri }
+        .mapLatest { track ->
+            if (track == null) return@mapLatest AlbumPage(AlbumTheme.Neutral, FileTags())
+            AlbumPageCache.get(albumId) ?: coroutineScope {
+                val theme = async(Dispatchers.Default) { buildAlbumTheme(context, track) }
+                val tags = async(Dispatchers.IO) { readFileTags(context, track) }
+                // Tags come off the file, which on a slow card can take a while; the page does not
+                // wait past this for a caption.
+                AlbumPage(theme.await(), withTimeoutOrNull(TAGS_TIMEOUT_MS) { tags.await() } ?: FileTags(null, track.year))
+                    .also { AlbumPageCache.put(albumId, it) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPageCache.get(albumId))
 
     fun toggleFavorite() = favoritesStore.toggle(albumId)
+
+    private companion object {
+        const val TAGS_TIMEOUT_MS = 350L
+    }
+}
+
+@Immutable
+data class FileTags(val genre: String? = null, val year: Int = 0)
+
+private fun readFileTags(context: Context, track: Track): FileTags {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(context, track.contentUri)
+        val genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)?.trim()?.takeIf { it.isNotEmpty() }
+        val year = track.year.takeIf { it > 0 }
+            ?: (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)
+                ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
+                ?.let { Regex("\\d{4}").find(it)?.value?.toIntOrNull() }
+                ?: 0
+        FileTags(genre, year)
+    } catch (_: Exception) {
+        FileTags(null, track.year)
+    } finally {
+        retriever.release()
+    }
 }

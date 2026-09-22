@@ -4,15 +4,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-enum class AuraColorMode { MESH_DYNAMIC, MONOCHROME }
-
-val LocalAuraColorMode = compositionLocalOf { AuraColorMode.MESH_DYNAMIC }
 val LocalAuraBatterySaver = staticCompositionLocalOf { false }
+
+/**
+ * The theme the background is lit with when a page has colours of its own (the album page, which is
+ * lit with its own record rather than the one playing). Null means the playing track's.
+ */
+val LocalPageTheme = staticCompositionLocalOf<androidx.compose.runtime.MutableState<com.ikko.aura.ui.components.AlbumTheme?>> {
+    mutableStateOf(null)
+}
+
+/** Opens the search over whichever page is showing. Provided by the root layout. */
+val LocalSearchOpener = staticCompositionLocalOf<() -> Unit> { {} }
+
 
 /**
  * The dominant colors of whatever track is currently playing (or the default palette when
@@ -44,12 +55,10 @@ private val AuraDarkColorScheme = darkColorScheme(
 
 @Composable
 fun AuraTheme(
-    colorMode: AuraColorMode = AuraColorMode.MESH_DYNAMIC,
     batterySaver: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
-        LocalAuraColorMode provides colorMode,
         LocalAuraBatterySaver provides batterySaver,
     ) {
         MaterialTheme(

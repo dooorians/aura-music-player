@@ -38,6 +38,7 @@ import com.ikko.aura.viewmodel.EqBand
 import com.ikko.aura.viewmodel.EqualizerViewModel
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.ikko.aura.ui.components.AuraChip
 
 @Composable
 fun EqualizerScreen(
@@ -89,20 +90,7 @@ fun EqualizerScreen(
                         items(uiState.presets.size, key = { uiState.presets[it] }) { index ->
                             val label = uiState.presets[index]
                             val isSelected = uiState.selectedPresetIndex == index
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { equalizerViewModel.applyPreset(index) },
-                                label = { Text(label, style = MaterialTheme.typography.titleMedium) },
-                                shape = AuraShapes.Pill,
-                                border = null,
-                                modifier = Modifier.height(46.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    containerColor = AuraColors.GlassFill,
-                                    labelColor = AuraColors.TextSecondary,
-                                    selectedContainerColor = AuraColors.TextPrimary,
-                                    selectedLabelColor = AuraColors.Black,
-                                ),
-                            )
+                            AuraChip(label = label, selected = isSelected, onClick = { equalizerViewModel.applyPreset(index) })
                         }
                     }
                 }

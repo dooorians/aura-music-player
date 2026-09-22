@@ -16,7 +16,10 @@ object AuraShapes {
      * as a lozenge, and squared off enough to give a label usable width. Shared with the search
      * bar, which is the same object arriving from the other edge of the screen.
      */
-    val PlayerPill = RoundedCornerShape(15.6.dp)
+    val PlayerPill = RoundedCornerShape(20.dp)
+
+    /** The floating mini player: a full capsule, as on iOS. */
+    val MiniPlayer = RoundedCornerShape(50)
 }
 
 val AuraMaterialShapes = Shapes(

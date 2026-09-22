@@ -32,16 +32,19 @@ class ArtistViewModel @Inject constructor(
 
     private val artistId: Long = savedStateHandle.get<String>("artistId")?.toLongOrNull() ?: -1L
 
-    val uiState: StateFlow<ArtistUiState> = combine(
-        repository.tracks,
-        repository.albums,
-    ) { tracks, albums ->
+    private fun stateFor(tracks: List<Track>, albums: List<Album>): ArtistUiState {
         val artistTracks = tracks.filter { it.artistId == artistId }
         val artistAlbums = albums.filter { it.artistId == artistId }.sortedByDescending { it.year }
-        ArtistUiState(
+        return ArtistUiState(
             name = artistTracks.firstOrNull()?.artist ?: artistAlbums.firstOrNull()?.artist ?: "",
             albums = artistAlbums,
             tracks = artistTracks,
         )
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArtistUiState())
+    }
+
+    // Seeded from what the repository already holds, so the page's first frame has its content
+    // instead of filling in a beat later.
+    val uiState: StateFlow<ArtistUiState> = combine(repository.tracks, repository.albums, ::stateFor)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), stateFor(repository.tracks.value, repository.albums.value))
 }

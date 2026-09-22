@@ -41,12 +41,14 @@ import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.components.TrackListItem
 import com.ikko.aura.ui.theme.AuraColors
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.PlayerViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
+import com.ikko.aura.ui.components.AuraButton
+import com.ikko.aura.ui.components.ButtonTone
 
 @Composable
 fun QueueScreen(
@@ -69,12 +71,13 @@ fun QueueScreen(
             )
             // Only offered when there is something to clear beyond the track playing.
             if (uiState.queue.size > 1) {
-                TextButton(onClick = playerViewModel::clearQueue) {
-                    Text(
-                        text = "Vider",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = AuraColors.TextSecondary,
-                    )
+                AuraButton(
+                    onClick = playerViewModel::clearQueue,
+                    tone = ButtonTone.Neutral,
+                    minHeight = 36.dp,
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                ) {
+                    Text(text = "Vider", style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
@@ -152,7 +155,7 @@ fun QueueScreen(
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = PhosphorIcons.DragHandle,
+                                imageVector = CupertinoIcons.DragHandle,
                                 contentDescription = "Déplacer dans la file",
                                 tint = AuraColors.TextTertiary,
                                 modifier = Modifier
@@ -214,7 +217,7 @@ fun QueueScreen(
                                     },
                             )
                             IconButton(onClick = { playerViewModel.removeFromQueue(index) }) {
-                                Icon(PhosphorIcons.Close, contentDescription = "Retirer", tint = AuraColors.TextTertiary)
+                                Icon(CupertinoIcons.Close, contentDescription = "Retirer", tint = AuraColors.TextTertiary)
                             }
                         }
                     },

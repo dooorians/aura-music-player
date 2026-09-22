@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.ikko.aura.ui.theme.AuraColorMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,15 +26,9 @@ data class EqualizerSettings(
 class SettingsStore @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) {
-    private val colorModeKey = stringPreferencesKey("color_mode")
     private val batterySaverKey = booleanPreferencesKey("battery_saver")
     private val onlineLyricsKey = booleanPreferencesKey("online_lyrics")
     private val automixKey = booleanPreferencesKey("automix")
-
-    val colorMode = context.settingsDataStore.data.map { prefs ->
-        prefs[colorModeKey]?.let { runCatching { AuraColorMode.valueOf(it) }.getOrNull() }
-            ?: AuraColorMode.MESH_DYNAMIC
-    }
 
     val batterySaverEnabled = context.settingsDataStore.data.map { prefs ->
         prefs[batterySaverKey] ?: false
@@ -60,10 +53,6 @@ class SettingsStore @Inject constructor(
 
     suspend fun setAutomixEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[automixKey] = enabled }
-    }
-
-    suspend fun setColorMode(mode: AuraColorMode) {
-        context.settingsDataStore.edit { it[colorModeKey] = mode.name }
     }
 
     suspend fun setBatterySaverEnabled(enabled: Boolean) {

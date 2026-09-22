@@ -52,6 +52,7 @@ private data class RepositorySnapshot(
 class LibraryViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val analysisReader: AnalysisReader,
+    private val selection: LibrarySelection,
 ) : ViewModel() {
 
     /**
@@ -74,7 +75,7 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private val filter = MutableStateFlow(LibraryFilter.TRACKS)
+    private val filter = selection.filter
     private val sort = MutableStateFlow(LibrarySort.NAME)
 
     private val repositorySnapshot = combine(
@@ -102,7 +103,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun setFilter(newFilter: LibraryFilter) {
-        filter.value = newFilter
+        selection.select(newFilter)
     }
 
     fun setSort(newSort: LibrarySort) {

@@ -45,9 +45,13 @@ import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.PlayerViewModel
 import com.ikko.aura.viewmodel.PlaylistDetailViewModel
+import com.ikko.aura.ui.components.AuraButton
+import com.ikko.aura.ui.components.ButtonTone
+import androidx.compose.ui.unit.sp
+import com.ikko.aura.ui.components.AuraIconButton
 
 @Composable
 fun PlaylistScreen(
@@ -96,8 +100,8 @@ fun PlaylistScreen(
                     )
                 }
                 Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(PhosphorIcons.MoreVertical, contentDescription = "Plus d'options", tint = AuraColors.TextPrimary)
+                    AuraIconButton(onClick = { menuExpanded = true }) {
+                        Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", modifier = Modifier.size(20.dp))
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         DropdownMenuItem(
@@ -136,29 +140,24 @@ fun PlaylistScreen(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
+                    AuraButton(
                         onClick = {
                             playerViewModel.playQueue(current.tracks, 0)
-                            navController.navigate(AuraDestination.NowPlaying.route)
                         },
-                        shape = AuraShapes.Pill,
-                        colors = ButtonDefaults.buttonColors(containerColor = AuraColors.TextPrimary, contentColor = AuraColors.Black),
+                        tone = ButtonTone.Primary,
                     ) {
-                        Icon(PhosphorIcons.Play, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Lire tout")
+                        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text("Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    AuraButton(
                         onClick = {
                             playerViewModel.playQueue(current.tracks.shuffled(), 0)
-                            navController.navigate(AuraDestination.NowPlaying.route)
                         },
-                        shape = AuraShapes.Pill,
-                        colors = ButtonDefaults.buttonColors(containerColor = AuraColors.GlassFill, contentColor = AuraColors.TextPrimary),
                     ) {
-                        Icon(PhosphorIcons.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Mélanger")
+                        Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text("Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
 
@@ -173,7 +172,6 @@ fun PlaylistScreen(
                             track = track,
                             onClick = {
                                 playerViewModel.playQueue(current.tracks, index)
-                                navController.navigate(AuraDestination.NowPlaying.route)
                             },
                             onRemove = { playlistDetailViewModel.removeTrack(track.id) },
                         )
@@ -203,11 +201,12 @@ private fun RenameField(initialName: String, onConfirm: (String) -> Unit, onCanc
                 unfocusedBorderColor = AuraColors.GlassBorder,
             ),
         )
-        IconButton(onClick = { onConfirm(text) }) {
-            Icon(PhosphorIcons.Check, contentDescription = "Valider", tint = AuraColors.TextPrimary)
+        AuraIconButton(onClick = { onConfirm(text) }, tone = ButtonTone.Primary, size = 40.dp) {
+            Icon(CupertinoIcons.Check, contentDescription = "Valider", modifier = Modifier.size(18.dp))
         }
-        IconButton(onClick = onCancel) {
-            Icon(PhosphorIcons.Close, contentDescription = "Annuler", tint = AuraColors.TextTertiary)
+        Spacer(Modifier.width(6.dp))
+        AuraIconButton(onClick = onCancel, size = 40.dp) {
+            Icon(CupertinoIcons.Close, contentDescription = "Annuler", modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -247,7 +246,7 @@ private fun PlaylistTrackRow(track: Track, onClick: () -> Unit, onRemove: () -> 
             )
         }
         IconButton(onClick = onRemove) {
-            Icon(PhosphorIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary)
+            Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary)
         }
     }
 }

@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 
 private val audioPermission: String =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -85,7 +85,7 @@ private fun PermissionRationale(onRequestClick: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
-                imageVector = PhosphorIcons.Library,
+                imageVector = CupertinoIcons.Library,
                 contentDescription = null,
                 tint = AuraColors.AccentPink,
                 modifier = Modifier.height(48.dp),
@@ -105,15 +105,8 @@ private fun PermissionRationale(onRequestClick: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = onRequestClick,
-                shape = AuraShapes.Pill,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AuraColors.AccentPink,
-                    contentColor = AuraColors.TextPrimary,
-                ),
-            ) {
-                Text("Autoriser l'accès")
+            AuraButton(onClick = onRequestClick, tone = ButtonTone.Primary) {
+                Text("Autoriser l'accès", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             }
         }
     }

@@ -37,9 +37,12 @@ import com.ikko.aura.ui.components.TrackListItem
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.ArtistViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.ui.components.AuraButton
+import com.ikko.aura.ui.components.ButtonTone
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun ArtistScreen(
@@ -75,33 +78,28 @@ fun ArtistScreen(
                     Spacer(Modifier.height(16.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(
+                        AuraButton(
                             onClick = {
                                 if (uiState.tracks.isNotEmpty()) {
                                     playerViewModel.playQueue(uiState.tracks, 0)
-                                    navController.navigate(AuraDestination.NowPlaying.route)
                                 }
                             },
-                            shape = AuraShapes.Pill,
-                            colors = ButtonDefaults.buttonColors(containerColor = AuraColors.TextPrimary, contentColor = AuraColors.Black),
+                            tone = ButtonTone.Primary,
                         ) {
-                            Icon(PhosphorIcons.Play, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Lire tout")
+                            Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         }
-                        Button(
+                        AuraButton(
                             onClick = {
                                 if (uiState.tracks.isNotEmpty()) {
                                     playerViewModel.playQueue(uiState.tracks.shuffled(), 0)
-                                    navController.navigate(AuraDestination.NowPlaying.route)
                                 }
                             },
-                            shape = AuraShapes.Pill,
-                            colors = ButtonDefaults.buttonColors(containerColor = AuraColors.GlassFill, contentColor = AuraColors.TextPrimary),
                         ) {
-                            Icon(PhosphorIcons.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Mélanger")
+                            Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -144,7 +142,6 @@ fun ArtistScreen(
                     track = track,
                     onClick = {
                         playerViewModel.playQueue(uiState.tracks, index)
-                        navController.navigate(AuraDestination.NowPlaying.route)
                     },
                     artSize = 56.dp,
                     modifier = Modifier.padding(horizontal = 20.dp),

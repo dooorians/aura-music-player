@@ -32,9 +32,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ikko.aura.data.playlist.PlaylistSummary
 import com.ikko.aura.ui.theme.AuraColors
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.viewmodel.PlaylistsViewModel
+import androidx.compose.foundation.layout.size
 
 /**
  * Adds [trackIds] (a single track, or a whole album's worth) to whichever playlist the user
@@ -97,13 +98,17 @@ fun AddToPlaylistDialog(
                             unfocusedBorderColor = AuraColors.GlassBorder,
                         ),
                     )
-                    IconButton(onClick = {
-                        if (newName.isNotBlank()) {
-                            playlistsViewModel.createPlaylistAndAddTracks(newName, trackIds)
-                            onDismiss()
-                        }
-                    }) {
-                        Icon(PhosphorIcons.Add, contentDescription = "Créer et ajouter", tint = AuraColors.TextPrimary)
+                    AuraIconButton(
+                        onClick = {
+                            if (newName.isNotBlank()) {
+                                playlistsViewModel.createPlaylistAndAddTracks(newName, trackIds)
+                                onDismiss()
+                            }
+                        },
+                        tone = ButtonTone.Primary,
+                        size = 42.dp,
+                    ) {
+                        Icon(CupertinoIcons.Add, contentDescription = "Créer et ajouter", modifier = Modifier.size(20.dp))
                     }
                 }
             }

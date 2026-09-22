@@ -27,7 +27,7 @@ import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 
 /** What a long press landed on. The menu's contents follow from it. */
 sealed interface LibraryContextTarget {
@@ -70,17 +70,17 @@ fun MediaContextSheet(
             Header(target)
             Spacer(Modifier.height(6.dp))
 
-            ContextAction(PhosphorIcons.Play, "Lire ensuite") { onPlayNext(); onDismiss() }
-            ContextAction(PhosphorIcons.Queue, "Ajouter à la file d'attente") { onAddToQueue(); onDismiss() }
-            ContextAction(PhosphorIcons.PlaylistAdd, "Ajouter à une playlist") { onAddToPlaylist() }
+            ContextAction(CupertinoIcons.Play, "Lire ensuite") { onPlayNext(); onDismiss() }
+            ContextAction(CupertinoIcons.Queue, "Ajouter à la file d'attente") { onAddToQueue(); onDismiss() }
+            ContextAction(CupertinoIcons.PlaylistAdd, "Ajouter à une playlist") { onAddToPlaylist() }
 
             if (target is LibraryContextTarget.TrackTarget) {
-                ContextAction(PhosphorIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }
+                ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }
             }
-            ContextAction(PhosphorIcons.Person, "Voir l'artiste") { onOpenArtist(); onDismiss() }
+            ContextAction(CupertinoIcons.Person, "Voir l'artiste") { onOpenArtist(); onDismiss() }
 
             ContextAction(
-                icon = PhosphorIcons.Delete,
+                icon = CupertinoIcons.Delete,
                 label = when (target) {
                     is LibraryContextTarget.TrackTarget -> "Supprimer le fichier"
                     is LibraryContextTarget.AlbumTarget -> "Supprimer l'album"

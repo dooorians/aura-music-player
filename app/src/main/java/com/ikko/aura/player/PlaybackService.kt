@@ -89,7 +89,7 @@ class PlaybackService : MediaSessionService() {
                 .setChannelId(CHANNEL_ID)
                 .setChannelName(R.string.notification_channel_playback)
                 .build()
-                .apply { setSmallIcon(R.drawable.ic_ph_headphones) },
+                .apply { setSmallIcon(R.drawable.ic_cu_headphones) },
         )
 
         val active = buildPlayer(activeFilter, ownsSession = true)

@@ -31,7 +31,6 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.BuildConfig
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.GradientScreenScaffold
-import com.ikko.aura.ui.theme.AuraColorMode
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
@@ -66,24 +65,6 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.headlineLarge,
                     color = AuraColors.TextPrimary,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                )
-            }
-
-            item { SectionLabel("Apparence") }
-            item {
-                // Phrased from the AMOLED side rather than as "animated background off": on this
-                // panel that is the choice being made, and it is the one with a measurable effect
-                // — library scrolling drops from ~5% janky frames to 0.3% with the backdrop off,
-                // since the blurred cover is a full-screen layer Haze then re-samples every frame.
-                SettingsSwitchRow(
-                    title = "Fond AMOLED noir",
-                    subtitle = "Noir pur au lieu du dégradé tiré de la pochette — plus fluide et moins gourmand en batterie",
-                    checked = uiState.colorMode == AuraColorMode.MONOCHROME,
-                    onCheckedChange = { amoled ->
-                        settingsViewModel.setColorMode(
-                            if (amoled) AuraColorMode.MONOCHROME else AuraColorMode.MESH_DYNAMIC,
-                        )
-                    },
                 )
             }
 
@@ -125,7 +106,7 @@ fun SettingsScreen(
                         ?.let { "La lecture se met en pause dans $it min" }
                         ?: "Mettre la lecture en pause après un délai",
                     trailing = if (uiState.sleepMinutesLeft != null) {
-                        { Text("Annuler", style = MaterialTheme.typography.labelLarge, color = AuraColors.AccentPink) }
+                        { Text("Annuler", style = MaterialTheme.typography.labelLarge, color = AuraColors.TextPrimary) }
                     } else {
                         null
                     },

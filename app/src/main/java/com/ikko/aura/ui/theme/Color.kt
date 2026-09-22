@@ -13,6 +13,7 @@ object AuraColors {
     val TextTertiary = Color(0x73FFFFFF)
 
     val AccentPink = Color(0xFFB8356F)
+
     val AccentPurple = Color(0xFF5B2E8C)
     val AccentOrange = Color(0xFFB35A1A)
 

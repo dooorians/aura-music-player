@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import androidx.palette.graphics.Palette
+import com.ikko.aura.ui.components.AlbumTheme
+import com.ikko.aura.ui.components.albumThemeFromBitmap
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.RecentlyPlayedTracker
 import com.ikko.aura.data.SettingsStore
@@ -34,7 +36,15 @@ import kotlinx.coroutines.withContext
 
 enum class RepeatMode { OFF, ALL, ONE }
 
-/** See [LibraryUiState]'s doc comment — same `List<T>` stability-inference issue applies here. */
+/**
+ * See [LibraryUiState]'s doc comment — same `List<T>` stability-inference issue applies here.
+ *
+ * `positionMs` and `durationMs` are deliberately absent: they tick every 500 ms during playback,
+ * and including them here would force every collector of [PlayerUiState] to recompose on every
+ * tick even if it only cares about track metadata or queue state. They live in dedicated flows
+ * ([positionMs] and [durationMs]) so only the composables that actually display the playback
+ * position subscribe to them.
+ */
 @Immutable
 data class PlayerUiState(
     val currentTrack: Track? = null,
@@ -42,8 +52,6 @@ data class PlayerUiState(
     val queueIndex: Int = -1,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
-    val positionMs: Long = 0L,
-    val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
     val isFavorite: Boolean = false,
@@ -52,6 +60,8 @@ data class PlayerUiState(
     val primaryColor: Color = AuraColors.DefaultPrimary,
     val audioOutput: AudioOutputState = AudioOutputState(),
     val automixEnabled: Boolean = false,
+    /** What the app's background is lit with: the playing cover's colours. */
+    val albumTheme: AlbumTheme = AlbumTheme.Neutral,
 )
 
 @HiltViewModel
@@ -71,6 +81,14 @@ class PlayerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
+
+    /** Isolated from [uiState] so only the composables that display the seek bar and lyrics subscribe. */
+    private val _positionMs = MutableStateFlow(0L)
+    val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
+
+    /** Isolated for the same reason: only [WavyProgressBar] and the lyrics clock need it. */
+    private val _durationMs = MutableStateFlow(0L)
+    val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -97,10 +115,10 @@ class PlayerViewModel @Inject constructor(
                 it.copy(
                     currentTrack = track,
                     queueIndex = index,
-                    durationMs = player.duration.coerceAtLeast(0L),
-                    positionMs = 0L,
                 )
             }
+            _positionMs.value = 0L
+            _durationMs.value = player.duration.coerceAtLeast(0L)
             track?.let(::extractPalette)
             track?.let { recentlyPlayedTracker.recordPlayed(it.albumId) }
         }
@@ -128,12 +146,8 @@ class PlayerViewModel @Inject constructor(
             // for the rest of the session with no further event to recover it.
             while (isActive) {
                 if (player.isPlaying) {
-                    _uiState.update {
-                        it.copy(
-                            positionMs = player.currentPosition.coerceAtLeast(0L),
-                            durationMs = player.duration.coerceAtLeast(0L),
-                        )
-                    }
+                    _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+                    _durationMs.value = player.duration.coerceAtLeast(0L)
                 }
                 reconcileCurrentItem(player)
                 kotlinx.coroutines.delay(POSITION_TICK_MS)
@@ -173,10 +187,10 @@ class PlayerViewModel @Inject constructor(
             it.copy(
                 currentTrack = track,
                 queueIndex = index,
-                durationMs = player.duration.coerceAtLeast(0L),
-                positionMs = player.currentPosition.coerceAtLeast(0L),
             )
         }
+        _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+        _durationMs.value = player.duration.coerceAtLeast(0L)
         extractPalette(track)
         recentlyPlayedTracker.recordPlayed(track.albumId)
     }
@@ -207,10 +221,10 @@ class PlayerViewModel @Inject constructor(
                 queueIndex = index,
                 currentTrack = queue[index],
                 isPlaying = player.isPlaying,
-                durationMs = player.duration.coerceAtLeast(0L),
-                positionMs = player.currentPosition.coerceAtLeast(0L),
             )
         }
+        _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+        _durationMs.value = player.duration.coerceAtLeast(0L)
         queue[index].let(::extractPalette)
     }
 
@@ -224,7 +238,7 @@ class PlayerViewModel @Inject constructor(
     fun skipPrevious() = playerController.skipPrevious()
     fun seekTo(positionMs: Long) {
         playerController.seekTo(positionMs)
-        _uiState.update { it.copy(positionMs = positionMs) }
+        _positionMs.value = positionMs
     }
 
     /**
@@ -339,7 +353,7 @@ class PlayerViewModel @Inject constructor(
 
     private fun extractPalette(track: Track) {
         val artworkUri = track.artworkUri ?: run {
-            _uiState.update { it.copy(meshColors = AuraColors.DefaultMesh) }
+            _uiState.update { it.copy(meshColors = AuraColors.DefaultMesh, albumTheme = AlbumTheme.Neutral) }
             return
         }
         // Cancels the previous one: swiping through the queue used to start a decode, a palette
@@ -360,20 +374,21 @@ class PlayerViewModel @Inject constructor(
                 targetSizePx = PALETTE_SIZE_PX,
                 cacheKey = track.albumId.toString(),
             )
-            val palette = bitmap?.let { readPalette(it) }
+            val palette = bitmap?.let { readPalette(it, track.albumId.hashCode()) }
             _uiState.update {
                 it.copy(
                     meshColors = palette?.mesh ?: AuraColors.DefaultMesh,
                     primaryColor = palette?.primary ?: AuraColors.DefaultPrimary,
+                    albumTheme = palette?.theme ?: AlbumTheme.Neutral,
                 )
             }
             bitmap?.let { playerController.updateItemArtwork(track.id, it) }
         }
     }
 
-    private class CoverPalette(val mesh: List<Color>, val primary: Color)
+    private class CoverPalette(val mesh: List<Color>, val primary: Color, val theme: AlbumTheme)
 
-    private suspend fun readPalette(bitmap: Bitmap): CoverPalette = withContext(Dispatchers.Default) {
+    private suspend fun readPalette(bitmap: Bitmap, seed: Int): CoverPalette = withContext(Dispatchers.Default) {
         // A backdrop gradient needs a handful of dominant colours, not a full 16-swatch
         // analysis of every pixel; both knobs cut the pass to a fraction of its default cost.
         val palette = Palette.from(bitmap)
@@ -397,7 +412,7 @@ class PlayerViewModel @Inject constructor(
                 ?: palette.dominantSwatch
             )?.rgb?.let { Color(it) } ?: AuraColors.DefaultPrimary
 
-        CoverPalette(mesh, primary)
+        CoverPalette(mesh, primary, albumThemeFromBitmap(bitmap, seed))
     }
 
     override fun onCleared() {

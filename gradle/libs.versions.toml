@@ -16,7 +16,6 @@ media3 = "1.11.0"
 palette = "1.0.0"
 datastore = "1.1.1"
 errorprone = "2.+"
-haze = "1.5.3"
 onnxruntime = "1.28.0"
 kotlinxSerialization = "1.7.3"
 
@@ -35,8 +34,6 @@ androidx-compose-material3 = { module = "androidx.compose.material3:material3", 
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-palette = { module = "androidx.palette:palette-ktx", version.ref = "palette" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
-haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
-haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 

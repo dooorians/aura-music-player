@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.SettingsStore
 import com.ikko.aura.player.SleepTimer
-import com.ikko.aura.ui.theme.AuraColorMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,7 +16,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class SettingsUiState(
-    val colorMode: AuraColorMode = AuraColorMode.MESH_DYNAMIC,
     val batterySaverEnabled: Boolean = false,
     val isScanning: Boolean = false,
     val onlineLyricsEnabled: Boolean = true,
@@ -48,7 +46,6 @@ class SettingsViewModel @Inject constructor(
     // intersection of everything passed in, which Kotlin warns about and will reject outright in a
     // future release. `Any?` is what the array is actually read as two lines below anyway.
     val uiState: StateFlow<SettingsUiState> = combine<Any?, SettingsUiState>(
-        settingsStore.colorMode,
         settingsStore.batterySaverEnabled,
         musicRepository.isScanning,
         settingsStore.onlineLyricsEnabled,
@@ -56,21 +53,16 @@ class SettingsViewModel @Inject constructor(
         sleepMinutes,
     ) { values ->
         SettingsUiState(
-            colorMode = values[0] as AuraColorMode,
-            batterySaverEnabled = values[1] as Boolean,
-            isScanning = values[2] as Boolean,
-            onlineLyricsEnabled = values[3] as Boolean,
-            automixEnabled = values[4] as Boolean,
-            sleepMinutesLeft = values[5] as Int?,
+            batterySaverEnabled = values[0] as Boolean,
+            isScanning = values[1] as Boolean,
+            onlineLyricsEnabled = values[2] as Boolean,
+            automixEnabled = values[3] as Boolean,
+            sleepMinutesLeft = values[4] as Int?,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     private companion object {
         const val SLEEP_TICK_MS = 20_000L
-    }
-
-    fun setColorMode(mode: AuraColorMode) {
-        viewModelScope.launch { settingsStore.setColorMode(mode) }
     }
 
     fun setBatterySaverEnabled(enabled: Boolean) {

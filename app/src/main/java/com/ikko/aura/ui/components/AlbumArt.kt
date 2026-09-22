@@ -11,6 +11,9 @@ import android.os.OperationCanceledException
 import android.util.LruCache
 import android.util.Size
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,7 +38,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.core.graphics.scale
 import com.ikko.aura.ui.theme.AuraColors
-import com.ikko.aura.ui.theme.PhosphorIcons
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -110,9 +113,12 @@ object AlbumArtCache {
      * Synchronous cache lookup, for reading an already-decoded bitmap during composition instead
      * of waiting a frame for a coroutine to hand back something already in memory.
      */
-    fun peek(cacheKey: String?, targetSizePx: Int): Bitmap? {
+    fun peek(cacheKey: String?, targetSizePx: Int, derive: Boolean = false): Bitmap? {
         if (cacheKey == null) return null
-        return cache.get(key(cacheKey, targetSizePx))
+        cache.get(key(cacheKey, targetSizePx))?.let { return it }
+        // A cover already decoded at a bigger size is scaled down on the spot: a millisecond or two,
+        // against a frame of placeholder followed by the picture appearing.
+        return if (derive) downscaledFromLarger(cacheKey, targetSizePx)?.let { store(cacheKey, targetSizePx, it) } else null
     }
 
     suspend fun load(
@@ -212,6 +218,9 @@ object AlbumArtCache {
     }
 }
 
+private const val DERIVE_FROM_PX = 200
+private const val REVEAL_MS = 130
+
 @Composable
 fun AlbumArt(
     uri: Uri?,
@@ -241,18 +250,28 @@ fun AlbumArt(
     // view are already decoded, and going through LaunchedEffect for those meant every item
     // drew the placeholder icon first and then recomposed a frame later with the real image —
     // twice the work per item, and a visible flicker, for a bitmap that was already in memory.
-    var bitmap by remember(effectiveKey, targetSizePx) {
-        mutableStateOf(AlbumArtCache.peek(effectiveKey, targetSizePx))
-    }
+    // Big covers (the hero on an album page, a carousel card) are derived from a larger cached copy
+    // right here if need be; small thumbnails in a scrolling grid are not, so a fling never pays for it.
+    val derive = targetSizePx >= DERIVE_FROM_PX
+    val seeded = remember(effectiveKey, targetSizePx) { AlbumArtCache.peek(effectiveKey, targetSizePx, derive) }
+    var bitmap by remember(effectiveKey, targetSizePx) { mutableStateOf(seeded) }
+    var settled by remember(effectiveKey, targetSizePx) { mutableStateOf(seeded != null) }
+    // A picture that arrives after the first frame fades in over the plain ground rather than
+    // popping in; one that was there from the start is simply there.
+    val reveal = remember(effectiveKey, targetSizePx) { Animatable(if (seeded != null) 1f else 0f) }
 
     LaunchedEffect(effectiveKey, targetSizePx) {
-        if (bitmap == null) bitmap = AlbumArtCache.load(context, uri, targetSizePx, effectiveKey)
+        if (bitmap == null) {
+            bitmap = AlbumArtCache.load(context, uri, targetSizePx, effectiveKey)
+            settled = true
+        }
+        if (bitmap != null) reveal.animateTo(1f, tween(REVEAL_MS))
     }
 
     Box(
         modifier = modifier
             .clip(shape)
-            .background(AuraColors.SurfaceVariantDark),
+            .groundFill(androidx.compose.ui.graphics.SolidColor(AuraColors.SurfaceVariantDark), shape),
         contentAlignment = Alignment.Center,
     ) {
         val currentBitmap = bitmap
@@ -265,12 +284,14 @@ fun AlbumArt(
             Image(
                 painter = painter,
                 contentDescription = contentDescription,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value },
                 contentScale = ContentScale.Crop,
             )
-        } else {
+        } else if (settled) {
+            // Only once loading has finished with nothing to show: while it is still going the
+            // ground stays plain, so there is no icon to swap for the picture.
             Icon(
-                imageVector = PhosphorIcons.MusicNote,
+                imageVector = CupertinoIcons.MusicNote,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxWidth(fraction = 0.35f),
                 tint = AuraColors.TextTertiary,
