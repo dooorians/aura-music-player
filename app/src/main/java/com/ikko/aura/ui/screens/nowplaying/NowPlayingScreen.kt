@@ -42,7 +42,23 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onSizeChanged
+import com.ikko.aura.ui.components.backdrop.GlassSettle
+import com.ikko.aura.ui.components.backdrop.LocalGlassSettle
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.unit.toIntSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,6 +132,12 @@ private val NeutralGlassTint = Color(0xFF121212)
 /** The card's face while it is a card: the dark grey Apple's is. */
 private val SheetFaceColor = Color(0xFF2C2B2C)
 
+/** What the card is doing: one animation at a time, keyed on this. */
+private enum class SheetPhase { Settled, Closing, Away }
+
+/** How close to rest the card lets its glass go live again, as a fraction of the screen's height. */
+private const val UNFREEZE_BELOW = 0.012f
+
 @Composable
 fun NowPlayingScreen(
     navController: NavHostController,
@@ -127,8 +149,8 @@ fun NowPlayingScreen(
     sheetClosing: Boolean = false,
     /** True while it leaves for a page of its own rather than for the mini player. */
     leavingSideways: Boolean = false,
-    /** The shared position of the card's top edge; see below. */
-    sheetCard: androidx.compose.runtime.MutableFloatState = androidx.compose.runtime.mutableFloatStateOf(1f),
+    /** The shared card; see below. */
+    sheetCard: com.ikko.aura.SheetCard = remember { com.ikko.aura.SheetCard() },
     /** The record's own deep colour, for the card's face. */
     faceTint: Color = SheetFaceColor,
 ) {
@@ -156,60 +178,96 @@ fun NowPlayingScreen(
         )
     }
 
-    // The player as a card, in Apple's way (see AuraMotion). [sheetCard] is how far below the top of the
-    // screen the card's top edge is, as a fraction of the screen's height — 0 when it is up, 1 when there
-    // is no card at all — and it is shared with the rest of the app: the page under the card is drawn only
-    // above that edge, and the mini player and the tab capsule stay away while it is over them.
+    // The player as a card, in Apple's way (see AuraMotion). [sheetCard] says where the card's top edge is,
+    // as a fraction of the screen's height — 0 up, 1 no card — and the rest of the app arranges itself
+    // around it: the page under the card is drawn only above that edge, and the mini player and the tab
+    // capsule stay away while it covers them.
     //
-    // It is driven from here and not by the navigation transition, and started only once this screen has
-    // drawn its first frames: composing the player takes several of them, and a transition that had begun
-    // in the meantime spent its first moves unseen and then jumped.
-    remember {
-        if (sheetOpening) sheetCard.floatValue = AuraMotion.SHEET_START_FRACTION
-        sheetOpening
+    // This screen owns it for as long as it is composed, and gives it back when it leaves. One animation
+    // drives it, keyed on what the card is doing, so a close started while the open was still running
+    // cancels the open rather than fighting it for the same number.
+    // The player is six panels of live glass, and each of them works out a fresh sample of the backdrop
+    // whenever it moves — six blur-and-lens chains on every frame of the travel, which is what made the card
+    // arrive and leave in steps. While it travels they are held still instead, at the picture they will rest
+    // with: see [GlassSettle].
+    val settle = remember { GlassSettle() }
+    var cardHeightPx by remember { mutableIntStateOf(0) }
+    // Set the first time this screen actually draws. Composing the player takes several frames, and a card
+    // that started rising before then was an empty grey rectangle for the first of them, filling in
+    // afterwards — which is the blink one sees on opening. Not snapshot state: it is written from the draw.
+    val drawnOnce = remember { MutableStateFlow(false) }
+
+    val token = remember { Any() }
+    remember(token) {
+        sheetCard.claim(token, if (sheetOpening) AuraMotion.SHEET_PILL_TOP_FRACTION else 0f)
+        token
     }
-    LaunchedEffect(Unit) {
-        if (sheetOpening) {
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.animation.core.animate(
-                initialValue = sheetCard.floatValue,
-                targetValue = 0f,
-                animationSpec = androidx.compose.animation.core.spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
-            ) { value, _ -> sheetCard.floatValue = value }
+    DisposableEffect(token) { onDispose { sheetCard.release(token) } }
+
+    val phase = when {
+        // Left for a page of its own (an album, the queue, the lyrics): there is no card any more, and the
+        // player leaves whole, by its own sideways transition.
+        leavingSideways -> SheetPhase.Away
+        sheetClosing -> SheetPhase.Closing
+        else -> SheetPhase.Settled
+    }
+    LaunchedEffect(phase) {
+        when (phase) {
+            SheetPhase.Away -> sheetCard.edge = 1f
+            SheetPhase.Closing -> {
+                // Already at rest, so the picture the glass has is the one to keep: nothing to compensate.
+                // In a try/finally: a close interrupted mid-flight (opened again, or left sideways, before
+                // it finished) cancels this coroutine inside animate(), and without the finally the glass
+                // was left frozen for good — a stuck picture that never went live again.
+                settle.frozen = true
+                try {
+                    animate(
+                        initialValue = sheetCard.edge.coerceAtMost(AuraMotion.SHEET_PILL_TOP_FRACTION),
+                        targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
+                        animationSpec = tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
+                    ) { value, _ -> sheetCard.edge = value }
+                } finally {
+                    settle.frozen = false
+                }
+            }
+            SheetPhase.Settled -> if (sheetCard.edge > 0f && sheetCard.edge < 1f) {
+                // Not before this screen has drawn: composing the player takes several frames, and an
+                // animation begun in the meantime spends its first moves unseen and then jumps.
+                // The first draw can still be a half-built screen, so a couple of frames more: what rises has
+                // to be the finished player, never an empty card that fills in afterwards.
+                drawnOnce.first { it }
+                repeat(3) { withFrameNanos { } }
+                // One frame drawn as the card will rest, then held there for the rise. Let go again just
+                // before the end, so the last frames sample where they really are and nothing steps.
+                settle.offset = Offset(0f, sheetCard.edge * cardHeightPx)
+                withFrameNanos { }
+                settle.frozen = true
+                try {
+                    animate(
+                        initialValue = sheetCard.edge,
+                        targetValue = 0f,
+                        animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
+                    ) { value, _ ->
+                        sheetCard.edge = value
+                        if (settle.frozen && value < UNFREEZE_BELOW) {
+                            settle.frozen = false
+                            settle.offset = Offset.Zero
+                        }
+                    }
+                } finally {
+                    settle.frozen = false
+                    settle.offset = Offset.Zero
+                }
+            }
         }
     }
-    // Closing starts from the top when there was no card (the player was reached sideways), from wherever
-    // it is when there was.
-    val closedDone = remember { mutableStateOf(false) }
-    androidx.compose.runtime.SideEffect {
-        if (sheetClosing && sheetCard.floatValue >= 1f) sheetCard.floatValue = 0f
-        // Left for a page of its own (an album, the queue): the card is over, and the pages must be seen whole.
-        if (leavingSideways) sheetCard.floatValue = 1f
-    }
-    LaunchedEffect(sheetClosing) {
-        if (sheetClosing) {
-            androidx.compose.animation.core.animate(
-                initialValue = sheetCard.floatValue.coerceAtMost(AuraMotion.SHEET_PILL_TOP_FRACTION),
-                targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
-                animationSpec = tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
-            ) { value, _ -> sheetCard.floatValue = value }
-            // Gone: hidden for good before the shared position is reset. Reset alone put the card back at
-            // the top for the rest of the navigation transition — the whole player, over the page, for a
-            // few frames after it had sunk into the pill: the flash on closing.
-            closedDone.value = true
-            sheetCard.floatValue = 1f
-        }
-    }
+    val sinking = phase == SheetPhase.Closing
+    CompositionLocalProvider(LocalGlassSettle provides settle) {
     Box(
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                if (closedDone.value) {
-                    alpha = 0f
-                    return@graphicsLayer
-                }
-                val o = sheetCard.floatValue.let { if (it >= 1f) 0f else it }
+                val o = sheetCard.edge.let { if (it >= 1f) 0f else it }
                 translationY = o * size.height
                 val s = 1f - AuraMotion.SHEET_NARROWING * o
                 scaleX = s
@@ -220,17 +278,28 @@ fun NowPlayingScreen(
                 val corner = AuraMotion.cornerAt(o).toPx()
                 shape = RoundedCornerShape(topStart = corner, topEnd = corner)
                 clip = o > 0.0005f
-                // Near the pill the card clears, to let the pill and the page show.
-                alpha = 1f - ((o - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)).coerceIn(0f, 1f)
+                // Gone by the time it reaches the mini player, which takes its place — on the way down only.
+                // Coming up it stays opaque: a layer that is see-through at all has to be drawn to a buffer of
+                // its own and composited, and doing that to a full screen, every frame, is dear.
+                alpha = if (sinking) {
+                    1f - ((o - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)).coerceIn(0f, 1f)
+                } else {
+                    1f
+                }
             }
             // The card's face: opaque while it is away from full screen — it hides what is under it — grey where
             // it is furthest down and the record's own deep colour as it nears the top, and clearing only in
             // the last of the way, when the player's own backdrop has long since come in behind it.
             .drawBehind {
-                val o = sheetCard.floatValue.let { if (it >= 1f) 0f else it }
+                val o = sheetCard.edge.let { if (it >= 1f) 0f else it }
                 val alpha = (o / AuraMotion.SHEET_FACE_CLEARS_BELOW).coerceIn(0f, 1f)
                 val grey = (o / AuraMotion.SHEET_START_FRACTION).coerceIn(0f, 1f)
                 drawRect(androidx.compose.ui.graphics.lerp(faceTint, SheetFaceColor, grey).copy(alpha = alpha))
+            }
+            .onSizeChanged { cardHeightPx = it.height }
+            .drawWithContent {
+                drawContent()
+                if (!drawnOnce.value) drawnOnce.value = true
             },
     ) {
     GradientScreenScaffold(applyContentInsets = true) {
@@ -320,6 +389,7 @@ fun NowPlayingScreen(
                 onJumpTo = viewModel::jumpToQueueIndex,
             )
         }
+    }
     }
     }
 }

@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.model.Track
+import androidx.compose.ui.graphics.Color
+import com.ikko.aura.ui.theme.LibraryTypography
+import com.ikko.aura.ui.theme.LocalCoverColors
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 
@@ -66,16 +69,16 @@ fun TrackListItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = AuraColors.TextPrimary,
+                style = LibraryTypography.AlbumTitle,
+                color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = track.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AuraColors.TextSecondary,
+                    style = LibraryTypography.AlbumArtist,
+                    color = LocalCoverColors.current.tint.copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

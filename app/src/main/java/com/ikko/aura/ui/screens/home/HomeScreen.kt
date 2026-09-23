@@ -1,34 +1,30 @@
 package com.ikko.aura.ui.screens.home
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import com.ikko.aura.ui.theme.CupertinoIcons
-import com.ikko.aura.ui.components.AuraIconButton
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,15 +34,33 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AlbumArt
-import com.ikko.aura.ui.components.clipOnce
+import com.ikko.aura.ui.components.AuraIconButton
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.SquircleCard
+import com.ikko.aura.ui.components.TrackListItem
+import com.ikko.aura.ui.components.clipOnce
 import com.ikko.aura.ui.theme.AuraColors
-import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
+import com.ikko.aura.ui.theme.CupertinoIcons
+import com.ikko.aura.ui.theme.LibraryTypography
+import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.HomeViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
-import com.ikko.aura.ui.components.AuraButton
-import com.ikko.aura.ui.components.ButtonTone
+
+/**
+ * The margin, the type and the colours are the library's: the two pages sit side by side under one
+ * gesture, so a title that changed size or tint from one to the other would read as two apps.
+ */
+private val PAGE_MARGIN = 21.dp
+
+/** Favourites, as Apple Music shows a library: three across, two down, and no row to scroll sideways. */
+private const val FAVOURITE_COLUMNS = 3
+private const val FAVOURITE_ROWS = 2
+private val GRID_SPACING = 13.dp
+
+/** Covers narrower than their column, so six of them don't dominate the page the way a full-bleed grid did. */
+private const val FAVOURITE_COVER_FRACTION = 0.8f
 
 @Composable
 fun HomeScreen(
@@ -63,34 +77,35 @@ fun HomeScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(top = 8.dp),
         ) {
-            SectionHeader(
-                title = "Favoris",
-                onSeeAll = { navController.navigate(AuraDestination.AlbumListPattern.route("favorites")) },
-            )
+            SectionTitle(title = "Favoris")
             if (uiState.favoriteAlbums.isEmpty()) {
-                Text(
-                    text = "Marque un album favori (★) pour le retrouver ici",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AuraColors.TextTertiary,
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                )
-                Spacer(Modifier.height(8.dp))
+                Hint("Marque un album favori (★) pour le retrouver ici")
             } else {
-                AlbumCarousel(albums = uiState.favoriteAlbums, navController = navController)
+                FavouriteGrid(albums = uiState.favoriteAlbums, navController = navController)
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
 
-            if (uiState.recentAlbums.isNotEmpty()) {
-                SectionHeader(
-                    title = "Écoutés récemment",
-                    onSeeAll = { navController.navigate(AuraDestination.AlbumListPattern.route("recent")) },
-                )
-                AlbumCarousel(albums = uiState.recentAlbums, navController = navController)
-                Spacer(Modifier.height(20.dp))
+            SectionTitle(
+                title = "Écoutés récemment",
+                onSeeAll = { navController.navigate(AuraDestination.AlbumListPattern.route("recent")) },
+            )
+            if (uiState.recentTracks.isEmpty()) {
+                Hint("Les derniers titres écoutés apparaîtront ici")
+            } else {
+                val recent = uiState.recentTracks.take(RECENT_TRACKS)
+                recent.forEachIndexed { index, track ->
+                    TrackListItem(
+                        track = track,
+                        onClick = { playerViewModel.playQueue(recent, index) },
+                        modifier = Modifier.padding(horizontal = PAGE_MARGIN - 4.dp),
+                    )
+                }
             }
 
-            SectionHeader(
+            Spacer(Modifier.height(24.dp))
+
+            SectionTitle(
                 title = "Redécouvrir",
                 onSeeAll = { navController.navigate(AuraDestination.AlbumListPattern.route("discover")) },
             )
@@ -101,25 +116,108 @@ fun HomeScreen(
     }
 }
 
-// Shared with LibraryScreen's LibraryHeader so both screens' titles sit at the exact same
-// height regardless of what's in the trailing slot (a TextButton here, an IconButton there) —
-// fixing the row's height and centering within it makes the text position independent of that.
+/** How many of the recently played show on Home; the arrow beside the title opens the rest. */
+private const val RECENT_TRACKS = 5
+
+// Must match LibraryScreen's title row so "Favoris" and "Bibliothèque" sit at the same height when
+// swiping between the two pages.
 private val SECTION_HEADER_HEIGHT = 56.dp
 
 @Composable
-private fun SectionHeader(title: String, onSeeAll: () -> Unit, modifier: Modifier = Modifier) {
+private fun SectionTitle(title: String, modifier: Modifier = Modifier, onSeeAll: (() -> Unit)? = null) {
+    val cover = LocalCoverColors.current
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(SECTION_HEADER_HEIGHT)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = PAGE_MARGIN),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = title, style = MaterialTheme.typography.headlineLarge, color = AuraColors.TextPrimary)
-        AuraIconButton(onClick = onSeeAll, size = 38.dp) {
-            Icon(CupertinoIcons.ChevronRight, contentDescription = "Tout voir", modifier = Modifier.size(15.dp))
+        Text(
+            text = title,
+            style = LibraryTypography.PageTitle,
+            color = cover.tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (onSeeAll != null) {
+            Spacer(Modifier.size(8.dp))
+            AuraIconButton(onClick = onSeeAll, size = 38.dp, light = 12f) {
+                Icon(CupertinoIcons.ChevronRight, contentDescription = "Tout voir", modifier = Modifier.size(15.dp))
+            }
         }
+    }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = AuraColors.TextTertiary,
+        modifier = Modifier.padding(horizontal = PAGE_MARGIN),
+    )
+    Spacer(Modifier.height(8.dp))
+}
+
+/**
+ * Six favourites in a fixed grid, laid out by hand rather than with a lazy grid: Home is one scrolling
+ * column, and a lazy grid inside it would be a second scroller on the same axis.
+ */
+@Composable
+private fun FavouriteGrid(albums: List<Album>, navController: NavHostController) {
+    val shown = albums.take(FAVOURITE_COLUMNS * FAVOURITE_ROWS)
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_MARGIN),
+        verticalArrangement = Arrangement.spacedBy(GRID_SPACING),
+    ) {
+        shown.chunked(FAVOURITE_COLUMNS).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(GRID_SPACING), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { album ->
+                    AlbumCell(album = album, navController = navController, modifier = Modifier.weight(1f))
+                }
+                // Keeps the last row's covers the same width as the ones above when it is not full.
+                repeat(FAVOURITE_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumCell(album: Album, navController: NavHostController, modifier: Modifier = Modifier) {
+    val cover = LocalCoverColors.current
+    Column(modifier = modifier) {
+        SquircleCard(
+            modifier = Modifier.fillMaxWidth(FAVOURITE_COVER_FRACTION).aspectRatio(1f),
+            onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+        ) {
+            AlbumArt(
+                uri = album.artworkUri,
+                contentDescription = album.title,
+                modifier = Modifier.fillMaxSize(),
+                targetSizeDp = 180.dp,
+                cacheKey = album.id.toString(),
+            )
+        }
+        Text(
+            text = album.title,
+            style = LibraryTypography.AlbumTitle,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 9.dp),
+        )
+        Text(
+            text = album.artist,
+            style = LibraryTypography.AlbumArtist,
+            color = cover.tint.copy(alpha = 0.72f),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -130,8 +228,9 @@ private fun SectionHeader(title: String, onSeeAll: () -> Unit, modifier: Modifie
 @Composable
 private fun AlbumCarousel(albums: List<Album>, navController: NavHostController) {
     if (albums.isEmpty()) return
+    val cover = LocalCoverColors.current
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
+        contentPadding = PaddingValues(horizontal = PAGE_MARGIN),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -168,16 +267,18 @@ private fun AlbumCarousel(albums: List<Album>, navController: NavHostController)
                 ) {
                     Text(
                         text = album.title,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = AuraColors.TextPrimary,
+                        style = LibraryTypography.AlbumTitle,
+                        color = Color.White,
                         maxLines = 1,
+                        softWrap = false,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = album.artist,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AuraColors.TextSecondary,
+                        style = LibraryTypography.AlbumArtist,
+                        color = cover.tint.copy(alpha = 0.72f),
                         maxLines = 1,
+                        softWrap = false,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -186,7 +287,7 @@ private fun AlbumCarousel(albums: List<Album>, navController: NavHostController)
     }
 }
 
-private val CARD_SCRIM = Brush.verticalGradient(
+private val CARD_SCRIM = androidx.compose.ui.graphics.Brush.verticalGradient(
     0.0f to Color.Transparent,
     0.45f to AuraColors.Black.copy(alpha = 0.45f),
     1.0f to AuraColors.Black.copy(alpha = 0.88f),

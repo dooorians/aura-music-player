@@ -256,7 +256,6 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .clipToBounds()
                 .nestedScroll(headerScrollConnection)
                 .nestedScroll(capsuleScroll)
                 .topFade { topFade },
@@ -666,7 +665,7 @@ private fun ScanningState() {
  * Keeps the index strip clear of the content it scrubs. Everything else keeps its own 16dp.
  */
 /** Kept clear at the grid's right for the index strip. */
-private val INDEX_GUTTER = 36.dp
+private val INDEX_GUTTER = 50.dp
 
 /**
  * The names the alphabet strip files this list under, or null when the strip should not be shown

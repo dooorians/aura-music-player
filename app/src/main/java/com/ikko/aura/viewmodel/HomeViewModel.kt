@@ -43,6 +43,7 @@ class HomeViewModel @Inject constructor(
         recentlyPlayedTracker.recentAlbumIds,
         favoritesStore.favoriteAlbumIds,
         recentlyPlayedTracker.playCounts,
+        recentlyPlayedTracker.recentTrackIds,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val tracks = values[0] as List<Track>
@@ -55,12 +56,15 @@ class HomeViewModel @Inject constructor(
         val favoriteIds = values[4] as Set<Long>
         @Suppress("UNCHECKED_CAST")
         val plays = values[5] as List<AlbumPlayEntity>
+        @Suppress("UNCHECKED_CAST")
+        val recentTrackIds = values[6] as List<String>
 
         val albumsById = albums.associateBy { it.id }
         HomeUiState(
             favoriteAlbums = albums.filter { it.id in favoriteIds },
             recentAlbums = recentIds.mapNotNull { albumsById[it] },
-            recentTracks = tracks.take(HOME_LIST_SIZE),
+            // What was actually played, newest first — not simply the first tracks of the library.
+            recentTracks = tracks.associateBy { it.id }.let { byId -> recentTrackIds.mapNotNull { byId[it] } },
             rediscoverAlbums = rediscover(albums, plays, recentIds.toSet()),
             isScanning = isScanning,
         )

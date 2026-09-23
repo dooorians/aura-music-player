@@ -51,7 +51,10 @@ private const val STEP_MS = 66L
  * 120ms between them.
  */
 private const val CROSSFADE_MS = 750L
-private const val FADE_FRAME_MS = 6L
+// One step per frame of the display, and no more: every post of this surface makes the compositor put the
+// whole screen together again, and at 6ms that was two of them per frame the screen could show — landing
+// exactly as the player closes, which is when the interface can least afford it.
+private const val FADE_FRAME_MS = 11L
 
 /**
  * The surface is this fraction of the view's size in each direction. A quarter: every pixel of it is

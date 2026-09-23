@@ -10,6 +10,7 @@
 package com.ikko.aura.ui.components.backdrop
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.neverEqualPolicy
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -29,7 +31,9 @@ import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.ObserverModifierNode
@@ -48,6 +52,27 @@ import com.ikko.aura.ui.components.backdrop.shadow.InnerShadow
 import com.ikko.aura.ui.components.backdrop.shadow.InnerShadowElement
 import com.ikko.aura.ui.components.backdrop.shadow.Shadow
 import com.ikko.aura.ui.components.backdrop.shadow.ShadowElement
+
+/**
+ * A screen that is travelling as a whole — the player's card rising or sinking — and where its glass will
+ * come to rest.
+ *
+ * What a glass surface draws depends on where it sits over its backdrop, so a screen in motion has every
+ * panel on it working out a fresh sample, and running the colour matrix, the blur and the lens over it,
+ * on every frame: on the player, six of those chains a frame, which is what made the card travel in steps.
+ *
+ * While [frozen], a surface keeps the picture it has and simply moves with its screen. So that the picture
+ * is the right one to keep, [offset] is how far the screen is from where it will rest at the moment it is
+ * frozen: the surface samples as if it were already there, which is what it will show at the end. Nothing
+ * changes when it is let go again, because what it had was the resting picture all along.
+ */
+class GlassSettle {
+    /** Read while drawing, so setting it redraws the glass once — which is how the resting picture is taken. */
+    var offset: Offset by androidx.compose.runtime.mutableStateOf(Offset.Zero)
+    var frozen: Boolean = false
+}
+
+val LocalGlassSettle = androidx.compose.runtime.staticCompositionLocalOf<GlassSettle?> { null }
 
 private val DefaultHighlight = { Highlight.Default }
 private val DefaultShadow = { Shadow.Default }
@@ -266,7 +291,7 @@ private class DrawBackdropNode(
     var onDrawSurface: (DrawScope.() -> Unit)?,
     var onDrawFront: (DrawScope.() -> Unit)?,
     var backdropScale: Float
-) : LayoutModifierNode, DrawModifierNode, GlobalPositionAwareModifierNode, ObserverModifierNode, Modifier.Node() {
+) : LayoutModifierNode, DrawModifierNode, GlobalPositionAwareModifierNode, ObserverModifierNode, CompositionLocalConsumerModifierNode, Modifier.Node() {
 
     private val effectScope =
         object : BackdropEffectScopeImpl() {
@@ -300,12 +325,16 @@ private class DrawBackdropNode(
             canvas.scale(scale, scale)
         }
         onDrawBackdrop {
-            with(backdrop) {
-                drawBackdrop(
-                    density = effectScope,
-                    coordinates = layoutCoordinates,
-                    layerBlock = layerBlock
-                )
+            // Sampled as if the screen were already at rest, while it is travelling — see [GlassSettle].
+            val settle = currentValueOf(LocalGlassSettle)?.offset ?: Offset.Zero
+            translate(settle.x, settle.y) {
+                with(backdrop) {
+                    drawBackdrop(
+                        density = effectScope,
+                        coordinates = layoutCoordinates,
+                        layerBlock = layerBlock
+                    )
+                }
             }
         }
         if (scale != 1f) {
@@ -381,7 +410,12 @@ private class DrawBackdropNode(
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
         if (coordinates.isAttached) {
             if (backdrop.isCoordinatesDependent) {
-                layoutCoordinates = coordinates
+                // Held still while the whole screen travels: the picture it has is the one it will rest with,
+                // so working it out again, every frame, would cost a great deal to change nothing.
+                val frozen = currentValueOf(LocalGlassSettle)?.frozen == true
+                if (!(frozen && layoutCoordinates != null)) {
+                    layoutCoordinates = coordinates
+                }
             } else {
                 if (layoutCoordinates != null) {
                     layoutCoordinates = null

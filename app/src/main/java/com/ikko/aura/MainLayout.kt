@@ -29,6 +29,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -55,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.State
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -135,14 +143,63 @@ private const val PILL_FADE_OUT_MS = 30
 
 /** Routes presented as a sheet over the page, fading in and out, rather than pushed in from the side. */
 /** What the navigation transitions have worked out about the player's card, for the screen to read. */
-/** The player's card, for the pages under it to be drawn only above it. */
-val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState> {
-    androidx.compose.runtime.mutableFloatStateOf(1f)
+/**
+ * Where the player's card is, and who is driving it.
+ *
+ * One object, with one owner, because everything else on screen is arranged around it: the page under the
+ * card is drawn only above its top edge, and the mini player and the tab capsule stay away while it covers
+ * them. Held as separate flags, a cancelled or interrupted transition could leave one of them saying the
+ * card was still there after the player had gone — and a page clipped to a card that no longer exists is an
+ * empty screen you can still tap.
+ *
+ * The player claims it on its first composition and gives it back when it leaves, and nothing else writes
+ * to it: what it says is true as long as [owner] is not null, and means nothing once it is.
+ */
+@Stable
+class SheetCard {
+    /** The card's top edge, as a fraction of the screen's height. 0 is up, 1 is no card. Read in draw. */
+    var edge by mutableFloatStateOf(1f)
+        internal set
+
+    /** The player composition in charge of the card, or null when there is no player on screen. */
+    var owner: Any? by mutableStateOf(null)
+        internal set
+
+    /** Takes the card over, at [edge]. */
+    fun claim(token: Any, edge: Float) {
+        owner = token
+        this.edge = edge
+    }
+
+    /** Gives it back, if it is still ours: another player may already have taken it. */
+    fun release(token: Any) {
+        if (owner === token) {
+            owner = null
+            edge = 1f
+        }
+    }
+
+    /** How much of a page under the card is drawn, as a fraction of its height: all of it once the card has sunk. */
+    val pageBottom: Float
+        get() = if (owner == null || edge >= AuraMotion.SHEET_PILL_TOP_FRACTION) 1f else edge.coerceIn(0f, 1f)
+
+    /** Whether the card is over the mini player and the tab capsule. */
+    val coversPill: Boolean get() = owner != null && edge < CARD_COVERS_PILL_BELOW
+
+    /** Where the card's top edge is while it travels, as a fraction of the screen's height; 0 when it is up or absent. */
+    val cardTop: Float get() = if (owner == null || edge >= 1f) 0f else edge.coerceIn(0f, 1f)
+
+    /** How dark the page under the card is: none of it when the card is at the mini player, all of it when the card is up. */
+    val dim: Float
+        get() = if (owner == null) 0f else AuraMotion.SHEET_DIM * (1f - (edge / AuraMotion.SHEET_START_FRACTION)).coerceIn(0f, 1f)
 }
+
+val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf { SheetCard() }
 
 /** The card covers the mini player and the tab capsule from here down: they stay away while it is over them. */
 private const val CARD_COVERS_PILL_BELOW = 0.70f
 
+/** What the navigation transitions have worked out about the player, for the screen itself to read. */
 private class SheetFlags {
     var opening = false
     var closing = false
@@ -151,7 +208,14 @@ private class SheetFlags {
 /** How dim the page under the player's card is, 0..1. Read in draw only. */
 val LocalSheetDim = androidx.compose.runtime.staticCompositionLocalOf<() -> Float> { { 0f } }
 
-/** A destination that can sit under the player's card: drawn as it is, with the card's dimming laid over it. */
+/**
+ * A destination that can sit under the player's card: cut off at the card's top edge, and dimmed.
+ *
+ * Both are done to a layer of this page rather than in a draw over it. A clip that changes shape is a new
+ * outline on the same recorded picture — the picture itself is not drawn again — whereas clipping inside a
+ * draw block made the whole page (a grid of covers, a list, their glass) re-record on every frame of the
+ * card's travel, which is most of what made the player open and close in steps.
+ */
 @Composable
 private fun UnderSheet(content: @Composable () -> Unit) {
     val dim = LocalSheetDim.current
@@ -159,21 +223,36 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .drawWithContent {
-                // Only what is above the card's top edge: the card is opaque there, and what is under it must
-                // not show through however its face is fading.
-                val edge = card.floatValue
-                if (edge < 1f) {
-                    clipRect(bottom = edge * size.height) {
-                        this@drawWithContent.drawContent()
-                        val d = dim()
-                        if (d > 0.001f) drawRect(Color.Black.copy(alpha = d))
-                    }
-                } else {
-                    drawContent()
-                }
+            .graphicsLayer {
+                val edge = card.pageBottom
+                clip = edge < 1f
+                if (clip) shape = TopSlice(edge)
             },
-    ) { content() }
+    ) {
+        content()
+        // Its own node, so the dimming — which animates on its own clock — costs one rectangle rather than
+        // another pass over the page under it.
+        Box(
+            Modifier
+                .matchParentSize()
+                .drawBehind {
+                    val d = dim()
+                    if (d > 0.001f) drawRect(Color.Black, alpha = d)
+                },
+        )
+    }
+}
+
+/** Everything below the top [fraction] of a box. */
+private data class BottomSlice(private val fraction: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rectangle(Rect(0f, size.height * fraction, size.width, size.height))
+}
+
+/** The top [fraction] of a box. */
+private data class TopSlice(private val fraction: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rectangle(Rect(0f, 0f, size.width, size.height * fraction))
 }
 
 private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.NowPlaying.route
@@ -218,9 +297,8 @@ private const val THROUGH_DELAY_MS = 50
 fun MainLayout() {
     val navController = rememberNavController()
     val sheetFlags = remember { SheetFlags() }
-    // Where the player's card has its top edge, as a fraction of the screen's height; 1 when there is no card.
-    val sheetCard = remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
-    val cardOverPill by remember { derivedStateOf { sheetCard.floatValue < CARD_COVERS_PILL_BELOW } }
+    val sheetCard = remember { SheetCard() }
+    val cardOverPill by remember { derivedStateOf { sheetCard.coversPill } }
     // Every weight of the typeface is built once, off the first frame that would otherwise build it: a
     // variable font makes one instance per weight, and the player's first frame was where several of them
     // were first asked for.
@@ -229,8 +307,7 @@ fun MainLayout() {
     // What the mini player refracts: the page itself, recorded once per frame and shared.
     val pillBackdrop = rememberLayerBackdrop()
     val pageMotion = rememberPageMotion(AuraDestination.topLevelRoutes.size)
-    // How dim the page under the player's card is: it stays drawn and goes dark as the card rises over it.
-    val sheetDim = remember { Animatable(0f) }
+
     val capsule = remember { TabCapsuleState() }
     val capsuleViewModel: TabCapsuleViewModel = hiltViewModel()
     val selectedFilter by capsuleViewModel.selection.filter.collectAsStateWithLifecycle()
@@ -262,13 +339,6 @@ fun MainLayout() {
         lastRoute[0] = currentRoute
     }
     val onTabs by rememberUpdatedState(tabsShown)
-    val onPlayer = currentRoute == AuraDestination.NowPlaying.route
-    LaunchedEffect(onPlayer) {
-        sheetDim.animateTo(
-            if (onPlayer) AuraMotion.SHEET_DIM else 0f,
-            tween(if (onPlayer) AuraMotion.SHEET_DIM_IN_MS else AuraMotion.SHEET_DIM_OUT_MS),
-        )
-    }
     LaunchedEffect(capsule, pageMotion) {
         // Whether the capsule is out, and if not, whether it was the list's scrolling that put it away
         // (which earns the wind-up) rather than the page leaving (which just sinks).
@@ -322,7 +392,10 @@ fun MainLayout() {
             LocalPageTheme provides pageTheme,
             com.ikko.aura.ui.theme.LocalCoverColors provides coverColors,
             LocalPageMotion provides pageMotion,
-            LocalSheetDim provides { sheetDim.value },
+            // The page darkens as the card rises over it and lightens as it sinks — tied to the card rather
+            // than run on a clock of its own, which put a change of brightness on the screen that belonged to
+            // nothing one could see moving.
+            LocalSheetDim provides { sheetCard.dim },
             LocalSheetCard provides sheetCard,
             LocalTabCapsule provides capsule,
         ) {
@@ -335,6 +408,10 @@ fun MainLayout() {
             active = currentRoute != AuraDestination.NowPlaying.route,
             modifier = Modifier.fillMaxSize(),
         )
+        // Clipped to the card while it travels: the cover's wash is the player's own background, so above the
+        // card's top edge the page keeps the plain one it always has. Drawn full-screen through the whole
+        // travel instead, it darkened the page under the card and then lifted again — a dip in brightness
+        // that reads as a blink at both ends of the animation.
         AlbumArtBackground(
             artworkUri = backdrop.artworkUri,
             artworkKey = backdrop.artworkKey,
@@ -344,9 +421,28 @@ fun MainLayout() {
             // its way out is drawn above this and deliberately outside the record. See the
             // parameter's own note for what that buys.
             settledModifier = Modifier.layerBackdrop(glassBackdrop),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val edge = sheetCard.cardTop
+                    clip = edge > 0f
+                    if (clip) shape = BottomSlice(edge)
+                },
         )
-        Box(Modifier.fillMaxSize().layerBackdrop(pillBackdrop)) {
+        // Recorded only while something is there to refract it. This records the whole page into a layer
+        // every time the page draws, and while the player's card is over the mini player and the tab capsule
+        // — the only two things that sample it — that was a full-screen recording per frame of the card's
+        // travel, for a picture nobody was looking through.
+        val pageBackdropNeeded = showPill && !cardOverPill
+        // A layer of its own, before the recording. Without one, the page shares its picture with everything
+        // drawn beside it — the mini player, the tab capsule — so each frame of their own arrival had the
+        // whole page recorded again for a backdrop whose content had not changed.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { }
+                .then(if (pageBackdropNeeded) Modifier.layerBackdrop(pillBackdrop) else Modifier),
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -540,13 +636,13 @@ fun MainLayout() {
                 PlayerPillHost(
                     playerViewModel = playerViewModel,
                     backdrop = pillBackdrop,
-                    onOpenNowPlaying = { navController.navigate(AuraDestination.NowPlaying.route) },
+                    onOpenNowPlaying = { navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true } },
                     onHeightMeasured = { pillHeightPx = it },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .graphicsLayer {
-                            if (!showPill || sheetCard.floatValue < CARD_COVERS_PILL_BELOW) { alpha = 0f; return@graphicsLayer }
+                            if (!showPill || sheetCard.coversPill) { alpha = 0f; return@graphicsLayer }
                             val a = arrival.value
                             val speed = if (arrival.isRunning) {
                                 min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)

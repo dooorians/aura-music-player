@@ -77,8 +77,12 @@ object AuraMotion {
     const val SHEET_STIFFNESS = 650f
     const val SHEET_EXIT_MS = 320
 
-    /** How long the cover backdrop takes to come in behind the card (and, going, to leave). */
-    const val SHEET_ARTWORK_IN_MS = 110
+    /**
+     * The cover's wash comes in at once rather than fading: it is clipped to the card (see MainLayout), so
+     * there is nothing for it to flash over, and fading it in left the card darker than what it was about to
+     * become — a dip in brightness in the middle of the rise. Going, it leaves on the card's own clock.
+     */
+    const val SHEET_ARTWORK_IN_MS = 0
 
     /** Where the card's dark face has cleared completely, and from where the card itself starts to clear on the way down. */
     const val SHEET_FACE_CLEARS_BELOW = 0.12f

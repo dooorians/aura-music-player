@@ -120,7 +120,7 @@ class PlayerViewModel @Inject constructor(
             _positionMs.value = 0L
             _durationMs.value = player.duration.coerceAtLeast(0L)
             track?.let(::extractPalette)
-            track?.let { recentlyPlayedTracker.recordPlayed(it.albumId) }
+            track?.let { recentlyPlayedTracker.recordPlayed(it.albumId, it.id) }
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -192,7 +192,7 @@ class PlayerViewModel @Inject constructor(
         _positionMs.value = player.currentPosition.coerceAtLeast(0L)
         _durationMs.value = player.duration.coerceAtLeast(0L)
         extractPalette(track)
-        recentlyPlayedTracker.recordPlayed(track.albumId)
+        recentlyPlayedTracker.recordPlayed(track.albumId, track.id)
     }
 
     /**

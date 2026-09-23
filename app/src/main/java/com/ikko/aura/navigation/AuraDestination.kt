@@ -34,7 +34,8 @@ sealed class AuraDestination(val route: String) {
 
     companion object {
         /** Routes with no mini-player pill at all (their own full-bleed player UI). */
-        val fullScreenRoutes = setOf(NowPlaying.route, Lyrics.route)
+        /** Reached from the player and part of it: the mini player has no business on any of them. */
+        val fullScreenRoutes = setOf(NowPlaying.route, Lyrics.route, Queue.route, Equalizer.route)
 
         /** The pager's pages, in swipe order. Search is not one: it opens over whichever page is showing. */
         val topLevelRoutes = listOf(Home, Library, Settings)
