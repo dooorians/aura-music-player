@@ -8,7 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -497,10 +496,12 @@ private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isP
     ) {
     AnimatedVisibility(
         visible = currentLine != null,
-        // Scaled as well as faded: the capsule is a small object arriving, and something that
-        // only fades up at full size reads as a layer being switched on rather than as a thing
-        // appearing.
-        enter = fadeIn(tween(AuraMotion.PEER_MS)) + scaleIn(tween(AuraMotion.PEER_MS), initialScale = 0.92f),
+        // Faded in only, never scaled. The lyrics usually arrive while the card is still rising, which is
+        // when the glass takes the picture it keeps until the card lands (see GlassSettle): a capsule still
+        // growing from 92% sat a few pixels from where it would rest, so its glass took a slightly wrong
+        // picture and corrected itself just after landing — a flash from one look to another. It still
+        // shrinks as it leaves: nothing is being pictured then.
+        enter = fadeIn(tween(AuraMotion.PEER_MS)),
         exit = fadeOut(tween(AuraMotion.PEER_MS)) + scaleOut(tween(AuraMotion.PEER_MS), targetScale = 0.92f),
     ) {
         LiquidGlassPanel(
