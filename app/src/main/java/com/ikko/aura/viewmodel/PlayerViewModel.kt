@@ -25,10 +25,14 @@ import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -71,6 +75,7 @@ class PlayerViewModel @Inject constructor(
     private val recentlyPlayedTracker: RecentlyPlayedTracker,
     private val musicRepository: MusicRepository,
     private val settingsStore: SettingsStore,
+    private val playlistRepository: com.ikko.aura.data.playlist.PlaylistRepository,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -90,16 +95,22 @@ class PlayerViewModel @Inject constructor(
     private val _durationMs = MutableStateFlow(0L)
     val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
 
+    /** Wakes the position ticker below at once, rather than at the end of its paused sleep. */
+    private val tickerWake = Channel<Unit>(Channel.CONFLATED)
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _uiState.update { it.copy(isPlaying = isPlaying) }
+            tickerWake.trySend(Unit)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             _uiState.update { it.copy(isBuffering = playbackState == Player.STATE_BUFFERING) }
+            tickerWake.trySend(Unit)
         }
 
         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+            tickerWake.trySend(Unit)
             val player = boundPlayer ?: return
             val index = player.currentMediaItemIndex
             val track = _uiState.value.queue.getOrNull(index)
@@ -150,13 +161,29 @@ class PlayerViewModel @Inject constructor(
                     _durationMs.value = player.duration.coerceAtLeast(0L)
                 }
                 reconcileCurrentItem(player)
-                kotlinx.coroutines.delay(POSITION_TICK_MS)
+                // Paused, nothing moves: rather than waking twice a second for the whole time the app is
+                // open, it sleeps until the player says something changed (play, pause, a new item, a
+                // state change), and still looks in every few seconds in case an event never came.
+                if (player.isPlaying) {
+                    kotlinx.coroutines.delay(POSITION_TICK_MS)
+                } else {
+                    withTimeoutOrNull(PAUSED_TICK_MS) { tickerWake.receive() }
+                }
             }
         }
         viewModelScope.launch {
             settingsStore.automixEnabled.collect { enabled ->
                 _uiState.update { it.copy(automixEnabled = enabled) }
             }
+        }
+        // The heart shows whether the track playing is in Favoris — for each track, and kept on disk. It used to be
+        // a flag in memory only, the same for every track and gone when the app closed.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                _uiState.map { it.currentTrack?.id }.distinctUntilChanged(),
+                playlistRepository.favoriteTrackIds,
+            ) { id, favorites -> id != null && id in favorites }
+                .collect { favorite -> _uiState.update { it.copy(isFavorite = favorite) } }
         }
         audioOutputMonitor.start()
         viewModelScope.launch {
@@ -346,7 +373,12 @@ class PlayerViewModel @Inject constructor(
         playerController.setRepeatMode(next.toPlayerRepeatMode())
     }
 
-    fun toggleFavorite() = _uiState.update { it.copy(isFavorite = !it.isFavorite) }
+    /** Adds the track playing to Favoris, or takes it out. The heart answers at once; the playlist follows. */
+    fun toggleFavorite() {
+        val id = _uiState.value.currentTrack?.id ?: return
+        _uiState.update { it.copy(isFavorite = !it.isFavorite) }
+        viewModelScope.launch { playlistRepository.toggleFavorite(id) }
+    }
 
     /** Routes playback to one of the outputs in [PlayerUiState.audioOutput], or back to the system's. */
     fun selectAudioOutput(deviceId: Int?) = audioOutputMonitor.select(deviceId)
@@ -423,6 +455,7 @@ class PlayerViewModel @Inject constructor(
 
     companion object {
         private const val POSITION_TICK_MS = 500L
+        private const val PAUSED_TICK_MS = 5_000L
         /**
          * The same size the backdrop loads at, deliberately — and therefore the same cache
          * entry. At 256 this decoded the identical cover a second time on every track change,

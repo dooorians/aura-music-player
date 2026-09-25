@@ -113,6 +113,56 @@ fun AuraIconButton(
     }
 }
 
+/**
+ * Several icon buttons joined into one capsule of the round buttons' own glass — one fill, one rim, one light —
+ * the way a toolbar groups related actions. Each [AuraGroupIcon] inside is still its own button, with its own
+ * press; the capsule itself does nothing when touched.
+ */
+@Composable
+fun AuraIconGroup(
+    modifier: Modifier = Modifier,
+    light: Float = 45f,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .drawBehind { drawRect(NeutralFill) }
+            .playerRim(CircleShape, ICON_RIM_STRENGTH, light),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** One button of an [AuraIconGroup]: a square slot of [size], its glyph sinking under the finger like a tile's. */
+@Composable
+fun AuraGroupIcon(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 46.dp,
+    content: @Composable () -> Unit,
+) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) GROUP_PRESSED_SCALE else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessVeryLow, visibilityThreshold = 0.0004f),
+        label = "group-icon-press",
+    )
+    CompositionLocalProvider(LocalContentColor provides Color.White) {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clickable(interactionSource = source, indication = null, onClick = onClick)
+                .graphicsLayer { scaleX = scale; scaleY = scale },
+            contentAlignment = Alignment.Center,
+        ) { content() }
+    }
+}
+
+/** A glyph inside a group sinks a little further than a whole tile does, so the press still reads on its own. */
+private const val GROUP_PRESSED_SCALE = 0.88f
+
 /** A selectable tile: the pale one when chosen, the dark one otherwise. */
 @Composable
 fun AuraChip(

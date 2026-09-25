@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
@@ -70,6 +71,28 @@ class GlassSettle {
     /** Read while drawing, so setting it redraws the glass once — which is how the resting picture is taken. */
     var offset: Offset by androidx.compose.runtime.mutableStateOf(Offset.Zero)
     var frozen: Boolean = false
+
+    /**
+     * The travelling screen's own content — inside its movement — and where that content's origin sits in
+     * the window when the screen is at rest (outside its movement). Set by the screen from its layout.
+     *
+     * With these, a surface works out exactly where it will rest, whatever the screen's movement is made of.
+     * [offset] alone only undoes a vertical shift, and the player's card is also narrowed while it travels
+     * (to 90% at the mini player): the glass sampled its backdrop up to a hundred pixels from where it would
+     * at rest, and jumped to the right picture when it was let go — the flash at the end of the opening.
+     */
+    var anchor: androidx.compose.ui.layout.LayoutCoordinates? = null
+    var restOrigin: Offset = Offset.Zero
+
+    /** How far [coordinates] are from where they will rest, in the window; null when that cannot be told. */
+    fun restShift(coordinates: androidx.compose.ui.layout.LayoutCoordinates?): Offset? {
+        val anchor = anchor ?: return null
+        val coordinates = coordinates ?: return null
+        if (!anchor.isAttached || !coordinates.isAttached) return null
+        return runCatching {
+            coordinates.positionInWindow() - (restOrigin + anchor.localPositionOf(coordinates, Offset.Zero))
+        }.getOrNull()
+    }
 }
 
 val LocalGlassSettle = androidx.compose.runtime.staticCompositionLocalOf<GlassSettle?> { null }
@@ -326,7 +349,12 @@ private class DrawBackdropNode(
         }
         onDrawBackdrop {
             // Sampled as if the screen were already at rest, while it is travelling — see [GlassSettle].
-            val settle = currentValueOf(LocalGlassSettle)?.offset ?: Offset.Zero
+            val glassSettle = currentValueOf(LocalGlassSettle)
+            val settle = if (glassSettle != null && (glassSettle.frozen || glassSettle.offset != Offset.Zero)) {
+                glassSettle.restShift(layoutCoordinates) ?: glassSettle.offset
+            } else {
+                Offset.Zero
+            }
             translate(settle.x, settle.y) {
                 with(backdrop) {
                     drawBackdrop(

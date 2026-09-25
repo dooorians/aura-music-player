@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.playlist
 
+import com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -99,7 +100,8 @@ fun PlaylistScreen(
                         color = AuraColors.TextSecondary,
                     )
                 }
-                Box {
+                // Favoris is kept: no renaming or deleting it, so no menu.
+                if (current.id != FAVORITES_PLAYLIST_ID) Box {
                     AuraIconButton(onClick = { menuExpanded = true }) {
                         Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", modifier = Modifier.size(20.dp))
                     }
@@ -133,7 +135,11 @@ fun PlaylistScreen(
             if (current.tracks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
+                        text = if (current.id == FAVORITES_PLAYLIST_ID) {
+                            "Touche le cœur dans le lecteur pour ajouter un titre ici"
+                        } else {
+                            "Ajoute des titres à cette playlist depuis un album ou la bibliothèque"
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = AuraColors.TextSecondary,
                     )

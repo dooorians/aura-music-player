@@ -28,6 +28,16 @@ interface PlaylistDao {
     @Insert
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long
 
+    /** Creates it only if there is no playlist with its id yet — for the Favoris playlist, made on demand. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistIfAbsent(playlist: PlaylistEntity)
+
+    @Query("SELECT COALESCE(MIN(position), 1) - 1 FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun firstPosition(playlistId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun containsTrack(playlistId: Long, trackId: String): Int
+
     @Query("DELETE FROM playlists WHERE id = :playlistId")
     suspend fun deletePlaylist(playlistId: Long)
 

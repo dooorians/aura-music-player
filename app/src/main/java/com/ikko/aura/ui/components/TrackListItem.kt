@@ -82,10 +82,6 @@ fun TrackListItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (track.isHiRes) {
-                    Spacer(Modifier.width(6.dp))
-                    HiResBadge(isHiRes = true, hasExternalDac = false)
-                }
             }
         }
         if (trailingContent != null) {

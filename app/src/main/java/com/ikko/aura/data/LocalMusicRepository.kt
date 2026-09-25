@@ -55,15 +55,28 @@ class LocalMusicRepository @Inject constructor(
         hasScanned = true
         _isScanning.value = true
         try {
-            val initial = canonicaliseAlbums(queryMediaStore())
+            val scan = queryMediaStore()
+            val cached = withContext(Dispatchers.IO) { propertiesCache.read() }
+            // Everything already measured goes in straight away, so the library is complete from its
+            // first emission and only new or changed files are left for the extractor.
+            val initial = canonicaliseAlbums(scan.tracks).map { track ->
+                cached[track.id]?.takeIf { it.stamp == scan.stamps[track.id] }
+                    ?.let { track.withProperties(it.properties) }
+                    ?: track
+            }
             _tracks.value = initial
-            enrichAudioProperties(initial)
+            enrichAudioProperties(initial, scan.stamps, cached)
         } finally {
             _isScanning.value = false
         }
     }
 
-    private suspend fun queryMediaStore(): List<Track> = withContext(Dispatchers.IO) {
+    private val propertiesCache by lazy { AudioPropertiesCache(java.io.File(context.filesDir, "audio_properties.tsv")) }
+
+    /** What MediaStore listed, and each file's modification stamp for [AudioPropertiesCache]. */
+    private class Scan(val tracks: List<Track>, val stamps: Map<String, String>)
+
+    private suspend fun queryMediaStore(): Scan = withContext(Dispatchers.IO) {
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
@@ -76,11 +89,14 @@ class LocalMusicRepository @Inject constructor(
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.DATE_MODIFIED,
+            MediaStore.Audio.Media.SIZE,
         )
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         val results = mutableListOf<Track>()
+        val stamps = HashMap<String, String>()
         context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -92,9 +108,12 @@ class LocalMusicRepository @Inject constructor(
             val trackNumberCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
             val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+            val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
+                stamps[id.toString()] = "${cursor.getLong(modifiedCol)}:${cursor.getLong(sizeCol)}"
                 val contentUri = ContentUris.withAppendedId(collection, id)
                 val rawTrackNumber = cursor.getInt(trackNumberCol)
 
@@ -114,32 +133,59 @@ class LocalMusicRepository @Inject constructor(
                 )
             }
         }
-        results
+        Scan(results, stamps)
     }
 
-    private suspend fun enrichAudioProperties(initial: List<Track>) = withContext(Dispatchers.IO) {
-        if (initial.isEmpty()) return@withContext
-        val enriched = initial.toMutableList()
-        var lastEmitAt = System.currentTimeMillis()
+    /**
+     * Opens only the files [AudioPropertiesCache] has no current measurement for, then writes the
+     * cache back if anything changed (a new or modified file, or one that has gone).
+     *
+     * Opening every file on every launch cost ~41% of a core for ~18 s after each cold start (437
+     * files, measured on the device), re-emitting the whole library twice a second while it went.
+     * The answer is the same as long as the file is, so it is kept, stamped with the file's
+     * modification date and size.
+     */
+    private suspend fun enrichAudioProperties(
+        initial: List<Track>,
+        stamps: Map<String, String>,
+        cached: Map<String, AudioPropertiesCache.Entry>,
+    ) = withContext(Dispatchers.IO) {
+        val fresh = HashMap<String, AudioPropertiesCache.Entry>(initial.size)
+        val toMeasure = ArrayList<Int>()
         initial.forEachIndexed { index, track ->
-            val properties = MetadataExtractor.extract(context, track.contentUri, null)
-            enriched[index] = track.copy(
-                format = properties.format,
-                sampleRateHz = properties.sampleRateHz,
-                bitDepth = properties.bitDepth,
-                bitrateKbps = properties.bitrateKbps,
-            )
-            val now = System.currentTimeMillis()
-            if (now - lastEmitAt >= ENRICHMENT_EMIT_INTERVAL_MS) {
-                _tracks.value = enriched.toList()
-                lastEmitAt = now
-            }
-            // Yield between files so thumbnail decoding for on-screen items isn't
-            // starved of IO/binder time by this background scan on low-end SoCs.
-            delay(ENRICHMENT_STEP_DELAY_MS)
+            val stamp = stamps[track.id] ?: return@forEachIndexed
+            val known = cached[track.id]?.takeIf { it.stamp == stamp }
+            if (known != null) fresh[track.id] = known else toMeasure += index
         }
-        _tracks.value = enriched.toList()
+        if (toMeasure.isNotEmpty()) {
+            val enriched = initial.toMutableList()
+            var lastEmitAt = System.currentTimeMillis()
+            for (index in toMeasure) {
+                val track = initial[index]
+                val properties = MetadataExtractor.extract(context, track.contentUri, null)
+                enriched[index] = track.withProperties(properties)
+                stamps[track.id]?.let { fresh[track.id] = AudioPropertiesCache.Entry(it, properties) }
+                val now = System.currentTimeMillis()
+                if (now - lastEmitAt >= ENRICHMENT_EMIT_INTERVAL_MS) {
+                    _tracks.value = enriched.toList()
+                    lastEmitAt = now
+                }
+                // Yield between files so thumbnail decoding for on-screen items isn't
+                // starved of IO/binder time by this background scan on low-end SoCs.
+                delay(ENRICHMENT_STEP_DELAY_MS)
+            }
+            _tracks.value = enriched.toList()
+        }
+        if (toMeasure.isNotEmpty() || fresh.size != cached.size) propertiesCache.write(fresh)
     }
+
+    /** Exactly what a fresh measurement puts on the track, whether it was just made or read back. */
+    private fun Track.withProperties(properties: TrackAudioProperties) = copy(
+        format = properties.format,
+        sampleRateHz = properties.sampleRateHz,
+        bitDepth = properties.bitDepth,
+        bitrateKbps = properties.bitrateKbps,
+    )
 
     /**
      * Puts every track of an album under one album id, whatever MediaStore thinks.

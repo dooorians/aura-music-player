@@ -3,6 +3,9 @@ package com.ikko.aura.ui.screens.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -36,6 +39,7 @@ import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.AuraIconButton
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.scrollTopBlur
 import com.ikko.aura.ui.components.SquircleCard
 import com.ikko.aura.ui.components.TrackListItem
 import com.ikko.aura.ui.components.clipOnce
@@ -54,13 +58,13 @@ import com.ikko.aura.viewmodel.PlayerViewModel
  */
 private val PAGE_MARGIN = 21.dp
 
-/** Favourites, as Apple Music shows a library: three across, two down, and no row to scroll sideways. */
+/** Favourites: one row of three covers, nothing under them (the user's choice), and no row to scroll sideways. */
 private const val FAVOURITE_COLUMNS = 3
-private const val FAVOURITE_ROWS = 2
+private const val FAVOURITE_ROWS = 1
 private val GRID_SPACING = 13.dp
 
-/** Covers narrower than their column, so six of them don't dominate the page the way a full-bleed grid did. */
-private const val FAVOURITE_COVER_FRACTION = 0.8f
+/** The covers fill their columns: narrower, the gaps between them read as uneven. */
+private const val FAVOURITE_COVER_FRACTION = 1f
 
 @Composable
 fun HomeScreen(
@@ -70,12 +74,18 @@ fun HomeScreen(
 ) {
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
 
-    GradientScreenScaffold {
+    val scroll = rememberScrollState()
+    val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    // The page runs under the status bar: its inset is inside the scroll, not around it, so at rest nothing
+    // moves, and scrolled, the content melts into the bar instead of stopping at a line below it.
+    GradientScreenScaffold(applyStatusBarInset = false) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(top = 8.dp),
+                // The same blurred top as the library's once the page is scrolled (see topBlur).
+                .scrollTopBlur(topInset = statusBar) { scroll.value.toFloat() }
+                .verticalScroll(scroll)
+                .padding(top = statusBar + 8.dp),
         ) {
             SectionTitle(title = "Favoris")
             if (uiState.favoriteAlbums.isEmpty()) {
@@ -187,36 +197,17 @@ private fun FavouriteGrid(albums: List<Album>, navController: NavHostController)
 
 @Composable
 private fun AlbumCell(album: Album, navController: NavHostController, modifier: Modifier = Modifier) {
-    val cover = LocalCoverColors.current
-    Column(modifier = modifier) {
-        SquircleCard(
-            modifier = Modifier.fillMaxWidth(FAVOURITE_COVER_FRACTION).aspectRatio(1f),
-            onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
-        ) {
-            AlbumArt(
-                uri = album.artworkUri,
-                contentDescription = album.title,
-                modifier = Modifier.fillMaxSize(),
-                targetSizeDp = 180.dp,
-                cacheKey = album.id.toString(),
-            )
-        }
-        Text(
-            text = album.title,
-            style = LibraryTypography.AlbumTitle,
-            color = Color.White,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 9.dp),
-        )
-        Text(
-            text = album.artist,
-            style = LibraryTypography.AlbumArtist,
-            color = cover.tint.copy(alpha = 0.72f),
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
+    // The cover alone: its title and artist are still read out (contentDescription), just not written under it.
+    SquircleCard(
+        modifier = modifier.fillMaxWidth(FAVOURITE_COVER_FRACTION).aspectRatio(1f),
+        onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+    ) {
+        AlbumArt(
+            uri = album.artworkUri,
+            contentDescription = "${album.title}, ${album.artist}",
+            modifier = Modifier.fillMaxSize(),
+            targetSizeDp = 120.dp,
+            cacheKey = album.id.toString(),
         )
     }
 }

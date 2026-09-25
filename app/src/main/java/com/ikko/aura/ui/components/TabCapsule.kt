@@ -187,7 +187,7 @@ fun TabCapsule(
 
     LaunchedEffect(selectedIndex) {
         chosen = selectedIndex
-        if (!dragging) rest.animateTo(selectedIndex.toFloat(), androidx.compose.animation.core.spring(0.8f, 520f, 0.001f))
+        if (!dragging) rest.animateTo(selectedIndex.toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
     }
     // The tab lit up (filled icon, white label) is the one the pastille is nearest to.
     val displayIndex by remember { derivedStateOf { if (dragging) (finger + 0.5f).toInt() else chosen } }
@@ -247,7 +247,7 @@ fun TabCapsule(
                                 // Hand over from the finger's position to the resting one without a jump.
                                 rest.snapTo(from)
                                 grip.snapTo(0f)
-                                rest.animateTo(index.toFloat(), androidx.compose.animation.core.spring(0.8f, 520f, 0.001f))
+                                rest.animateTo(index.toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
                             }
                             currentOnSelect(Tabs[index].filter)
                         }
@@ -277,7 +277,9 @@ fun TabCapsule(
                         .padding(TAB_PAD)
                         .layout { measurable, constraints ->
                             val gap = TAB_GAP.roundToPx()
-                            val w = (constraints.maxWidth - (Tabs.size - 1) * gap) / Tabs.size
+                            // Never below zero: measured narrower than its gaps for a frame at launch, it asked for a
+                            // negative width and crashed the app.
+                            val w = ((constraints.maxWidth - (Tabs.size - 1) * gap) / Tabs.size).coerceAtLeast(0)
                             val placeable = measurable.measure(Constraints.fixed(w, constraints.maxHeight))
                             layout(constraints.maxWidth, constraints.maxHeight) {
                                 placeable.place((shownAt() * (w + gap)).roundToInt(), 0)
@@ -353,3 +355,6 @@ fun capsuleWanted(page: Float, dragging: Boolean, scrolledAway: Boolean, onTabs:
 fun capsuleBottom(reservedForPlayer: Dp, navBar: Dp, hasPlayer: Boolean): Dp =
     // The touch box is 1.5 dp taller than the drawing at each end, hence the extra 1.5 off.
     if (hasPlayer) reservedForPlayer + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP.dp - 7.5.dp else navBar + 10.5.dp
+
+/** The capsule's highlight settling on its tab: barely a bounce (~0.3% overshoot; it was 0.8, ~1.5%). */
+private const val CAPSULE_REST_DAMPING = 0.88f

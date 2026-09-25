@@ -53,6 +53,9 @@ import com.ikko.aura.ui.components.backdrop.GlassSettle
 import com.ikko.aura.ui.components.backdrop.LocalGlassSettle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
+import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawWithContent
@@ -73,6 +76,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +100,7 @@ import com.ikko.aura.ui.components.SweepLyricLine
 import com.ikko.aura.ui.components.WavyProgressBar
 import com.ikko.aura.ui.components.rememberLyricClock
 import com.ikko.aura.ui.components.LiquidGlassPanel
+import com.ikko.aura.ui.components.horizontalEdgeBlur
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraMotion
 import com.ikko.aura.ui.components.FillableIcon
@@ -129,14 +134,17 @@ private val PlayTint = Color(0xFFF3C7D5)
 private val PlayGlyph = Color(0xFF6E1B36)
 private val NeutralGlassTint = Color(0xFF121212)
 
-/** The card's face while it is a card: the dark grey Apple's is. */
-private val SheetFaceColor = Color(0xFF2C2B2C)
-
 /** What the card is doing: one animation at a time, keyed on this. */
 private enum class SheetPhase { Settled, Closing, Away }
 
-/** How close to rest the card lets its glass go live again, as a fraction of the screen's height. */
-private const val UNFREEZE_BELOW = 0.012f
+/** How visible the card is while it renders unseen before showing: enough to be rendered, not to be seen. */
+private const val WARMING_ALPHA = 0.01f
+
+/** The longest a closing card waits for the page under it to be composed again before it goes down anyway. */
+private const val PAGE_WAIT_MS = 250L
+
+/** The longest the card waits, hidden, for the player to draw before it shows anyway. */
+private const val READY_TIMEOUT_MS = 400L
 
 @Composable
 fun NowPlayingScreen(
@@ -152,7 +160,6 @@ fun NowPlayingScreen(
     /** The shared card; see below. */
     sheetCard: com.ikko.aura.SheetCard = remember { com.ikko.aura.SheetCard() },
     /** The record's own deep colour, for the card's face. */
-    faceTint: Color = SheetFaceColor,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
@@ -199,22 +206,51 @@ fun NowPlayingScreen(
 
     val token = remember { Any() }
     remember(token) {
-        sheetCard.claim(token, if (sheetOpening) AuraMotion.SHEET_PILL_TOP_FRACTION else 0f)
+        // Opening from the mini player, the card stays hidden until this screen has drawn (see
+        // SheetCard.ready): the mini player holds the place until then.
+        sheetCard.claim(
+            token,
+            if (sheetOpening) AuraMotion.SHEET_PILL_TOP_FRACTION else 0f,
+            ready = !sheetOpening,
+        )
         token
     }
     DisposableEffect(token) { onDispose { sheetCard.release(token) } }
 
+    // Set the moment this screen itself closes the player (the swipe down, the back button), so the card starts
+    // going down at once rather than whenever the navigation has worked out what its own pop was. Deduced from
+    // the navigation alone, the close waited 100–190 ms for the page under it to be rebuilt and this screen to
+    // be recomposed (latency), and could be read as "leaving sideways" if that recomposition came before the
+    // navigation's own transition had said it was a close (no animation at all).
+    var closeRequested by remember { mutableStateOf(false) }
+    fun close() {
+        if (closeRequested) return
+        closeRequested = true
+        navController.popBackStack()
+    }
     val phase = when {
+        closeRequested || sheetClosing -> SheetPhase.Closing
         // Left for a page of its own (an album, the queue, the lyrics): there is no card any more, and the
         // player leaves whole, by its own sideways transition.
         leavingSideways -> SheetPhase.Away
-        sheetClosing -> SheetPhase.Closing
         else -> SheetPhase.Settled
     }
+    // The system back button, the same way: without this it went to NavHost's own pop and waited like the swipe.
+    BackHandler(enabled = phase == SheetPhase.Settled && sheetCard.owner === token) { close() }
     LaunchedEffect(phase) {
+        if (phase != SheetPhase.Settled) sheetCard.markReady()
+        sheetCard.sinking = phase == SheetPhase.Closing
         when (phase) {
             SheetPhase.Away -> sheetCard.edge = 1f
             SheetPhase.Closing -> {
+                // Down only once there is a page under the card to be uncovered. The page is let go shortly after
+                // the player opens (AuraMotion.SHEET_HOLD_MS) and is composed again by the pop: that takes a few
+                // frames, and a card already on its way down would have shown nothing around it meanwhile.
+                // Usually ~60 ms; bounded, so the card always goes.
+                withTimeoutOrNull(PAGE_WAIT_MS) {
+                    snapshotFlow { sheetCard.pagesComposed }.first { it > 0 }
+                    withFrameNanos { }
+                }
                 // Already at rest, so the picture the glass has is the one to keep: nothing to compensate.
                 // In a try/finally: a close interrupted mid-flight (opened again, or left sideways, before
                 // it finished) cancels this coroutine inside animate(), and without the finally the glass
@@ -235,10 +271,14 @@ fun NowPlayingScreen(
                 // animation begun in the meantime spends its first moves unseen and then jumps.
                 // The first draw can still be a half-built screen, so a couple of frames more: what rises has
                 // to be the finished player, never an empty card that fills in afterwards.
-                drawnOnce.first { it }
-                repeat(3) { withFrameNanos { } }
-                // One frame drawn as the card will rest, then held there for the rise. Let go again just
-                // before the end, so the last frames sample where they really are and nothing steps.
+                // Bounded, so a card can never stay hidden: past it the player shows as it is.
+                withTimeoutOrNull(READY_TIMEOUT_MS) {
+                    drawnOnce.first { it }
+                    repeat(3) { withFrameNanos { } }
+                }
+                // One frame drawn as the card will rest, then held there for the whole rise: the glass samples
+                // exactly where each panel will rest (see GlassSettle.restShift), so the picture it holds is
+                // the final one and letting go at the end changes nothing.
                 settle.offset = Offset(0f, sheetCard.edge * cardHeightPx)
                 withFrameNanos { }
                 settle.frozen = true
@@ -249,23 +289,28 @@ fun NowPlayingScreen(
                         animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
                     ) { value, _ ->
                         sheetCard.edge = value
-                        if (settle.frozen && value < UNFREEZE_BELOW) {
-                            settle.frozen = false
-                            settle.offset = Offset.Zero
+                        // Shown — and the mini player gone — in the first frame the card has actually moved,
+                        // never sitting still at the pill's place: all the waiting (drawing, rendering, taking
+                        // the glass's resting picture) happened while it was still unseen.
+                        if (!sheetCard.ready && value < AuraMotion.SHEET_PILL_TOP_FRACTION) {
+                            sheetCard.markReady()
                         }
                     }
                 } finally {
                     settle.frozen = false
                     settle.offset = Offset.Zero
+                    sheetCard.markReady()
                 }
             }
         }
     }
-    val sinking = phase == SheetPhase.Closing
     CompositionLocalProvider(LocalGlassSettle provides settle) {
     Box(
         Modifier
             .fillMaxSize()
+            // Where the card's content sits when the card is at rest (outside its movement), and the content
+            // itself (inside it): what the glass needs to sample where it will rest. See GlassSettle.
+            .onGloballyPositioned { settle.restOrigin = it.positionInWindow() }
             .graphicsLayer {
                 val o = sheetCard.edge.let { if (it >= 1f) 0f else it }
                 translationY = o * size.height
@@ -281,22 +326,17 @@ fun NowPlayingScreen(
                 // Gone by the time it reaches the mini player, which takes its place — on the way down only.
                 // Coming up it stays opaque: a layer that is see-through at all has to be drawn to a buffer of
                 // its own and composited, and doing that to a full screen, every frame, is dear.
-                alpha = if (sinking) {
-                    1f - ((o - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)).coerceIn(0f, 1f)
-                } else {
-                    1f
-                }
+                // Still getting ready: in place and rendered — its glass, its covers, all of it — but at 1%, under
+                // the mini player, so the first frame anyone sees is a finished one. Moved off screen instead, it
+                // was composed but never rendered, and its first real render was the frame it appeared in:
+                // 48 ms, and empty.
+                alpha = if (!sheetCard.ready) WARMING_ALPHA else sheetCard.cardAlpha
             }
-            // The card's face: opaque while it is away from full screen — it hides what is under it — grey where
-            // it is furthest down and the record's own deep colour as it nears the top, and clearing only in
-            // the last of the way, when the player's own backdrop has long since come in behind it.
-            .drawBehind {
-                val o = sheetCard.edge.let { if (it >= 1f) 0f else it }
-                val alpha = (o / AuraMotion.SHEET_FACE_CLEARS_BELOW).coerceIn(0f, 1f)
-                val grey = (o / AuraMotion.SHEET_START_FRACTION).coerceIn(0f, 1f)
-                drawRect(androidx.compose.ui.graphics.lerp(faceTint, SheetFaceColor, grey).copy(alpha = alpha))
-            }
+            // No face of its own: through its whole travel the card shows the player's own background — the
+            // cover's wash, drawn behind the page and cut to the card's shape (see MainLayout) — rather than an
+            // opaque grey that only gave way to it at the very top.
             .onSizeChanged { cardHeightPx = it.height }
+            .onGloballyPositioned { settle.anchor = it }
             .drawWithContent {
                 drawContent()
                 if (!drawnOnce.value) drawnOnce.value = true
@@ -320,7 +360,7 @@ fun NowPlayingScreen(
                             when {
                                 abs(dx) > abs(dy) && dx <= -threshold -> viewModel.skipNext()
                                 abs(dx) > abs(dy) && dx >= threshold -> viewModel.skipPrevious()
-                                dy >= threshold -> navController.popBackStack()
+                                dy >= threshold -> close()
                             }
                         },
                     ) { change, drag ->
@@ -329,7 +369,9 @@ fun NowPlayingScreen(
                         change.consume()
                     }
                 }
-                .padding(horizontal = SCREEN_PADDING, vertical = 10.dp),
+                // The side margin is on each block rather than here, so the seek bar alone can span the screen's
+                // full width to catch a thumb at the edge (it draws itself inset by the same margin).
+                .padding(vertical = 10.dp),
             // Evenly distributed rather than stacked with fixed gaps: every block below has a
             // fixed height, so on this panel the leftover would otherwise pool into one dead gap
             // in the middle. Spreading it reproduces the mockup's even rhythm, and it absorbs the
@@ -337,57 +379,71 @@ fun NowPlayingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            LyricCapsule(
-                lyricsState = lyricsState,
-                positionMs = positionMs,
-                isPlaying = uiState.isPlaying,
-            )
+            Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
+                LyricCapsule(
+                    lyricsState = lyricsState,
+                    positionMs = positionMs,
+                    isPlaying = uiState.isPlaying,
+                    // The line being sung is the way into all of them.
+                    onClick = { navController.navigate(AuraDestination.Lyrics.route) },
+                )
+            }
 
-            HeroPanel(
-                currentTrack = uiState.currentTrack,
-                queueIndex = uiState.queueIndex,
-                onOpenLyrics = { navController.navigate(AuraDestination.Lyrics.route) },
-                onOpenAlbum = { albumId ->
-                    navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
-                },
-                onOpenArtist = { artistId ->
-                    navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
-                },
-            )
+            Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
+                HeroPanel(
+                    currentTrack = uiState.currentTrack,
+                    queueIndex = uiState.queueIndex,
+                    onOpenAlbum = { albumId ->
+                        navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
+                    },
+                    onOpenArtist = { artistId ->
+                        navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
+                    },
+                )
+            }
 
             WavyProgressBar(
                 positionMs = positionMs,
                 durationMs = durationMs,
                 isPlaying = uiState.isPlaying,
                 onSeek = viewModel::seekTo,
+                // The full width of the screen, drawn inset by the page's margin: its touch area reaches the edges
+                // and is kept out of Android's back gesture — grabbing the bar from the side went back instead.
+                edgeInset = SCREEN_PADDING,
             )
 
-            TransportRow(
-                isPlaying = uiState.isPlaying,
-                onPrevious = viewModel::skipPrevious,
-                onPlayPause = viewModel::togglePlayPause,
-                onNext = viewModel::skipNext,
-            )
+            Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
+                TransportRow(
+                    isPlaying = uiState.isPlaying,
+                    onPrevious = viewModel::skipPrevious,
+                    onPlayPause = viewModel::togglePlayPause,
+                    onNext = viewModel::skipNext,
+                )
+            }
 
-            UtilityRow(
-                isFavorite = uiState.isFavorite,
-                automixEnabled = uiState.automixEnabled,
-                shuffleEnabled = uiState.shuffleEnabled,
-                repeatMode = uiState.repeatMode,
-                audioOutput = uiState.audioOutput,
-                onFavoriteToggle = viewModel::toggleFavorite,
-                onAutomixToggle = viewModel::toggleAutomix,
-                onShuffleToggle = viewModel::toggleShuffle,
-                onRepeatCycle = viewModel::cycleRepeatMode,
-                onPickOutput = { showOutputPicker = true },
-            )
+            Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
+                UtilityRow(
+                    isFavorite = uiState.isFavorite,
+                    automixEnabled = uiState.automixEnabled,
+                    shuffleEnabled = uiState.shuffleEnabled,
+                    repeatMode = uiState.repeatMode,
+                    audioOutput = uiState.audioOutput,
+                    onFavoriteToggle = viewModel::toggleFavorite,
+                    onAutomixToggle = viewModel::toggleAutomix,
+                    onShuffleToggle = viewModel::toggleShuffle,
+                    onRepeatCycle = viewModel::cycleRepeatMode,
+                    onPickOutput = { showOutputPicker = true },
+                )
+            }
 
-            UpNextPanel(
-                queue = uiState.queue,
-                queueIndex = uiState.queueIndex,
-                onOpenQueue = { navController.navigate(AuraDestination.Queue.route) },
-                onJumpTo = viewModel::jumpToQueueIndex,
-            )
+            Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
+                UpNextPanel(
+                    queue = uiState.queue,
+                    queueIndex = uiState.queueIndex,
+                    onOpenQueue = { navController.navigate(AuraDestination.Queue.route) },
+                    onJumpTo = viewModel::jumpToQueueIndex,
+                )
+            }
         }
     }
     }
@@ -410,7 +466,7 @@ fun NowPlayingScreen(
  * lyrics having failed rather than as the singing having stopped.
  */
 @Composable
-private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: Long, isPlaying: Boolean) {
+private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: Long, isPlaying: Boolean, onClick: () -> Unit) {
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
     val currentLine = remember(lines, positionMs) { lines?.currentLineAt(positionMs) }
     // No words on screen, no clock: a gap capsule draws three static dots and a track with no
@@ -444,7 +500,18 @@ private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: Long, isPlaying
         enter = fadeIn(tween(AuraMotion.PEER_MS)) + scaleIn(tween(AuraMotion.PEER_MS), initialScale = 0.92f),
         exit = fadeOut(tween(AuraMotion.PEER_MS)) + scaleOut(tween(AuraMotion.PEER_MS), targetScale = 0.92f),
     ) {
-        LiquidGlassPanel(shape = ChipShape, contentAlignment = Alignment.Center) {
+        LiquidGlassPanel(
+            shape = ChipShape,
+            contentAlignment = Alignment.Center,
+            // Opens the full lyrics. No ripple across the glass: the page it opens is the answer to the tap.
+            modifier = Modifier
+                .clip(ChipShape)
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                ),
+        ) {
             AnimatedContent(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                 targetState = currentLine,
@@ -483,6 +550,9 @@ private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: Long, isPlaying
     }
 }
 
+/** How far the up-next row scrolls before its start is fully softened. */
+private val UP_NEXT_EDGE_RAMP = 24.dp
+
 /** Long enough to read as a dissolve, short enough that a quick couplet does not lag behind. */
 private const val LYRIC_CROSSFADE_MS = 180
 
@@ -498,29 +568,31 @@ private val LYRIC_SLOT_HEIGHT = 36.dp
 private fun List<LyricLine>.currentLineAt(positionMs: Long): LyricLine? =
     lastOrNull { it.timeMs <= positionMs }
 
-/** Cover, "En lecture" chip, title and artist — the mockup's dominant block. */
+/** Cover, title and artist — the mockup's dominant block. */
 @Composable
 private fun HeroPanel(
     currentTrack: Track?,
     queueIndex: Int,
-    onOpenLyrics: () -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
 ) {
+    // The cover, title and artist slide through the queue as one block across the panel's whole width.
+    var panelWidthPx by remember { mutableIntStateOf(0) }
     LiquidGlassPanel(shape = PanelShape, modifier = Modifier.fillMaxWidth()) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onSizeChanged { panelWidthPx = it.width }
             .clip(PanelShape)
             .padding(13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The cover is the way into the full lyrics, with or without an `.lrc` — the lyrics screen
-        // says so itself when there are none, which is more use than a dead tap target.
+        // The cover opens its album, as a cover does everywhere else in the app; the lyrics are opened from
+        // the lyric bubble above.
         AnimatedContent(
             targetState = queueIndex to currentTrack,
             transitionSpec = {
-                AuraMotion.queueSlide(forward = targetState.first >= initialState.first)
+                AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
             },
             modifier = Modifier.size(HERO_ART_SIZE),
             label = "hero-art",
@@ -533,30 +605,19 @@ private fun HeroPanel(
                 cacheKey = shown?.albumId?.toString(),
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable(onClick = onOpenLyrics),
+                    .then(if (shown == null) Modifier else Modifier.clickable { onOpenAlbum(shown.albumId) }),
             )
         }
 
         Spacer(Modifier.width(12.dp))
 
+        // No "En lecture" chip above the title any more (removed at the user's request): the title and artist
+        // sit centred beside the cover on their own.
         Column(modifier = Modifier.weight(1f)) {
-            Box(
-                modifier = Modifier
-                    .background(AuraColors.GlassFill, ChipShape)
-                    .border(0.5.dp, AuraColors.GlassBorder, ChipShape)
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    text = "En lecture",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AuraColors.TextSecondary,
-                )
-            }
-            Spacer(Modifier.height(6.dp))
             AnimatedContent(
                 targetState = queueIndex to currentTrack,
                 transitionSpec = {
-                    AuraMotion.queueSlide(forward = targetState.first >= initialState.first)
+                    AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
                 },
                 label = "hero-label",
             ) { (_, shown) ->
@@ -847,8 +908,22 @@ private fun UpNextPanel(
                 color = AuraColors.TextTertiary,
             )
         } else {
+            val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val rampPx = with(androidx.compose.ui.platform.LocalDensity.current) { UP_NEXT_EDGE_RAMP.toPx() }
             LazyRow(
-                modifier = Modifier.fillMaxHeight().weight(1f),
+                state = rowState,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f)
+                    // What passes either end blurs a little and fades rather than being cut off by a straight
+                    // line: the start once the row has moved, the end while there is more to come.
+                    .horizontalEdgeBlur(
+                        start = {
+                            if (rowState.firstVisibleItemIndex > 0) 1f
+                            else (rowState.firstVisibleItemScrollOffset / rampPx).coerceIn(0f, 1f)
+                        },
+                        end = { if (rowState.canScrollForward) 1f else 0f },
+                    ),
                 contentPadding = PaddingValues(end = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,

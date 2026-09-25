@@ -85,7 +85,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-private val PAGE_PADDING = 22.dp
+private val PAGE_PADDING = 21.dp // the other pages' margin (it was 22)
 private val ART_SIZE = 96.dp
 private val ART_SHAPE = RoundedCornerShape(24.dp)
 private val ACTION_HEIGHT = 44.dp
@@ -266,6 +266,13 @@ private fun StatusBarScrim(solid: Color, listState: LazyListState) {
 
 private const val SCRIM_RAMP_PX = 260f
 
+/**
+ * The header starts where the other pages' titles do — Home's "Favoris", the library's "Bibliothèque",
+ * "Réglages": 21 dp under the status bar (8 dp of margin, then a 56 dp title row centring a 30 sp line). At 10 dp
+ * it sat noticeably higher than everything else in the app (the user's report).
+ */
+private val HEADER_TOP_BELOW_STATUS = 21.dp
+
 @Composable
 private fun AlbumHeader(
     uiState: AlbumUiState,
@@ -282,7 +289,7 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + 10.dp, bottom = 18.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Box(
@@ -501,7 +508,9 @@ private fun PlayingBars(color: Color, animate: Boolean) {
             }
         }
     }
-    Canvas(modifier = Modifier.size(width = 16.dp, height = 15.dp)) {
+    // Its own layer, so each step of the bars re-records these three bars and not the page around them:
+    // without one the redraw lands on the nearest enclosing layer, the album page's list.
+    Canvas(modifier = Modifier.size(width = 16.dp, height = 15.dp).graphicsLayer()) {
         val barWidth = 3.dp.toPx()
         val gap = (size.width - barWidth * 3) / 2
         val t = clock.floatValue

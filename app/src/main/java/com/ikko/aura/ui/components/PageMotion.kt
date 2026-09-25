@@ -53,8 +53,11 @@ import kotlinx.coroutines.launch
  */
 object PageMotionSpec {
     // --- Pages ---
-    /** The settle after a release. Low bounce: one overshoot of about six dp, no more. */
-    const val PAGE_DAMPING = 0.75f
+    /**
+     * The settle after a release. A very light bounce: one overshoot of about 0.6% of the way travelled
+     * (~7 px over a whole page), where 0.75 gave ~2.8% (~30 px) and read as bouncy.
+     */
+    const val PAGE_DAMPING = 0.85f
     const val PAGE_STIFFNESS = 140f
 
     /** The target page is the nearest to where the page would be this long after release. */
@@ -66,11 +69,6 @@ object PageMotionSpec {
     /** How far past either end the pages may be pulled, in pages, and how much of the finger counts there. */
     const val EDGE_OVERSHOOT_PAGES = 0.06f
     const val EDGE_RESISTANCE = 0.35f
-
-    // --- Followers: how far behind the page an element trails ---
-    const val TRAIL_TITLE_S = 0.015f
-    const val TRAIL_COLUMN_BASE_S = 0.020f
-    const val TRAIL_COLUMN_STEP_S = 0.018f
 
     // --- Tab capsule ---
     const val CAPSULE_HEIGHT_DP = 45f
@@ -101,7 +99,8 @@ object PageMotionSpec {
 
     // --- List fade (top only) ---
     const val FADE_TOP_LENGTH_DP = 77f
-    const val FADE_TOP_AFTER_SCROLL_DP = 20f
+    /** How far a page is scrolled before its top fade is complete: it grows with the scroll up to here. */
+    const val FADE_TOP_RAMP_DP = 80f
 }
 
 /** The page position, shared with whatever should react to it. */
@@ -292,37 +291,6 @@ fun PagedContainer(
             }
         }
     }
-}
-
-/**
- * How far behind the page an element trails, as a position: a critically damped follower of the page
- * position with a time constant of [delaySec]. The offset to apply is `(page position - this) * width`
- * — zero at rest, largest at the page's peak speed, which is what makes the content feel liquid.
- */
-@Composable
-fun rememberTrail(motion: PageMotionState?, delaySec: Float): State<Float> {
-    val x = remember { mutableFloatStateOf(motion?.p ?: 0f) }
-    LaunchedEffect(motion, delaySec) {
-        if (motion == null) return@LaunchedEffect
-        var v = 0f
-        var lastNanos = 0L
-        val w = 2f / delaySec
-        snapshotFlow { motion.p }.collectLatest { target ->
-            while (abs(target - x.floatValue) > 1e-4f || abs(v) > 1e-3f) {
-                val now = androidx.compose.runtime.withFrameNanos { it }
-                val dt = if (lastNanos == 0L) 0.011f else ((now - lastNanos) / 1e9f).coerceIn(0.001f, 0.05f)
-                lastNanos = now
-                // Exact step of a critically damped spring toward a fixed target: stable at any dt.
-                val y = x.floatValue - target
-                val decay = exp(-w * dt)
-                val c = v + w * y
-                x.floatValue = target + (y + c * dt) * decay
-                v = (v - c * w * dt) * decay
-            }
-            lastNanos = 0L
-        }
-    }
-    return x
 }
 
 /** The soft diagonal light that crosses a glass surface while things move: 105 degrees, white at 20% in the middle. */

@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -104,6 +105,10 @@ fun SweepLyricLine(
             onTextLayout = { layout = it },
             modifier = Modifier
                 .fillMaxWidth()
+                // Its own layer, so each frame of the sweep re-records this text alone. Without one the
+                // redraw falls to the nearest enclosing layer, which in the player is its whole content.
+                // Not clipped, so the glow below can still spill past the text's bounds.
+                .graphicsLayer()
                 .drawWithContent {
                     val result = layout ?: return@drawWithContent
                     val revealed = line.revealedChars(positionProvider())

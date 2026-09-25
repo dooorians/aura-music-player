@@ -2,6 +2,7 @@ package com.ikko.aura.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -52,7 +54,7 @@ import androidx.compose.foundation.layout.PaddingValues
 
 /**
  * The one thing a long list and a long grid are asked for identically — where am I, and take me
- * there — behind one name, so [AlphabetIndex] and [ScrollToTopButton] work over either without
+ * there — behind one name, so [AlphabetIndex] (and its double tap to the top) works over either without
  * caring which they were handed.
  */
 @Stable
@@ -112,29 +114,25 @@ const val INDEX_OTHER = '#'
 val INDEX_LETTERS: List<Char> = listOf(INDEX_OTHER) + ('A'..'Z')
 
 /**
- * PowerAmp's alphabet strip: a thin column of letters down the right edge that scrubs the list
- * as a finger runs over it.
+ * PowerAmp's alphabet strip, made invisible: a column down the right edge that scrubs the list as a finger runs
+ * over it, with nothing drawn — no letters, no pill behind them (the user's choice, cleaner). Only the magnified
+ * letter shows, beside the finger, while it scrubs.
  *
- * Dragging rather than tapping is the point — the whole alphabet is a few hundred pixels tall,
- * so every letter is a target far under the touch minimum and tapping one accurately is not
- * realistic. Held as a scrub, the size stops mattering: the finger lands roughly and slides to
- * the letter, with the magnified bubble saying where it is. Each new letter ticks the haptics,
- * which is what makes it usable without looking.
- *
- * [available] dims the letters nothing files under, so the strip tells the truth about a library
- * with no Q in it rather than jumping to the nearest thing.
+ * Dragging rather than tapping is the point: the finger lands roughly and slides, with the bubble saying where it
+ * is and each new letter ticking the haptics, so it works without looking. A double tap in the same zone goes
+ * back to the top of the list — it replaced the back-to-top button. A single tap still jumps to the letter under
+ * it. Letters nothing files under are skipped, so a library with no Q never jumps to the nearest thing.
  */
 @Composable
 fun AlphabetIndex(
     available: Set<Char>,
-    current: Char?,
     onLetterPicked: (Char) -> Unit,
+    onDoubleTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
     var stripHeightPx by remember { mutableIntStateOf(0) }
     var activeIndex by remember { mutableStateOf<Int?>(null) }
-    val cover = LocalCoverColors.current
 
     fun pick(y: Float) {
         if (stripHeightPx <= 0) return
@@ -149,32 +147,21 @@ fun AlphabetIndex(
         }
     }
 
-    // Drawn rather than composed. Twenty-seven Text nodes laid out with SpaceEvenly cannot be
-    // made smaller than their line height, so on a short list area the strip simply overflowed
-    // and the last letters fell off the bottom — the one thing an index must never do. Measured
-    // once and drawn into slots computed from the height actually available, it always fits,
-    // and it costs one node instead of twenty-seven.
-    val measurer = rememberTextMeasurer()
-    val glyphs = remember(measurer) {
-        INDEX_LETTERS.map { measurer.measure(AnnotatedString(it.toString()), LibraryTypography.IndexLetter) }
-    }
-    val currentGlyphs = remember(measurer) {
-        INDEX_LETTERS.map { measurer.measure(AnnotatedString(it.toString()), LibraryTypography.IndexLetterCurrent) }
-    }
-
-    // The touch zone is the strip's own height and 40 dp wide: the strip drawn inside it, a hand's breadth
-    // narrower than the finger that scrubs it.
+    // The touch zone is the strip's old place: its height, and 40 dp wide at the screen's edge.
     Box(modifier = modifier, contentAlignment = Alignment.TopEnd) {
-        Canvas(
+        Box(
             modifier = Modifier
                 .width(TOUCH_WIDTH)
                 .height(STRIP_HEIGHT)
                 .onSizeChanged { stripHeightPx = it.height }
                 .pointerInput(available) {
                     detectTapGestures(
-                        onPress = { offset ->
+                        onDoubleTap = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDoubleTap()
+                        },
+                        onTap = { offset ->
                             pick(offset.y)
-                            tryAwaitRelease()
                             activeIndex = null
                         },
                     )
@@ -188,38 +175,10 @@ fun AlphabetIndex(
                         change.consume()
                     }
                 },
-        ) {
-            val stripWidth = STRIP_WIDTH.toPx()
-            val stripLeft = size.width - STRIP_MARGIN.toPx() - stripWidth
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.07f),
-                topLeft = Offset(stripLeft, 0f),
-                size = androidx.compose.ui.geometry.Size(stripWidth, size.height),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(stripWidth / 2f),
-            )
-            val slot = size.height / INDEX_LETTERS.size
-            val tint = cover.tint
-            INDEX_LETTERS.forEachIndexed { index, letter ->
-                val isCurrent = index == activeIndex || (activeIndex == null && letter == current)
-                val glyph = if (isCurrent) currentGlyphs[index] else glyphs[index]
-                drawText(
-                    textLayoutResult = glyph,
-                    color = when {
-                        isCurrent -> cover.accent
-                        letter in available -> tint.copy(alpha = 0.90f)
-                        else -> tint.copy(alpha = 0.36f)
-                    },
-                    topLeft = Offset(
-                        x = stripLeft + (stripWidth - glyph.size.width) / 2f,
-                        y = slot * index + (slot - glyph.size.height) / 2f,
-                    ),
-                )
-            }
-        }
+        )
 
         // The magnified letter, parked beside whichever row the finger is on rather than centred
-        // on the screen: it belongs to the strip, and level with the finger it can be read
-        // without the hand being in the way.
+        // on the screen: level with the finger it can be read without the hand being in the way.
         val shown = activeIndex
         if (shown != null && stripHeightPx > 0) {
             val slotHeight = stripHeightPx.toFloat() / INDEX_LETTERS.size
@@ -247,7 +206,7 @@ fun AlphabetIndex(
     }
 }
 
-/** 13 dp wide and 253 tall, 10 dp in from the screen's edge. */
+/** Where the strip was drawn — 13 dp wide, 10 dp in from the edge — still places the bubble; 253 dp tall. */
 private val STRIP_WIDTH = 13.dp
 private val STRIP_HEIGHT = 253.dp
 private val STRIP_MARGIN = 10.dp
@@ -260,24 +219,3 @@ private val BUBBLE_GAP = 10.dp
  * out, so the strip can hold still on the screen while the header above the list folds away.
  */
 val LocalIndexStripShift = androidx.compose.runtime.compositionLocalOf<() -> Float> { { 0f } }
-
-/**
- * Appears once a list is more than half scrolled and takes it back to the top.
- *
- * Past halfway is the point where flicking back is a chore rather than a gesture — before it,
- * a button would be in the way of the content it is meant to help with.
- */
-@Composable
-fun ScrollToTopButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    AuraButton(
-        onClick = onClick,
-        modifier = modifier,
-        minHeight = 36.dp,
-        contentPadding = PaddingValues(horizontal = 14.dp),
-    ) {
-        Text(
-            text = "↑  Haut de la liste",
-            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-        )
-    }
-}

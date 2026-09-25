@@ -22,6 +22,8 @@ import com.ikko.aura.player.smart.TransitionTrackInfo
 import com.ikko.aura.player.smart.planTransition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -201,6 +203,7 @@ class CrossfadeController(
     /** Which player this class's own listener is currently attached to. */
     private var listeningTo: ExoPlayer? = null
     private var tickerJob: Job? = null
+    private val wake = Channel<Unit>(Channel.CONFLATED)
 
     /** Length of the transition in flight, in ms. Fixed when it begins. */
     private var fadeMs = 0L
@@ -318,6 +321,11 @@ class CrossfadeController(
         settledAt.takeIf { it != 0L }?.let { SystemClock.elapsedRealtime() - it }
 
     private val listener = object : Player.Listener {
+        // Wakes the ticker from its paused sleep the moment playback starts again (see [start]).
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            wake.trySend(Unit)
+        }
+
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -366,6 +374,13 @@ class CrossfadeController(
         tickerJob = scope.launch {
             while (isActive) {
                 tick()
+                // Idle and paused, there is nothing to arm or run: it sleeps until playback starts again
+                // instead of ticking four times a second on the main thread for as long as the service
+                // lives. It still looks in every couple of seconds, in case a wake-up was ever missed.
+                if (phase == Phase.IDLE && !active().isPlaying) {
+                    withTimeoutOrNull(PAUSED_STEP_MS) { wake.receive() }
+                    continue
+                }
                 delay(
                     when (phase) {
                         Phase.IDLE -> IDLE_STEP_MS
@@ -1635,6 +1650,7 @@ class CrossfadeController(
         const val BLEND_EXIT_LOW_PASS_HZ = 2_200.0
 
         const val IDLE_STEP_MS = 250L
+        const val PAUSED_STEP_MS = 2_000L
 
         /**
          * Arming only waits on a buffer now — nothing is being converged — so

@@ -15,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.unit.IntOffset
@@ -40,6 +41,18 @@ import androidx.compose.ui.unit.dp
 object AuraMotion {
     const val PEER_MS = 220
     const val PUSH_MS = 260
+
+    /**
+     * How long a push waits before moving: the new page's first frame, which is where it is built (~70 ms for
+     * an album page, measured).
+     */
+    const val PUSH_START_DELAY_MS = 80
+
+    /**
+     * The same for going back, which rebuilds the page underneath from nothing — the pager's Home, its covers and
+     * its lists: 120–130 ms, measured.
+     */
+    const val POP_START_DELAY_MS = 150
 
     /** Fraction of the container height the entering peer rises from — deliberately small. */
     private const val PEER_RISE_DIVISOR = 14
@@ -84,15 +97,17 @@ object AuraMotion {
      */
     const val SHEET_ARTWORK_IN_MS = 0
 
-    /** Where the card's dark face has cleared completely, and from where the card itself starts to clear on the way down. */
-    const val SHEET_FACE_CLEARS_BELOW = 0.12f
+    /** From where the card starts to clear on its way down, into the mini player. */
     const val SHEET_CLEAR_FROM = 0.70f
 
     val EaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
 
     /** How long the navigation transition holds the page under the card (and the card itself, on the way out) in place. */
     const val SHEET_HOLD_MS = 800
-    const val SHEET_EXIT_HOLD_MS = 380
+    // How long the navigation keeps the closing player: its card's whole way down (SHEET_EXIT_MS), after waiting
+    // up to 250 ms for the page under it to be composed again, with room to spare. At 380 the player was
+    // removed part-way down whenever the close started late — the card vanished before reaching the pill.
+    const val SHEET_EXIT_HOLD_MS = 650
 
     /** How dim the page behind goes, and how quickly. */
     const val SHEET_DIM = 0.45f
@@ -149,4 +164,30 @@ object AuraMotion {
             } + fadeOut(tween(QUEUE_SLIDE_MS))
             )
     }
+
+    /**
+     * The player's cover, title and artist moving through the queue as one block, as in the user's sketch
+     * ("le contenu glisse jusqu'au bord du cadre, puis inversement"). Each part travels the panel's whole width,
+     * [distancePx], unclipped by its own box — only the panel's edge cuts it — so the old block leaves by one
+     * side as the new one comes in from the other, never cut off half-way.
+     *
+     * Both sides ride the same spring, which keeps the parts of a block together (a curve for one and a spring
+     * for the other pulled them apart), and it overshoots by a hair (~2% of the width) before settling, so the
+     * block does not stop dead.
+     */
+    fun heroSlide(forward: Boolean, distancePx: Int): ContentTransform {
+        val sign = if (forward) 1 else -1
+        fun distance(width: Int) = if (distancePx > 0) distancePx else width
+        return ContentTransform(
+            targetContentEnter = slideInHorizontally(heroSlideSpring) { width -> sign * distance(width) },
+            initialContentExit = slideOutHorizontally(heroSlideSpring) { width -> -sign * distance(width) },
+            sizeTransform = SizeTransform(clip = false),
+        )
+    }
+
+    private val heroSlideSpring = spring(
+        dampingRatio = 0.78f,
+        stiffness = 300f,
+        visibilityThreshold = IntOffset(1, 1),
+    )
 }

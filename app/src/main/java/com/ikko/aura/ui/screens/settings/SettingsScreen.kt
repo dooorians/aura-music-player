@@ -1,8 +1,15 @@
 package com.ikko.aura.ui.screens.settings
 
 import androidx.compose.foundation.background
+import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.LibraryTypography
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -31,6 +39,7 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.BuildConfig
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.scrollTopBlur
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
@@ -54,18 +63,37 @@ fun SettingsScreen(
         )
     }
 
-    GradientScreenScaffold {
+    val listState = rememberLazyListState()
+    val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    // Runs under the status bar, its inset inside the list (see HomeScreen).
+    GradientScreenScaffold(applyStatusBarInset = false) {
         LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
+            state = listState,
+            // The same blurred top as the library's once the page is scrolled (see topBlur).
+            // Past the first row, the list counts as fully scrolled whatever that row's own offset.
+            modifier = Modifier.fillMaxWidth().scrollTopBlur(topInset = statusBar) {
+                if (listState.firstVisibleItemIndex > 0) Float.MAX_VALUE else listState.firstVisibleItemScrollOffset.toFloat()
+            },
+            contentPadding = PaddingValues(top = statusBar, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
-                Text(
-                    text = "Réglages",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = AuraColors.TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                )
+                // Set like the other pages' titles (Home's "Favoris", the library's "Bibliothèque"): the same face,
+                // size and cover tint, the same margin and header height.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .height(PAGE_HEADER_HEIGHT)
+                        .padding(horizontal = PAGE_MARGIN),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(
+                        text = "Réglages",
+                        style = LibraryTypography.PageTitle,
+                        color = LocalCoverColors.current.tint,
+                        maxLines = 1,
+                    )
+                }
             }
 
             item { SectionLabel("Paroles") }
@@ -106,7 +134,7 @@ fun SettingsScreen(
                         ?.let { "La lecture se met en pause dans $it min" }
                         ?: "Mettre la lecture en pause après un délai",
                     trailing = if (uiState.sleepMinutesLeft != null) {
-                        { Text("Annuler", style = MaterialTheme.typography.labelLarge, color = AuraColors.TextPrimary) }
+                        { Text("Annuler", style = LibraryTypography.AlbumArtist, color = Color.White) }
                     } else {
                         null
                     },
@@ -155,13 +183,29 @@ fun SettingsScreen(
     }
 }
 
+/** The margin and title height of the other pages (see HomeScreen). */
+private val PAGE_MARGIN = 21.dp
+private val PAGE_HEADER_HEIGHT = 56.dp
+
+// Rows set like the lists on the other pages: the title as a track's (white, bold), the line under it as its
+// artist's (the cover's tint), and section labels as the library's count.
+@Composable
+private fun RowTitle(text: String) {
+    Text(text = text, style = LibraryTypography.AlbumTitle, color = Color.White)
+}
+
+@Composable
+private fun RowSubtitle(text: String) {
+    Text(text = text, style = LibraryTypography.AlbumArtist, color = LocalCoverColors.current.tint.copy(alpha = 0.72f))
+}
+
 @Composable
 private fun SectionLabel(text: String) {
     Text(
         text = text.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        color = AuraColors.TextTertiary,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        style = LibraryTypography.PageCount,
+        color = LocalCoverColors.current.tint.copy(alpha = 0.66f),
+        modifier = Modifier.padding(start = PAGE_MARGIN, end = PAGE_MARGIN, top = 14.dp, bottom = 4.dp),
     )
 }
 
@@ -176,13 +220,13 @@ private fun SettingsSwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = AuraColors.TextSecondary)
+            RowTitle(title)
+            RowSubtitle(subtitle)
         }
         Switch(
             checked = checked,
@@ -209,13 +253,13 @@ private fun SettingsActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = AuraColors.TextSecondary)
+            RowTitle(title)
+            RowSubtitle(subtitle)
         }
         trailing?.invoke()
     }
@@ -226,11 +270,11 @@ private fun SettingsInfoRow(title: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(text = title, style = MaterialTheme.typography.bodyLarge, color = AuraColors.TextPrimary)
-        Text(text = value, style = MaterialTheme.typography.bodyLarge, color = AuraColors.TextSecondary)
+        RowTitle(title)
+        RowSubtitle(value)
     }
 }
 

@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Density
@@ -165,23 +166,60 @@ class SheetCard {
     var owner: Any? by mutableStateOf(null)
         internal set
 
-    /** Takes the card over, at [edge]. */
-    fun claim(token: Any, edge: Float) {
+    /**
+     * Whether the card has something to show. False from the tap on the mini player until the player has
+     * drawn itself, which takes a few frames: until then the card stays hidden and the mini player stays
+     * where it is, so what the eye sees is the pill, then the card with the player already in it — never
+     * an empty grey card at the pill's place (the blink on opening).
+     */
+    var ready by mutableStateOf(true)
+        internal set
+
+    /** Takes the card over, at [edge]. [ready] is false when the player still has to draw before it shows. */
+    fun claim(token: Any, edge: Float, ready: Boolean = true) {
         owner = token
         this.edge = edge
+        this.ready = ready
+        sinking = false
     }
+
+    fun markReady() {
+        ready = true
+    }
+
+    /**
+     * How many pages that can sit under the card are composed right now (see UnderSheet). A closing card waits
+     * for one: the page is let go while the player is open, and is composed again by the pop.
+     */
+    var pagesComposed by androidx.compose.runtime.mutableIntStateOf(0)
+        internal set
+
+    /** Set by the player while its card is going back down to the mini player (its Closing phase). */
+    var sinking by mutableStateOf(false)
+        internal set
+
+    /**
+     * How opaque the card is: fully, except on its way down, where it clears over the last of the way (from
+     * SHEET_CLEAR_FROM to the mini player) as the pill takes its place. The cover's wash behind it clears with
+     * it, and the page under it comes back through it, so nothing is left to appear at once when it has gone.
+     */
+    val cardAlpha: Float
+        get() = if (owner == null || !sinking) 1f else 1f - (
+            (edge - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)
+            ).coerceIn(0f, 1f)
 
     /** Gives it back, if it is still ours: another player may already have taken it. */
     fun release(token: Any) {
         if (owner === token) {
             owner = null
             edge = 1f
+            ready = true
+            sinking = false
         }
     }
 
-    /** How much of a page under the card is drawn, as a fraction of its height: all of it once the card has sunk. */
-    val pageBottom: Float
-        get() = if (owner == null || edge >= AuraMotion.SHEET_PILL_TOP_FRACTION) 1f else edge.coerceIn(0f, 1f)
+    /** True while the card is claimed but still hidden, waiting for the player to draw. */
+    val waitingToShow: Boolean get() = owner != null && !ready
 
     /** Whether the card is over the mini player and the tab capsule. */
     val coversPill: Boolean get() = owner != null && edge < CARD_COVERS_PILL_BELOW
@@ -220,14 +258,47 @@ val LocalSheetDim = androidx.compose.runtime.staticCompositionLocalOf<() -> Floa
 private fun UnderSheet(content: @Composable () -> Unit) {
     val dim = LocalSheetDim.current
     val card = LocalSheetCard.current
+    androidx.compose.runtime.DisposableEffect(card) {
+        card.pagesComposed++
+        onDispose { card.pagesComposed-- }
+    }
+    val cutout = remember { androidx.compose.ui.graphics.Path() }
+    val revealPaint = remember { androidx.compose.ui.graphics.Paint() }
     Box(
         Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                val edge = card.pageBottom
-                clip = edge < 1f
-                if (clip) shape = TopSlice(edge)
-            },
+            // The page is hidden under the card only — the card's own rectangle, as narrow as it is and with
+            // its rounded top corners — and drawn everywhere else. It used to be cut at the card's top edge in
+            // a straight line across the whole width, which left nothing at all (black) beside the narrower
+            // card and in the notches of its rounded corners: rounded and square at once.
+            //
+            // Cut for the card's whole travel: the card no longer has an opaque face of its own, it shows the
+            // player's own background (the cover's wash, drawn under the page), so nothing of the page may show
+            // inside it. On the way down, as the card clears into the mini player, the page comes back inside it
+            // at the same rate, so that once the card has gone nothing appears at once.
+            .drawWithContent {
+                val o = card.edge
+                if (card.owner == null || !card.ready || o >= 1f) {
+                    drawContent()
+                    return@drawWithContent
+                }
+                setToCard(cutout, o, size, AuraMotion.cornerAt(o).toPx())
+                clipPath(cutout, androidx.compose.ui.graphics.ClipOp.Difference) {
+                    this@drawWithContent.drawContent()
+                }
+                val reveal = 1f - card.cardAlpha
+                if (reveal > 0.004f) {
+                    clipPath(cutout) {
+                        revealPaint.alpha = reveal
+                        drawContext.canvas.saveLayer(Rect(Offset.Zero, size), revealPaint)
+                        this@drawWithContent.drawContent()
+                        drawContext.canvas.restore()
+                    }
+                }
+            }
+            // The page in a layer of its own, so a frame of the card's travel redraws the cut above and reuses
+            // the page's picture as it is.
+            .graphicsLayer { },
     ) {
         content()
         // Its own node, so the dimming — which animates on its own clock — costs one rectangle rather than
@@ -243,35 +314,55 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     }
 }
 
-/** Everything below the top [fraction] of a box. */
-private data class BottomSlice(private val fraction: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Rectangle(Rect(0f, size.height * fraction, size.width, size.height))
-}
-
-/** The top [fraction] of a box. */
-private data class TopSlice(private val fraction: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Rectangle(Rect(0f, 0f, size.width, size.height * fraction))
+/**
+ * Sets [path] to the player's card as NowPlayingScreen lays it out, in the coordinates of a full-screen box of
+ * [size]: pushed down by [edge] of the height, scaled about its top centre by 1 - SHEET_NARROWING * edge, with
+ * top corners of cornerAt(edge) ([radiusPx], before that scale). The page under the card is drawn outside
+ * this and the cover's wash inside it, so the two meet exactly at the card's own edge, corners included.
+ */
+private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size: Size, radiusPx: Float) {
+    val s = 1f - AuraMotion.SHEET_NARROWING * edge
+    val width = size.width * s
+    val left = (size.width - width) / 2f
+    val top = edge * size.height
+    val radius = androidx.compose.ui.geometry.CornerRadius(radiusPx * s)
+    path.reset()
+    path.addRoundRect(
+        androidx.compose.ui.geometry.RoundRect(
+            left = left,
+            top = top,
+            right = left + width,
+            bottom = top + size.height * s,
+            topLeftCornerRadius = radius,
+            topRightCornerRadius = radius,
+            bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius.Zero,
+            bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius.Zero,
+        ),
+    )
 }
 
 private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.NowPlaying.route
 
+// Every push and pop starts a little late (PUSH_/POP_START_DELAY_MS), both pages together. The page coming in is built in
+// the transition's first frame — an album page takes ~70 ms of it, measured — and the transition's clock was
+// already running through that frame: its next frame drew the slide a third of the way in, half-way along
+// this easing, and the rest played in a handful of frames (the jerk on opening an album). Waiting out that
+// first frame before moving anything lets the whole slide play, at its own pace, from its start.
 private fun pushEnter() =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { it / 4 } +
-        fadeIn(tween(AuraMotion.PUSH_MS))
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = FastOutSlowInEasing)) { it / 4 } +
+        fadeIn(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS))
 
 private fun pushExit() =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
-        fadeOut(tween(AuraMotion.PUSH_MS))
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
+        fadeOut(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS))
 
 private fun popEnter() =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
-        fadeIn(tween(AuraMotion.PUSH_MS))
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
+        fadeIn(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS))
 
 private fun popExit() =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { it / 4 } +
-        fadeOut(tween(AuraMotion.PUSH_MS))
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = FastOutSlowInEasing)) { it / 4 } +
+        fadeOut(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS))
 
 /**
  * The player and the full-screen lyrics are the two densest screens in the app and each is mostly
@@ -291,6 +382,9 @@ private fun throughExit(toLeft: Boolean) =
         fadeOut(tween(THROUGH_OUT_MS))
 
 private const val THROUGH_OUT_MS = 90
+
+/** The player's cover wash fading into the lyrics' aurora and back. */
+private const val LYRICS_WASH_FADE_MS = 300
 private const val THROUGH_DELAY_MS = 50
 
 @Composable
@@ -412,21 +506,48 @@ fun MainLayout() {
         // card's top edge the page keeps the plain one it always has. Drawn full-screen through the whole
         // travel instead, it darkened the page under the card and then lifted again — a dip in brightness
         // that reads as a blink at both ends of the animation.
+        val washClip = remember { androidx.compose.ui.graphics.Path() }
+        // Between the player and its lyrics the cover's wash cross-fades with the aurora the lyrics sit on, both
+        // ways, rather than cutting: it came on at once going back to the player and was dropped outright once the
+        // player had left for the lyrics. Only there — opening and closing the player keep their own timing.
+        val toLyrics = currentRoute == AuraDestination.Lyrics.route
+        val washFade by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (toLyrics) 0f else 1f,
+            animationSpec = tween(LYRICS_WASH_FADE_MS, easing = FastOutSlowInEasing),
+            label = "lyrics-wash-fade",
+        )
         AlbumArtBackground(
             artworkUri = backdrop.artworkUri,
             artworkKey = backdrop.artworkKey,
             fallbackColors = backdrop.meshColors,
-            forceArtwork = currentRoute == AuraDestination.NowPlaying.route,
+            // For as long as the card exists, not only while the route says "player": closing pops the route
+            // at the start of the gesture, before the card has moved, and the cover went (and the aurora came
+            // back behind the glass) while the card was still full screen — the flash on closing.
+            forceArtwork = currentRoute == AuraDestination.NowPlaying.route || sheetCard.owner != null,
             // Recorded around the settled backdrop only, not around the whole thing: the cover on
             // its way out is drawn above this and deliberately outside the record. See the
             // parameter's own note for what that buys.
             settledModifier = Modifier.layerBackdrop(glassBackdrop),
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer {
+                // Inside the card's own shape — its width and its rounded corners — rather than everything
+                // below its top edge: a straight cut across the whole width showed the wash (or black) beside
+                // the narrower card and in its corners. At 1% while the card is still getting ready, like the
+                // card itself: rendered, so the glass has it to sample, but unseen under the mini player.
+                .graphicsLayer { alpha = (if (sheetCard.waitingToShow) 0.01f else sheetCard.cardAlpha) * washFade }
+                .drawWithContent {
+                    // No card and not the player: the cover has nothing to fill. Its own fade-out would
+                    // otherwise run across the whole screen, over the page, once the card has gone. Except on
+                    // the way to the lyrics, until it has faded out there.
+                    val fadingToLyrics = toLyrics && washFade > 0f
+                    if (sheetCard.owner == null && currentRoute != AuraDestination.NowPlaying.route && !fadingToLyrics) return@drawWithContent
                     val edge = sheetCard.cardTop
-                    clip = edge > 0f
-                    if (clip) shape = BottomSlice(edge)
+                    if (edge <= 0f) {
+                        drawContent()
+                        return@drawWithContent
+                    }
+                    setToCard(washClip, edge, size, AuraMotion.cornerAt(edge).toPx())
+                    clipPath(washClip) { this@drawWithContent.drawContent() }
                 },
         )
         // Recorded only while something is there to refract it. This records the whole page into a layer
@@ -521,7 +642,6 @@ fun MainLayout() {
                         sheetClosing = leaving && sheetFlags.closing,
                         leavingSideways = leaving && !sheetFlags.closing,
                         sheetCard = sheetCard,
-                        faceTint = backdrop.theme.solid,
                     )
                 }
                 composable(AuraDestination.AlbumPattern.route) { backStack ->
@@ -631,7 +751,14 @@ fun MainLayout() {
                         .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) },
                 )
             }
-            val pillComposed by remember(showPill) { derivedStateOf { showPill || pillAlpha.value > 0f } }
+            // The player is being opened but has not claimed the card yet: the route changes a frame or more
+            // before the player's first composition, and the mini player stays until the card replaces it.
+            val playerComing = currentRoute == AuraDestination.NowPlaying.route
+            val pillComposed by remember(showPill) {
+                derivedStateOf {
+                    showPill || pillAlpha.value > 0f || sheetCard.waitingToShow || (playerComing && sheetCard.owner == null)
+                }
+            }
             if (pillComposed) {
                 PlayerPillHost(
                     playerViewModel = playerViewModel,
@@ -642,7 +769,10 @@ fun MainLayout() {
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .graphicsLayer {
-                            if (!showPill || sheetCard.coversPill) { alpha = 0f; return@graphicsLayer }
+                            // Kept, as it is, while the card waits for the player to draw: it goes in the
+                            // frame the card comes in (see SheetCard.ready), so the two never leave a gap.
+                            val waiting = sheetCard.waitingToShow || (playerComing && sheetCard.owner == null)
+                            if (!waiting && (!showPill || sheetCard.coversPill)) { alpha = 0f; return@graphicsLayer }
                             val a = arrival.value
                             val speed = if (arrival.isRunning) {
                                 min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)
@@ -653,7 +783,7 @@ fun MainLayout() {
                             scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
                             scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
                             translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                            alpha = pillAlpha.value * (1.6f * a).coerceIn(0f, 1f)
+                            alpha = (if (waiting) 1f else pillAlpha.value) * (1.6f * a).coerceIn(0f, 1f)
                         }
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         // Measured inside the window inset (which GradientScreenScaffold applies

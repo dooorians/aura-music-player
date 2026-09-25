@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.rememberCoroutineScope
 import com.ikko.aura.ui.components.AlphabetIndex
-import com.ikko.aura.ui.components.ScrollToTopButton
 import com.ikko.aura.ui.components.indexLetterOf
 import com.ikko.aura.ui.components.rememberScrollTarget
 import com.ikko.aura.ui.components.LocalIndexStripShift
@@ -110,12 +109,12 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import com.ikko.aura.ui.components.rememberTrail
 import com.ikko.aura.ui.components.LocalPageMotion
 import com.ikko.aura.ui.components.rememberCapsuleScrollConnection
 import com.ikko.aura.ui.components.TabCapsuleState
 import com.ikko.aura.ui.components.LocalTabCapsule
 import com.ikko.aura.ui.components.PageMotionSpec
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -124,6 +123,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import com.ikko.aura.ui.components.AuraChip
 import com.ikko.aura.ui.components.AuraIconButton
+import com.ikko.aura.ui.components.AuraIconGroup
+import com.ikko.aura.ui.components.AuraGroupIcon
 import com.ikko.aura.ui.components.ButtonTone
 import androidx.compose.foundation.layout.width
 
@@ -132,8 +133,10 @@ import androidx.compose.foundation.layout.width
  * 89 dp down, the count's 111, and the first row of covers starts at 129. One margin, 21 dp, at both sides.
  */
 private val PAGE_MARGIN = 21.dp
-private val TITLE_BASELINE = 89.dp
-private val COUNT_BASELINE = 111.dp
+// 2.4 dp higher than the mockup's 89 and 111: the title then sits at exactly the height of Home's "Favoris" and
+// Settings' "Réglages" (it was 6 px below them); the count and buttons follow it, the covers stay at 129.
+private val TITLE_BASELINE = 86.6.dp
+private val COUNT_BASELINE = 108.6.dp
 private val GRID_TOP = 129.dp
 private val HEADER_BUTTON = 47.dp
 private val STRIP_TOP = 119.dp
@@ -154,7 +157,9 @@ fun LibraryScreen(
 
     val density = LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
-    val headerHeight = GRID_TOP - statusBarTop
+    // The header folds away with the status bar's height included: the page runs under the bar (see HomeScreen),
+    // so once folded the list goes on up beneath it and melts into it. At rest the list starts where it did.
+    val headerHeight = GRID_TOP
     val headerHeightPx = with(density) { headerHeight.toPx() }
     var headerOffsetPx by rememberCollapseOffset()
     // Same rule as the top nav row: collapse while scrolling down, and only come back once the
@@ -188,13 +193,16 @@ fun LibraryScreen(
     val capsule = LocalTabCapsule.current
     val reduceMotion = LocalPageMotion.current?.reduceMotion == true
     // A new view starts at its top, so its header is back, and the capsule with it.
-    androidx.compose.runtime.LaunchedEffect(uiState.filter) { headerOffsetPx = 0f; capsule?.scrolledAway = false }
+    // Only on a real change of filter, though: this also runs when the page comes back into composition — back
+    // from an album opened further down — and it used to reopen the header there over a list still scrolled
+    // where it had been left. The filter last seen is saved with the page, so coming back is told apart.
+    var lastFilter by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<LibraryFilter?>(null) }
+    androidx.compose.runtime.LaunchedEffect(uiState.filter) {
+        if (lastFilter != null && lastFilter != uiState.filter) headerOffsetPx = 0f
+        lastFilter = uiState.filter
+        capsule?.scrolledAway = false
+    }
     val capsuleScroll = rememberCapsuleScrollConnection(capsule, density.density) { headerOffsetPx == 0f }
-    val topFade by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (headerOffsetPx < -PageMotionSpec.FADE_TOP_AFTER_SCROLL_DP * density.density) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(160),
-        label = "library-top-fade",
-    )
 
     /**
      * Puts the header where the new scroll position says it should be, after a jump the nested
@@ -203,6 +211,8 @@ fun LibraryScreen(
      */
     fun settleHeaderAfterJump(atTop: Boolean) {
         headerOffsetPx = if (atTop) 0f else -headerHeightPx
+        // Back at the top, the tab capsule belongs out too: the jump is no scroll, so nothing else brought it back.
+        if (atTop) capsule?.scrolledAway = false
     }
 
     val countText = when (uiState.filter) {
@@ -218,12 +228,17 @@ fun LibraryScreen(
         onLibraryChanged = libraryViewModel::rescan,
     ) { context ->
     val stripTopPx = with(density) { STRIP_TOP.toPx() }
-    val listTopBasePx = with(density) { statusBarTop.toPx() } + headerHeightPx
+    val listTopBasePx = headerHeightPx
     androidx.compose.runtime.CompositionLocalProvider(
         // The strip holds still on the screen — 119 dp from the top — while the header above the list folds.
         LocalIndexStripShift provides { stripTopPx - (listTopBasePx + headerOffsetPx) },
     ) {
-    GradientScreenScaffold {
+    GradientScreenScaffold(
+        applyStatusBarInset = false,
+        // On the whole page, not only the list: the header folds up under the status bar too, and has to melt into
+        // it the same way rather than slide under it sharp. Grows as the header collapses (see scrollTopBlur).
+        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { -headerOffsetPx },
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -233,7 +248,8 @@ fun LibraryScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(0, headerOffsetPx.roundToInt()) },
+                    .offset { IntOffset(0, headerOffsetPx.roundToInt()) }
+                    .padding(top = statusBarTop),
             ) {
                 LibraryHeader(
                     statusBarTop = statusBarTop,
@@ -257,8 +273,7 @@ fun LibraryScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .nestedScroll(headerScrollConnection)
-                .nestedScroll(capsuleScroll)
-                .topFade { topFade },
+                .nestedScroll(capsuleScroll),
         ) {
             // The four filters are peers, exactly like the top tabs, so they animate with the
             // same vocabulary — switching them used to swap content instantly with nothing at all.
@@ -341,15 +356,14 @@ private fun LibraryHeader(
     onSmartShuffle: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val motion = LocalPageMotion.current
-    val trail by rememberTrail(motion, PageMotionSpec.TRAIL_TITLE_S)
     val cover = LocalCoverColors.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(GRID_TOP - statusBarTop)
-            .padding(horizontal = PAGE_MARGIN)
-            .graphicsLayer { if (motion != null && !motion.reduceMotion) translationX = (motion.p - trail) * motion.widthPx },
+            // Moves with its page, like the headers of the other pages: it used to trail behind it, which on a
+            // fast swipe left it lagging and then catching up — a bounce of its own the other pages do not have.
+            .padding(horizontal = PAGE_MARGIN),
     ) {
         // Two texts stacked in one box, each placed by its own baseline from the top of the header, so the
         // title's baseline is at 89 dp and the count's at 111 dp whatever their line heights.
@@ -379,19 +393,23 @@ private fun LibraryHeader(
             AuraIconButton(onClick = openSearch, size = HEADER_BUTTON, light = 12f) {
                 Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(22.dp))
             }
-            // Not the plain shuffle: this one sequences the set so consecutive tracks are ones
-            // Automix can actually mix — see SmartShuffle.
-            AuraIconButton(onClick = onSmartShuffle, size = HEADER_BUTTON, light = 62f) {
-                Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(22.dp))
-            }
-            Box {
-                AuraIconButton(onClick = { menuExpanded = true }, size = HEADER_BUTTON, light = 100f) {
-                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(22.dp))
+            // Shuffle and sort share one capsule — the two ways of ordering the list, as a toolbar groups
+            // related actions — while search keeps its own round button.
+            AuraIconGroup(light = 80f) {
+                // Not the plain shuffle: this one sequences the set so consecutive tracks are ones
+                // Automix can actually mix — see SmartShuffle.
+                AuraGroupIcon(onClick = onSmartShuffle, size = HEADER_BUTTON) {
+                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(22.dp))
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Nom") }, onClick = { onSortSelected(LibrarySort.NAME); menuExpanded = false })
-                    DropdownMenuItem(text = { Text("Artiste") }, onClick = { onSortSelected(LibrarySort.ARTIST); menuExpanded = false })
-                    DropdownMenuItem(text = { Text("Date d'ajout") }, onClick = { onSortSelected(LibrarySort.DATE_ADDED); menuExpanded = false })
+                Box {
+                    AuraGroupIcon(onClick = { menuExpanded = true }, size = HEADER_BUTTON) {
+                        Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(22.dp))
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Nom") }, onClick = { onSortSelected(LibrarySort.NAME); menuExpanded = false })
+                        DropdownMenuItem(text = { Text("Artiste") }, onClick = { onSortSelected(LibrarySort.ARTIST); menuExpanded = false })
+                        DropdownMenuItem(text = { Text("Date d'ajout") }, onClick = { onSortSelected(LibrarySort.DATE_ADDED); menuExpanded = false })
+                    }
                 }
             }
         }
@@ -441,10 +459,6 @@ private fun AlbumGrid(
 ) {
     val gridState = rememberLazyGridState()
     val coverTint = LocalCoverColors.current.tint
-    val motion = LocalPageMotion.current
-    val trails = List(3) { column ->
-        rememberTrail(motion, PageMotionSpec.TRAIL_COLUMN_BASE_S + PageMotionSpec.TRAIL_COLUMN_STEP_S * column)
-    }
     IndexedList(
         target = rememberScrollTarget(gridState),
         onJumped = onJumped,
@@ -463,12 +477,10 @@ private fun AlbumGrid(
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
         itemsIndexed(albums, key = { _, album -> album.id }) { index, album ->
-            Column(
-                Modifier.graphicsLayer {
-                    val m = motion
-                    if (m != null && !m.reduceMotion) translationX = (m.p - trails[index % 3].value) * m.widthPx
-                },
-            ) {
+            // Moves with its page like everything else on the other pages. Each column used to trail behind it by
+            // its own delay (20 to 56 ms), so on a swipe the albums arrived one column after another, out of step
+            // with the rest.
+            Column {
                 SquircleCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -631,7 +643,12 @@ private fun PlaylistsList(
                         .background(AuraColors.GlassFill),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(CupertinoIcons.PlaylistMusic, contentDescription = null, tint = AuraColors.TextPrimary)
+                    // Favoris, pinned first, is marked with the heart that fills it.
+                    if (playlist.isFavorites) {
+                        Icon(CupertinoIcons.HeartFilled, contentDescription = null, tint = LocalCoverColors.current.accent)
+                    } else {
+                        Icon(CupertinoIcons.PlaylistMusic, contentDescription = null, tint = AuraColors.TextPrimary)
+                    }
                 }
                 Column(modifier = Modifier.padding(start = 12.dp)) {
                     Text(playlist.name, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
@@ -684,8 +701,8 @@ private inline fun <T> List<T>.indexKeysFor(sort: LibrarySort, keys: (T) -> Pair
     }
 
 /**
- * Wraps a list in the two things that make a long one navigable: PowerAmp's alphabet strip down
- * the right edge, and a way back to the top once scrolling back would be a chore.
+ * Wraps a list in what makes a long one navigable: PowerAmp's alphabet strip down the right edge,
+ * invisible, which also takes a double tap back to the top.
  *
  * Both read the scroll position in composition, which is what they are for — but only this
  * wrapper does, so a scroll invalidates this one composable and not the list inside it.
@@ -695,8 +712,8 @@ private fun IndexedList(
     target: ScrollTarget,
     indexKeys: List<String>?,
     /**
-     * Called after a jump that did not come from a finger on the list — the alphabet strip or the
-     * back-to-top button. [atTop] says where it landed.
+     * Called after a jump that did not come from a finger on the list — a letter, or the double tap
+     * back to the top. [atTop] says where it landed.
      *
      * The collapsing header is driven by nested scroll, and a programmatic scroll does not
      * produce any: jumping to the Ms left the header fully open above a list scrolled halfway
@@ -712,14 +729,9 @@ private fun IndexedList(
 
         if (indexKeys != null && indexKeys.size >= MIN_ITEMS_FOR_INDEX) {
             val available = remember(indexKeys) { indexKeys.map(::indexLetterOf).toSet() }
-            // The letter the list is at: that of the first row on screen.
-            val current by remember(target, indexKeys) {
-                derivedStateOf { indexKeys.getOrNull(target.firstVisibleIndex)?.let(::indexLetterOf) }
-            }
             val shift = LocalIndexStripShift.current
             AlphabetIndex(
                 available = available,
-                current = current,
                 onLetterPicked = { letter ->
                     val destination = indexKeys.indexOfFirst { indexLetterOf(it) == letter }
                     if (destination >= 0) {
@@ -727,35 +739,14 @@ private fun IndexedList(
                         onJumped(destination == 0)
                     }
                 },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset { IntOffset(0, shift().roundToInt()) },
-            )
-        }
-
-        // Derived rather than read straight: `firstVisibleIndex` and `layoutInfo` are snapshot
-        // state that moves on every single frame of a scroll, so reading them here recomposed
-        // this whole node — and re-invoked `content()`, the list itself — ninety times a second
-        // for a boolean that flips twice in a library. derivedStateOf keeps the reads inside its
-        // own observer and only notifies when the answer actually changes.
-        val pastHalfway by remember(target) {
-            derivedStateOf {
-                target.itemCount > 0 && target.firstVisibleIndex > target.itemCount / 2
-            }
-        }
-        AnimatedVisibility(
-            visible = pastHalfway,
-            enter = fadeIn(tween(AuraMotion.PEER_MS)) + slideInVertically { it / 2 },
-            exit = fadeOut(tween(AuraMotion.PEER_MS)) + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = listBottomPadding() + 14.dp),
-        ) {
-            ScrollToTopButton(
-                onClick = {
+                // A double tap in the (invisible) strip goes back to the top: it replaced the back-to-top button.
+                onDoubleTap = {
                     scope.launch { target.animateToTop() }
                     onJumped(true)
                 },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset { IntOffset(0, shift().roundToInt()) },
             )
         }
     }
@@ -763,6 +754,7 @@ private fun IndexedList(
 
 /** Below this a list fits in a couple of flicks and the strip is only in the way. */
 private const val MIN_ITEMS_FOR_INDEX = 25
+
 
 
 /** The room a list keeps at its end: the player's, plus the tab capsule's while it is out. */
@@ -773,28 +765,3 @@ private fun listBottomPadding(): androidx.compose.ui.unit.Dp {
     return LocalPlayerPillHeight.current +
         if (shown) (PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP).dp else 0.dp
 }
-
-/**
- * Once the list is scrolled, it dissolves under the status bar so covers do not run into the clock and
- * the icons. Nothing is faded at the bottom: the list runs on under the tab capsule and the player,
- * which blur what passes behind them.
- */
-private fun Modifier.topFade(strength: () -> Float): Modifier =
-    graphicsLayer { compositingStrategy = if (strength() > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
-        .drawWithContent {
-            drawContent()
-            val top = strength()
-            if (top > 0.001f) {
-                val topLen = PageMotionSpec.FADE_TOP_LENGTH_DP.dp.toPx()
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 1f - top),
-                        1f to Color.Black,
-                        startY = 0f,
-                        endY = topLen,
-                    ),
-                    size = androidx.compose.ui.geometry.Size(size.width, topLen),
-                    blendMode = BlendMode.DstIn,
-                )
-            }
-        }

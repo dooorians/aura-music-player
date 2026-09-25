@@ -1,12 +1,11 @@
 package com.ikko.aura.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.theme.AuraColors
@@ -71,6 +72,13 @@ fun WavyProgressBar(
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * How far in from its own edges the bar is drawn. Given the whole screen's width with this as its margin (in
+     * the player), it is drawn where it always was while its touch area runs to the screen's edges — where the
+     * page's margin had left a strip that belonged to Android's back gesture: grabbing the bar from the side went
+     * back instead of seeking. The whole width is kept out of the back gesture too.
+     */
+    edgeInset: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f),
 ) {
     var dragFraction by remember { mutableStateOf<Float?>(null) }
 
@@ -79,40 +87,57 @@ fun WavyProgressBar(
         ?: (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
     val displayedMs = (playedFraction * safeDuration).toLong()
 
-    val transition = rememberInfiniteTransition(label = "wavy-progress")
-    val phase = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(WAVE_CYCLE_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "wavy-progress-phase",
-    )
+    val waving = isPlaying && dragFraction == null
     // Flattening rather than freezing: a wave that simply stops mid-crest reads as a glitch,
     // whereas easing the amplitude to zero reads as the track settling.
     val amplitudeScale = animateFloatAsState(
-        targetValue = if (isPlaying && dragFraction == null) 1f else 0f,
+        targetValue = if (waving) 1f else 0f,
         animationSpec = tween(AMPLITUDE_SETTLE_MS),
         label = "wavy-progress-amplitude",
     )
+    // The wave's travel — one wavelength every WAVE_CYCLE_MS, as before — advanced by a frame loop that
+    // only runs while there is a wave to move: while playing, and on through the settle so it flattens
+    // while still travelling. This was an infinite transition, which asks for every frame for as long as
+    // the player is composed: a paused player drew nothing, but its main thread still woke ~90 times a
+    // second (17% of a core, measured) to step a value nobody read.
+    val phase = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(waving) {
+        if (!waving && amplitudeScale.value == 0f) return@LaunchedEffect
+        val runForMs = if (waving) Long.MAX_VALUE else AMPLITUDE_SETTLE_MS.toLong()
+        var last = -1L
+        var elapsed = 0L
+        while (elapsed < runForMs) {
+            withFrameMillis { now ->
+                if (last >= 0L) {
+                    val dt = now - last
+                    elapsed += dt
+                    phase.floatValue = (phase.floatValue + dt.toFloat() / WAVE_CYCLE_MS) % 1f
+                }
+                last = now
+            }
+        }
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Canvas(
+        androidx.compose.foundation.layout.Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(TRACK_HEIGHT)
-                .pointerInput(safeDuration) {
+                .systemGestureExclusion()
+                .pointerInput(safeDuration, edgeInset) {
+                    val over = edgeInset.toPx()
+                    val track = (size.width - 2 * over).coerceAtLeast(1f)
+                    fun fractionAt(x: Float) = ((x - over) / track).coerceIn(0f, 1f)
                     coroutineScope {
                         launch {
                             detectTapGestures { offset ->
-                                onSeek(((offset.x / size.width).coerceIn(0f, 1f) * safeDuration).toLong())
+                                onSeek((fractionAt(offset.x) * safeDuration).toLong())
                             }
                         }
                         launch {
                             detectHorizontalDragGestures(
                                 onDragStart = { offset ->
-                                    dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                                    dragFraction = fractionAt(offset.x)
                                 },
                                 onDragEnd = {
                                     dragFraction?.let { onSeek((it * safeDuration).toLong()) }
@@ -120,13 +145,23 @@ fun WavyProgressBar(
                                 },
                                 onDragCancel = { dragFraction = null },
                             ) { change, dragAmount ->
-                                val current = dragFraction ?: (change.position.x / size.width)
-                                dragFraction = (current + dragAmount / size.width).coerceIn(0f, 1f)
+                                val current = dragFraction ?: fractionAt(change.position.x)
+                                dragFraction = (current + dragAmount / track).coerceIn(0f, 1f)
                                 change.consume()
                             }
                         }
                     }
                 },
+        ) {
+        Canvas(
+            modifier = Modifier
+                .padding(horizontal = edgeInset)
+                .fillMaxSize()
+                // Its own layer, so a frame of wave motion re-records this canvas and nothing else.
+                // Without one the redraw lands on the nearest enclosing layer — the whole player's
+                // content — and the page, its glass and its text were re-recorded on every frame while
+                // a track played (~2 ms of main thread per frame, traced on the device).
+                .graphicsLayer(),
         ) {
             val centerY = size.height / 2f
             val strokePx = WAVE_STROKE.toPx()
@@ -147,7 +182,7 @@ fun WavyProgressBar(
                 // Read only while there is a wave to move. Not reading it is what unsubscribes
                 // this draw from the animation, so a paused track stops invalidating the canvas
                 // ninety times a second to redraw the same straight line.
-                val shift = if (amplitude > 0f) phase.value * wavelength else 0f
+                val shift = if (amplitude > 0f) phase.floatValue * wavelength else 0f
                 var x = start
                 path.moveTo(x, centerY)
                 while (x < thumbX) {
@@ -185,9 +220,10 @@ fun WavyProgressBar(
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbW / 2f),
             )
         }
+        }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = edgeInset + 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
