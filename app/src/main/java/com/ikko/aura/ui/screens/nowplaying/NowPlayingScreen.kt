@@ -382,7 +382,7 @@ fun NowPlayingScreen(
             Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
                 LyricCapsule(
                     lyricsState = lyricsState,
-                    positionMs = positionMs,
+                    positionMs = { positionMs },
                     isPlaying = uiState.isPlaying,
                     // The line being sung is the way into all of them.
                     onClick = { navController.navigate(AuraDestination.Lyrics.route) },
@@ -403,8 +403,9 @@ fun NowPlayingScreen(
             }
 
             WavyProgressBar(
-                positionMs = positionMs,
-                durationMs = durationMs,
+                // Providers, read inside the bar: the column around it no longer recomposes on every tick.
+                positionMs = { positionMs },
+                durationMs = { durationMs },
                 isPlaying = uiState.isPlaying,
                 onSeek = viewModel::seekTo,
                 // The full width of the screen, drawn inset by the page's margin: its touch area reaches the edges
@@ -466,7 +467,9 @@ fun NowPlayingScreen(
  * lyrics having failed rather than as the singing having stopped.
  */
 @Composable
-private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: Long, isPlaying: Boolean, onClick: () -> Unit) {
+private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isPlaying: Boolean, onClick: () -> Unit) {
+    // Read here rather than by the player's column: a playback tick recomposes the bubble alone.
+    val positionMs = positionMs()
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
     val currentLine = remember(lines, positionMs) { lines?.currentLineAt(positionMs) }
     // No words on screen, no clock: a gap capsule draws three static dots and a track with no

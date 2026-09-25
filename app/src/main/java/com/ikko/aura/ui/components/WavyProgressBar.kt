@@ -67,8 +67,9 @@ private const val AMPLITUDE_SETTLE_MS = 450
  */
 @Composable
 fun WavyProgressBar(
-    positionMs: Long,
-    durationMs: Long,
+    /** Read here, not by the caller, so a playback tick recomposes this bar and not the screen around it. */
+    positionMs: () -> Long,
+    durationMs: () -> Long,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -82,9 +83,9 @@ fun WavyProgressBar(
 ) {
     var dragFraction by remember { mutableStateOf<Float?>(null) }
 
-    val safeDuration = durationMs.coerceAtLeast(1L)
+    val safeDuration = durationMs().coerceAtLeast(1L)
     val playedFraction = dragFraction
-        ?: (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+        ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
     val displayedMs = (playedFraction * safeDuration).toLong()
 
     val waving = isPlaying && dragFraction == null
