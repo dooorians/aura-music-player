@@ -97,7 +97,7 @@ fun LyricsScreen(
                 }
                 is LyricsUiState.Available -> SyncedLyrics(
                     lines = state.lines,
-                    positionMs = positionMs,
+                    positionMs = { positionMs },
                     isPlaying = playerState.isPlaying,
                     onSeek = playerViewModel::seekTo,
                 )
@@ -109,10 +109,12 @@ fun LyricsScreen(
 @Composable
 private fun SyncedLyrics(
     lines: List<LyricLine>,
-    positionMs: Long,
+    positionMs: () -> Long,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
 ) {
+    // Read here rather than by the screen: a playback tick recomposes the list alone, not the header above it.
+    val positionMs = positionMs()
     val listState = rememberLazyListState()
     val clock = rememberLyricClock(positionMs, isPlaying)
 
