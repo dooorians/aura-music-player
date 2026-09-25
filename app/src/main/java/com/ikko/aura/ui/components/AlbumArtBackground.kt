@@ -152,7 +152,7 @@ fun AlbumArtBackground(
         remember { mutableFloatStateOf(0f) }
     }
 
-    var shown by remember { mutableStateOf<Bitmap?>(null) }
+    var shown by remember { mutableStateOf(bitmap) }
     var outgoing by remember { mutableStateOf<Bitmap?>(null) }
     // 1 while the outgoing cover is still fully there, 0 once it has gone.
     val leaving = remember { Animatable(0f) }
