@@ -183,6 +183,15 @@ class SheetCard {
         sinking = false
     }
 
+    /**
+     * Moves the card, if [token] still holds it. A player that has lost the card to a newer one keeps running its
+     * own animation until it is disposed, and it went on writing the card's position under the new player's feet:
+     * two animations on one card, which is what a stutter on reopening mid-close was.
+     */
+    fun move(token: Any, edge: Float) {
+        if (owner === token) this.edge = edge
+    }
+
     fun markReady() {
         ready = true
     }
@@ -217,6 +226,15 @@ class SheetCard {
             sinking = false
         }
     }
+
+    /**
+     * Whether a tap on the mini player may open the player now: no player holds the card, or the one that did has
+     * taken it all the way back down to the pill. Not while a card is on its way down — the mini player is
+     * invisible over it, yet it still caught taps, and each one started a new player that took the card from the
+     * closing one mid-flight: two players driving one card, the stutter on spamming the pill.
+     */
+    val acceptsOpen: Boolean
+        get() = owner == null || (sinking && edge >= AuraMotion.SHEET_PILL_TOP_FRACTION - 0.001f)
 
     /** True while the card is claimed but still hidden, waiting for the player to draw. */
     val waitingToShow: Boolean get() = owner != null && !ready
@@ -534,7 +552,13 @@ fun MainLayout() {
                 // below its top edge: a straight cut across the whole width showed the wash (or black) beside
                 // the narrower card and in its corners. At 1% while the card is still getting ready, like the
                 // card itself: rendered, so the glass has it to sample, but unseen under the mini player.
-                .graphicsLayer { alpha = (if (sheetCard.waitingToShow) 0.01f else sheetCard.cardAlpha) * washFade }
+                // Also at 1% in the frame or two between the tap and the player's first composition, when the route
+                // is already the player's but no card has been claimed: with no card to clip to, the wash was drawn
+                // across the whole screen at full strength — the cover's blur flashing over the aurora on opening.
+                .graphicsLayer {
+                    val playerNotYetThere = sheetCard.owner == null && currentRoute == AuraDestination.NowPlaying.route
+                    alpha = (if (sheetCard.waitingToShow || playerNotYetThere) 0.01f else sheetCard.cardAlpha) * washFade
+                }
                 .drawWithContent {
                     // No card and not the player: the cover has nothing to fill. Its own fade-out would
                     // otherwise run across the whole screen, over the page, once the card has gone. Except on
@@ -763,7 +787,17 @@ fun MainLayout() {
                 PlayerPillHost(
                     playerViewModel = playerViewModel,
                     backdrop = pillBackdrop,
-                    onOpenNowPlaying = { navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true } },
+                    onOpenNowPlaying = {
+                        // Once per opening. The mini player stays on screen (and under the finger) until the player's card
+                        // replaces it, and every further tap navigated to the player again: launchSingleTop still swaps
+                        // the entry for a new one, which tore the player down and built it again from the start — the
+                        // card went back to the pill each time, and for a frame there was no card at all, so the
+                        // cover's wash showed across the whole screen. Read here, at the tap, not captured.
+                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                        if (!playerOnTop && sheetCard.acceptsOpen) {
+                            navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
+                        }
+                    },
                     onHeightMeasured = { pillHeightPx = it },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
