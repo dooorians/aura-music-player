@@ -427,7 +427,9 @@ private fun TrackList(
     val gridState = rememberLazyGridState()
     IndexedList(
         target = rememberScrollTarget(gridState),
-        indexKeys = tracks.indexKeysFor(sort) { it.title to it.artist },
+        // Remembered, as AlbumGrid's are: recomputed on every recomposition, the keys were a new list each time,
+        // which also made IndexedList recompute its set of letters over the whole library.
+        indexKeys = remember(tracks, sort) { tracks.indexKeysFor(sort) { it.title to it.artist } },
         onJumped = onJumped,
     ) {
         LazyVerticalGrid(
