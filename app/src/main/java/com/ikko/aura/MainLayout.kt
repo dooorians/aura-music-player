@@ -296,7 +296,11 @@ private fun UnderSheet(content: @Composable () -> Unit) {
             // at the same rate, so that once the card has gone nothing appears at once.
             .drawWithContent {
                 val o = card.edge
-                if (card.owner == null || !card.ready || o >= 1f) {
+                // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
+                // drawn whole. The player keeps the card for another ~0.2 s until it is disposed, and cutting the page
+                // and redrawing it a second time into a layer at full strength cost a full-screen offscreen pass per
+                // frame for a picture identical to the plain one — right while the mini player and the tabs come back.
+                if (card.owner == null || !card.ready || o >= 1f || card.cardAlpha <= 0f) {
                     drawContent()
                     return@drawWithContent
                 }
