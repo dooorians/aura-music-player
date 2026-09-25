@@ -507,7 +507,11 @@ private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isP
             shape = ChipShape,
             contentAlignment = Alignment.Center,
             // Opens the full lyrics. No ripple across the glass: the page it opens is the answer to the tap.
+            // One width, the column's, whatever the line: the glass keeps the picture it takes as the player opens,
+            // like every other panel, and only a resize makes it take a new one — which, a moment after opening,
+            // showed as a flash from one look to another. Only a line long enough to wrap still changes its height.
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(ChipShape)
                 .clickable(
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
@@ -520,9 +524,8 @@ private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isP
                 targetState = currentLine,
                 transitionSpec = {
                     (fadeIn(tween(LYRIC_CROSSFADE_MS)) togetherWith fadeOut(tween(LYRIC_CROSSFADE_MS)))
-                        // clip = false so a line still overflowing the capsule mid-resize is
-                        // drawn rather than cut off — the capsule catching up to the text is
-                        // what the movement is, and clipping it hides exactly that.
+                        // clip = false so a line still overflowing the capsule mid-resize is drawn rather than cut
+                        // off. The capsule's width is fixed now; this only animates its height, when a line wraps.
                         .using(SizeTransform(clip = false) { _, _ -> tween(LYRIC_RESIZE_MS, easing = FastOutSlowInEasing) })
                 },
                 // Keyed on the line's own stamp: the enclosing state ticks twice a second, and
