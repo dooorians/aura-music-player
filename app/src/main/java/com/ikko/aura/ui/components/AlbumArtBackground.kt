@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
@@ -123,7 +124,12 @@ fun AlbumArtBackground(
     // so: leaving the player fades back to AMOLED instead of cutting to it a frame before the
     // transition has even started. Once covered it is dropped again, so the pan animation and the
     // full-screen draw stop costing anything — which is the whole point of the setting.
-    val artComposed = !blackedOut || blackAlpha.value < 1f
+    //
+    // Derived, not read here: the fade is a frame-rate value, and reading it in composition recomposed this whole
+    // backdrop on every frame of it (about 30 times after each close of the player, measured) to answer a question
+    // whose answer changes once, when the black has finished covering it.
+    val stillBlackedOut by rememberUpdatedState(blackedOut)
+    val artComposed by remember { derivedStateOf { !stillBlackedOut || blackAlpha.value < 1f } }
 
     // Frozen under the player. The pan is a slow drift nobody watches directly, but every frame
     // of it re-records the backdrop layer, and the player has six liquid glass surfaces sampling
