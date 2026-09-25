@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -134,13 +135,16 @@ fun WavyProgressBar(
                     val over = edgeInset.toPx()
                     val track = (size.width - 2 * over).coerceAtLeast(1f)
                     fun fractionAt(x: Float) = ((x - over) / track).coerceIn(0f, 1f)
+                    // Both detectors start undispatched. Compose starts this block lazily, on the first touch; a plain
+                    // launch would begin listening only after that touch had been delivered, so the first gesture after
+                    // the player opened reached the page instead — which read a drag to the right as "previous track".
                     coroutineScope {
-                        launch {
+                        launch(start = CoroutineStart.UNDISPATCHED) {
                             detectTapGestures { offset ->
                                 onSeek((fractionAt(offset.x) * safeDuration).toLong())
                             }
                         }
-                        launch {
+                        launch(start = CoroutineStart.UNDISPATCHED) {
                             detectHorizontalDragGestures(
                                 onDragStart = { offset ->
                                     dragFraction = fractionAt(offset.x)
