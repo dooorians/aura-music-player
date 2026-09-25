@@ -71,6 +71,7 @@ class GlassSettle {
     /** Read while drawing, so setting it redraws the glass once — which is how the resting picture is taken. */
     var offset: Offset by androidx.compose.runtime.mutableStateOf(Offset.Zero)
     var frozen: Boolean = false
+    var isClosing: Boolean = false
 
     /**
      * The travelling screen's own content — inside its movement — and where that content's origin sits in
@@ -332,6 +333,10 @@ private class DrawBackdropNode(
 
     private var layoutCoordinates: LayoutCoordinates? by mutableStateOf(null, neverEqualPolicy())
 
+    // Where the coordinates last put this surface, so a callback that moves nothing writes nothing (see below).
+    private var lastPositionInWindow = Offset.Unspecified
+    private var lastSize = IntSize.Zero
+
     private var padding by mutableFloatStateOf(0f)
 
     private val recordBackdropBlock: (DrawScope.() -> Unit) = {
@@ -440,9 +445,24 @@ private class DrawBackdropNode(
             if (backdrop.isCoordinatesDependent) {
                 // Held still while the whole screen travels: the picture it has is the one it will rest with,
                 // so working it out again, every frame, would cost a great deal to change nothing.
-                val frozen = currentValueOf(LocalGlassSettle)?.frozen == true
+                val settle = currentValueOf(LocalGlassSettle)
+                val frozen = settle?.frozen == true
                 if (!(frozen && layoutCoordinates != null)) {
-                    layoutCoordinates = coordinates
+                    val disableCache = settle != null && settle.isClosing
+                    if (disableCache) {
+                        layoutCoordinates = coordinates
+                    } else {
+                        // Only when the surface has really moved or changed size. The state never compares equal
+                        // (the coordinates are the same object from call to call), so every write redraws this
+                        // surface and sends its backdrop through the whole effect chain again — and Compose calls
+                        // this after every layout pass that places the surface, moved or not.
+                        val position = coordinates.positionInWindow()
+                        if (layoutCoordinates == null || position != lastPositionInWindow || coordinates.size != lastSize) {
+                            lastPositionInWindow = position
+                            lastSize = coordinates.size
+                            layoutCoordinates = coordinates
+                        }
+                    }
                 }
             } else {
                 if (layoutCoordinates != null) {
@@ -489,6 +509,8 @@ private class DrawBackdropNode(
 
         effectScope.reset()
         layoutCoordinates = null
+        lastPositionInWindow = Offset.Unspecified
+        lastSize = IntSize.Zero
         exportedBackdrop?.layerCoordinates = null
     }
 }

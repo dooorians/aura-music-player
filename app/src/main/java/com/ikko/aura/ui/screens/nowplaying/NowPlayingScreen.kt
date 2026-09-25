@@ -236,6 +236,7 @@ fun NowPlayingScreen(
         leavingSideways -> SheetPhase.Away
         else -> SheetPhase.Settled
     }
+    settle.isClosing = phase == SheetPhase.Closing || phase == SheetPhase.Away
     // The system back button, the same way: without this it went to NavHost's own pop and waited like the swipe.
     BackHandler(enabled = phase == SheetPhase.Settled && sheetCard.owner === token) { close() }
     LaunchedEffect(phase) {
