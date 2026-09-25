@@ -469,13 +469,13 @@ fun NowPlayingScreen(
 @Composable
 private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isPlaying: Boolean, onClick: () -> Unit) {
     // Read here rather than by the player's column: a playback tick recomposes the bubble alone.
-    val positionMs = positionMs()
+    val position = positionMs()
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
-    val currentLine = remember(lines, positionMs) { lines?.currentLineAt(positionMs) }
+    val currentLine = remember(lines, position) { lines?.currentLineAt(position) }
     // No words on screen, no clock: a gap capsule draws three static dots and a track with no
     // lyrics at all draws nothing, and neither has a sweep for the per-frame clock to feed.
     val clock = rememberLyricClock(
-        positionMs = positionMs,
+        positionMs = position,
         isPlaying = isPlaying,
         active = currentLine != null && !currentLine.isGap,
     )

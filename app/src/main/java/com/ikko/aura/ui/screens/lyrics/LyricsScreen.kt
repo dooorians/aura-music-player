@@ -114,16 +114,16 @@ private fun SyncedLyrics(
     onSeek: (Long) -> Unit,
 ) {
     // Read here rather than by the screen: a playback tick recomposes the list alone, not the header above it.
-    val positionMs = positionMs()
+    val position = positionMs()
     val listState = rememberLazyListState()
-    val clock = rememberLyricClock(positionMs, isPlaying)
+    val clock = rememberLyricClock(position, isPlaying)
 
     // The scroll cursor stays on the coarse position: it only has to change when the line
     // does, and driving it off the frame clock would recompose the list ninety times a
     // second to arrive at the same index. The sweep inside the line is the part that
     // needs the fine clock, and it reads it in the draw phase.
-    val activeIndex = remember(lines, positionMs) {
-        lines.indexOfLast { it.timeMs <= positionMs }
+    val activeIndex = remember(lines, position) {
+        lines.indexOfLast { it.timeMs <= position }
     }
     LaunchedEffect(activeIndex) {
         if (activeIndex >= 0) listState.animateScrollToItem(activeIndex)

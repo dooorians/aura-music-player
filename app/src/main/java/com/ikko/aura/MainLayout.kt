@@ -886,8 +886,9 @@ private fun TabPager(
     playerViewModel: PlayerViewModel,
     motion: PageMotionState,
 ) {
-    // Built once per navController/player rather than on every recomposition: a new list of new lambdas made the
-    // pager treat all three pages as changed each time this ran (every track change, for one), and call them again.
+    // Kept across recompositions rather than rebuilt: a new list of new lambdas each time this ran made the pager
+    // see three changed pages. It seldom re-runs (its inputs never change identity), so this only keeps the list's
+    // identity stable when it does.
     val pages = remember(navController, playerViewModel) {
         AuraDestination.topLevelRoutes.map { destination ->
             @Composable {
