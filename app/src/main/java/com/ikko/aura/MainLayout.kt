@@ -357,8 +357,13 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
             bottom = top + size.height * s,
             topLeftCornerRadius = radius,
             topRightCornerRadius = radius,
-            bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius.Zero,
-            bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius.Zero,
+            // Rounded like the top, though they are never seen: the card's bottom stays below the screen's (checked
+            // at this density, the arc never reaches it). One radius all round makes this a *simple* rounded rect,
+            // which the GPU clips by itself; top-only rounding is a "complex" one, which Skia can only clip through a
+            // mask drawn on the CPU and uploaded again on every frame of the travel — a full-screen texture per
+            // frame, for the page and for the cover's wash, measured.
+            bottomRightCornerRadius = radius,
+            bottomLeftCornerRadius = radius,
         ),
     )
 }

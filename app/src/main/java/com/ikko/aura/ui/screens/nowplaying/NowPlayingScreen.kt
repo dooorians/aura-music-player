@@ -318,9 +318,11 @@ fun NowPlayingScreen(
                 scaleY = s
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
                 // Top corners: rounded while it is a card, straightening as it comes up; on the way down they
-                // settle to the pill's own.
+                // settle to the pill's own. The bottom ones are rounded too, and never seen (the card's bottom is below
+                // the screen's): the same radius on all four is a shape the GPU clips by itself, where top-only
+                // corners made Skia draw a mask on the CPU and upload it on every frame of the travel.
                 val corner = AuraMotion.cornerAt(o).toPx()
-                shape = RoundedCornerShape(topStart = corner, topEnd = corner)
+                shape = RoundedCornerShape(corner)
                 clip = o > 0.0005f
                 // Gone by the time it reaches the mini player, which takes its place — on the way down only.
                 // Coming up it stays opaque: a layer that is see-through at all has to be drawn to a buffer of
