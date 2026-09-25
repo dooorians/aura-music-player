@@ -202,6 +202,8 @@ fun NowPlayingScreen(
     // that started rising before then was an empty grey rectangle for the first of them, filling in
     // afterwards — which is the blink one sees on opening. Not snapshot state: it is written from the draw.
     val drawnOnce = remember { MutableStateFlow(false) }
+    // Whether the card has arrived at the top. Until then it takes no touches (see the card's pointerInput).
+    var landed by remember { mutableStateOf(!sheetOpening) }
 
     val token = remember { Any() }
     remember(token) {
@@ -299,6 +301,7 @@ fun NowPlayingScreen(
                     settle.frozen = false
                     settle.offset = Offset.Zero
                     sheetCard.markReady()
+                    landed = true
                 }
             }
         }
@@ -337,6 +340,22 @@ fun NowPlayingScreen(
             // cover's wash, drawn behind the page and cut to the card's shape (see MainLayout) — rather than an
             // opaque grey that only gave way to it at the very top.
             .onSizeChanged { cardHeightPx = it.height }
+            // Deaf until it has landed. Rapid taps on the mini player do not stop at the mini player: the card rises
+            // under the same finger, and the taps that followed the first one landed on whatever was passing under
+            // it — the cover (the album page), the lyric bubble (the lyrics), the artist, next, a track in the queue.
+            // Each one either sent the player away mid-rise, cutting the card off where it was, or changed the track
+            // mid-rise, a new cover and its glass to render during the animation: the stutter that came and went
+            // over repeated spamming, depending on what the finger happened to hit. Taken here, in the Initial pass,
+            // before any control inside sees them.
+            .pointerInput(landed) {
+                if (landed) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
             .onGloballyPositioned { settle.anchor = it }
             .drawWithContent {
                 drawContent()
