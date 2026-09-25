@@ -118,6 +118,11 @@ fun WavyProgressBar(
         }
     }
 
+    // One Path for the wave, emptied and refilled each frame rather than allocated each frame: the wave is
+    // redrawn ninety-odd times a second while a track plays, and a new native Path per frame was garbage for
+    // the collector to chase for nothing.
+    val wavePath = remember { Path() }
+
     Column(modifier = modifier.fillMaxWidth()) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
@@ -178,7 +183,7 @@ fun WavyProgressBar(
             val thumbX = start + usable * playedFraction
 
             if (thumbX > start + 0.5f) {
-                val path = Path()
+                val path = wavePath.apply { reset() }
                 // Read only while there is a wave to move. Not reading it is what unsubscribes
                 // this draw from the animation, so a paused track stops invalidating the canvas
                 // ninety times a second to redraw the same straight line.
