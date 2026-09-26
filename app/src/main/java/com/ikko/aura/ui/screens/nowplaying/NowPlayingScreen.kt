@@ -56,6 +56,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -202,6 +203,10 @@ fun NowPlayingScreen(
     // that started rising before then was an empty grey rectangle for the first of them, filling in
     // afterwards — which is the blink one sees on opening. Not snapshot state: it is written from the draw.
     val drawnOnce = remember { MutableStateFlow(false) }
+    // Whether the card is shown at no opacity at all: a close has taken it all the way into the mini player (the layer
+    // alpha below is then exactly 0). Derived, so the draw that reads it is invalidated once, when it flips, and not
+    // on every frame of the fade.
+    val cardCleared by remember { derivedStateOf { sheetCard.ready && sheetCard.cardAlpha <= 0f } }
     // Whether the card has arrived at the top. Until then it takes no touches (see the card's pointerInput).
     var landed by remember { mutableStateOf(!sheetOpening) }
 
@@ -359,7 +364,10 @@ fun NowPlayingScreen(
             }
             .onGloballyPositioned { settle.anchor = it }
             .drawWithContent {
-                drawContent()
+                // Nothing drawn once the card is fully cleared at the end of a close. The player stays composed for
+                // another ~0.2 s until the navigation lets it go, and its six glass panels were re-recorded and put
+                // through their blur and lens on nearly every frame of that time (traced) for a card at alpha 0.
+                if (!cardCleared) drawContent()
                 if (!drawnOnce.value) drawnOnce.value = true
             },
     ) {
