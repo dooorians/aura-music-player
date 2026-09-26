@@ -203,14 +203,19 @@ fun NowPlayingScreen(
     // that started rising before then was an empty grey rectangle for the first of them, filling in
     // afterwards — which is the blink one sees on opening. Not snapshot state: it is written from the draw.
     val drawnOnce = remember { MutableStateFlow(false) }
-    // Whether the card is shown at no opacity at all: a close has taken it all the way into the mini player (the layer
-    // alpha below is then exactly 0). Derived, so the draw that reads it is invalidated once, when it flips, and not
-    // on every frame of the fade.
-    val cardCleared by remember { derivedStateOf { sheetCard.ready && sheetCard.cardAlpha <= 0f } }
     // Whether the card has arrived at the top. Until then it takes no touches (see the card's pointerInput).
     var landed by remember { mutableStateOf(!sheetOpening) }
 
     val token = remember { Any() }
+    // Whether the card is shown at no opacity at all: a close has taken it all the way into the mini player (the layer
+    // alpha below is then exactly 0) — or whether another player has taken the card. A closed player is still composed
+    // for a moment after its close, and a tap on the mini player in that moment opened a new one: its claim set the card
+    // back to not ready, this one drew again, and its last picture (the time, the wave and the lyric of the close)
+    // rode up over the new player until the navigation let it go. Derived, so the draw that reads it is invalidated
+    // once, when it flips, and not on every frame of the fade.
+    val cardCleared by remember {
+        derivedStateOf { (sheetCard.ready && sheetCard.cardAlpha <= 0f) || sheetCard.owner !== token }
+    }
     remember(token) {
         // Opening from the mini player, the card stays hidden until this screen has drawn (see
         // SheetCard.ready): the mini player holds the place until then.
