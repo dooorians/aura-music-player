@@ -769,7 +769,15 @@ fun MainLayout() {
                 ),
                 label = "capsule-bottom",
             )
-            val capsuleLayer by remember { derivedStateOf { capsule.shown.value > 0.002f || capsule.shown.isRunning } }
+            // Composed while there is something of it to show: any value above rest, or an animation on its way up. An
+            // animation that only holds it at 0 — the one run when the player returns to a page the capsule does not
+            // belong to — used to count, and composed an invisible capsule (alpha 0) in the very frame the closing card
+            // uncovered the mini player: that frame's missed deadline, measured on every close from the home page.
+            val capsuleLayer by remember {
+                derivedStateOf {
+                    capsule.shown.value > 0.002f || (capsule.shown.isRunning && capsule.shown.targetValue > 0f)
+                }
+            }
             // Not composed at all the moment the route leaves the tabs, in the same frame — waiting for the
             // capsule's own animation to notice left it drawn over the player's card for several frames.
             if (capsuleLayer && currentRoute == AuraDestination.Tabs.route && !cardOverPill) {
