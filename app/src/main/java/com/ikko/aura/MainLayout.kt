@@ -630,7 +630,7 @@ fun MainLayout() {
                     if (isSheet(initialState)) sheetFlags.closing = false
                     when {
                         isSheet(targetState) -> AuraMotion.sheetUnderExit
-                        isLyrics(targetState) && isSheet(initialState) -> fadeOut(tween(THROUGH_OUT_MS))
+                        isLyrics(targetState) && isSheet(initialState) -> throughExit(toLeft = true)
                         isSheet(initialState) -> fadeOut(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS))
                         else -> pushExit()
                     }
@@ -639,7 +639,7 @@ fun MainLayout() {
                     if (isSheet(targetState)) sheetFlags.opening = false
                     when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
-                        isSheet(targetState) && isLyrics(initialState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS - THROUGH_DELAY_MS, delayMillis = THROUGH_DELAY_MS))
+                        isSheet(targetState) && isLyrics(initialState) -> throughEnter(fromLeft = true)
                         isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
