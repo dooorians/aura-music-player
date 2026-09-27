@@ -42,7 +42,7 @@ fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Mo
 }
 
 /** How often the aurora itself moves. */
-private const val STEP_MS = 66L
+private const val STEP_MS = 10L
 
 /**
  * How long one background takes to give way to the next, and the pace the change is redrawn at. The
@@ -146,7 +146,7 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
     }
 
     private fun tick() {
-        if (!surfaceReady || !active) return
+        if (!surfaceReady) return
         val now = SystemClock.uptimeMillis()
         val next = wanted
         var changed = false
@@ -159,6 +159,9 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
             theme = next
             changed = true
         }
+        // Allow one render pass if the theme just changed, so the surface is
+        // never empty when we transition back to active.
+        if (!active && !changed) return
         val r = renderer ?: return
         var rendered = false
         if (changed || now - lastRenderAt >= STEP_MS) {
@@ -182,7 +185,7 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         }
         when {
             fading -> handler?.postDelayed(tickRunnable, FADE_FRAME_MS)
-            animate -> handler?.postDelayed(tickRunnable, (STEP_MS - (SystemClock.uptimeMillis() - lastRenderAt)).coerceIn(8L, STEP_MS))
+            animate && active -> handler?.postDelayed(tickRunnable, (STEP_MS - (SystemClock.uptimeMillis() - lastRenderAt)).coerceIn(8L, STEP_MS))
         }
     }
 

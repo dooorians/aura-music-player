@@ -419,7 +419,7 @@ fun NowPlayingScreen(
                     positionMs = { positionMs },
                     isPlaying = uiState.isPlaying,
                     // The line being sung is the way into all of them.
-                    onClick = { navController.navigate(AuraDestination.Lyrics.route) },
+                    onClick = { if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.Lyrics.route) },
                 )
             }
 
@@ -428,10 +428,10 @@ fun NowPlayingScreen(
                     currentTrack = uiState.currentTrack,
                     queueIndex = uiState.queueIndex,
                     onOpenAlbum = { albumId ->
-                        navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
+                        if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
                     },
                     onOpenArtist = { artistId ->
-                        navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
+                        if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
                     },
                 )
             }
@@ -631,7 +631,8 @@ private fun HeroPanel(
         AnimatedContent(
             targetState = queueIndex to currentTrack,
             transitionSpec = {
-                AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
+                (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
+                    .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
             },
             modifier = Modifier.size(HERO_ART_SIZE),
             label = "hero-art",
@@ -652,12 +653,14 @@ private fun HeroPanel(
 
         // No "En lecture" chip above the title any more (removed at the user's request): the title and artist
         // sit centred beside the cover on their own.
-        Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.weight(1f).height(HERO_ART_SIZE), verticalArrangement = Arrangement.Center) {
             AnimatedContent(
                 targetState = queueIndex to currentTrack,
                 transitionSpec = {
-                    AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
+                    (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
+                        .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
                 },
+                contentAlignment = Alignment.CenterStart,
                 label = "hero-label",
             ) { (_, shown) ->
                 Column {

@@ -82,7 +82,8 @@ private const val MESH_H = 16
 
 internal const val AURORA_PIXELS = AURORA_W * AURORA_H
 
-internal class AuroraRenderer(private val art: Bitmap) {
+internal class AuroraRenderer(originalArt: Bitmap) {
+    private val art = android.graphics.Bitmap.createScaledBitmap(originalArt, 64, 64, true)
     private val scene = Bitmap.createBitmap(AURORA_W, AURORA_H, Bitmap.Config.ARGB_8888)
     private val sceneCanvas = AndroidCanvas(scene)
     private val meshed = Bitmap.createBitmap(AURORA_W, AURORA_H, Bitmap.Config.ARGB_8888)
@@ -105,6 +106,7 @@ internal class AuroraRenderer(private val art: Bitmap) {
     private val pixels = IntArray(AURORA_PIXELS)
     private val scratch = IntArray(AURORA_PIXELS)
     private val dst = RectF()
+    private val clipPath = android.graphics.Path()
 
     /** The cover's average, dark: what shows through wherever the four copies leave a gap. */
     private val ground: Int
@@ -179,6 +181,9 @@ internal class AuroraRenderer(private val art: Bitmap) {
         sceneCanvas.save()
         sceneCanvas.translate(cx, cy)
         sceneCanvas.rotate(degrees)
+        clipPath.reset()
+        clipPath.addCircle(0f, 0f, size / 2f, android.graphics.Path.Direction.CW)
+        sceneCanvas.clipPath(clipPath)
         dst.set(-size / 2f, -size / 2f, size / 2f, size / 2f)
         sceneCanvas.drawBitmap(art, null, dst, layerPaint)
         sceneCanvas.restore()
@@ -193,7 +198,7 @@ internal class AuroraRenderer(private val art: Bitmap) {
         val ox = w * (0.50f + 0.20f * cos(t * 0.11f))
         val oy = h * (0.42f + 0.16f * sin(t * 0.09f + 0.7f))
         val radius = 0.80f * h
-        val angle = 2.1f * sin(t * 0.13f) + 0.9f
+        val angle = 0.5f * sin(t * 0.13f) + 0.25f
         var i = 0
         for (row in 0..MESH_H) {
             val y = h * row / MESH_H
@@ -252,13 +257,13 @@ internal class AuroraRenderer(private val art: Bitmap) {
             calibrated = true
         }
         for (i in 0 until AURORA_PIXELS) {
-            rgbToHsv(outR[i] / 256f, outG[i] / 256f, outB[i] / 256f, hsv)
-            hsv[1] = minOf(hsv[1] * boost, sCap)
-            hsv[2] = minOf(hsv[2] * vGain, vCap)
-            hsvToRgb(hsv[0], hsv[1], hsv[2], hsv)
-            var nr = hsv[0]
-            var ng = hsv[1]
-            var nb = hsv[2]
+            var nr = outR[i] / 256f
+            var ng = outG[i] / 256f
+            var nb = outB[i] / 256f
+            val lum = 0.2126f * nr + 0.7152f * ng + 0.0722f * nb
+            nr = maxOf(0f, lum + (nr - lum) * boost) * vGain
+            ng = maxOf(0f, lum + (ng - lum) * boost) * vGain
+            nb = maxOf(0f, lum + (nb - lum) * boost) * vGain
             // A soft ceiling on brightness. Every screen has white type on it, and a cover with white in
             // it (a pale sleeve, a sky, a highlight) otherwise made a patch of background as light as the
             // text: above the knee the light is compressed, keeping the hue, so the brightest part of any

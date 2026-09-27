@@ -6,6 +6,7 @@ import com.ikko.aura.ui.theme.AuraMotion
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
@@ -376,19 +377,19 @@ private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraD
 // this easing, and the rest played in a handful of frames (the jerk on opening an album). Waiting out that
 // first frame before moving anything lets the whole slide play, at its own pace, from its start.
 private fun pushEnter() =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = FastOutSlowInEasing)) { it / 4 } +
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { it / 4 } +
         fadeIn(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS))
 
 private fun pushExit() =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { -it / 4 } +
         fadeOut(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS))
 
 private fun popEnter() =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = FastOutSlowInEasing)) { -it / 4 } +
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { -it / 4 } +
         fadeIn(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS))
 
 private fun popExit() =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = FastOutSlowInEasing)) { it / 4 } +
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { it / 4 } +
         fadeOut(tween(AuraMotion.PUSH_MS, delayMillis = AuraMotion.POP_START_DELAY_MS))
 
 /**
@@ -401,11 +402,11 @@ private fun popExit() =
 private fun isLyrics(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.Lyrics.route
 
 private fun throughEnter(fromLeft: Boolean) =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { if (fromLeft) -it / 4 else it / 4 } +
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { if (fromLeft) -it / 4 else it / 4 } +
         fadeIn(tween(AuraMotion.PUSH_MS - THROUGH_DELAY_MS, delayMillis = THROUGH_DELAY_MS))
 
 private fun throughExit(toLeft: Boolean) =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, easing = FastOutSlowInEasing)) { if (toLeft) -it / 4 else it / 4 } +
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { if (toLeft) -it / 4 else it / 4 } +
         fadeOut(tween(THROUGH_OUT_MS))
 
 private const val THROUGH_OUT_MS = 90
@@ -537,10 +538,10 @@ fun MainLayout() {
         // Between the player and its lyrics the cover's wash cross-fades with the aurora the lyrics sit on, both
         // ways, rather than cutting: it came on at once going back to the player and was dropped outright once the
         // player had left for the lyrics. Only there — opening and closing the player keep their own timing.
-        val toLyrics = currentRoute == AuraDestination.Lyrics.route
+        val fadingRoute = currentRoute == AuraDestination.Lyrics.route || currentRoute?.startsWith(AuraDestination.AlbumPattern.route) == true || currentRoute?.startsWith(AuraDestination.ArtistPattern.route) == true
         val washFade by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (toLyrics) 0f else 1f,
-            animationSpec = tween(LYRICS_WASH_FADE_MS, easing = FastOutSlowInEasing),
+            targetValue = if (fadingRoute) 0f else 1f,
+            animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
             label = "lyrics-wash-fade",
         )
         AlbumArtBackground(
@@ -572,8 +573,8 @@ fun MainLayout() {
                     // No card and not the player: the cover has nothing to fill. Its own fade-out would
                     // otherwise run across the whole screen, over the page, once the card has gone. Except on
                     // the way to the lyrics, until it has faded out there.
-                    val fadingToLyrics = toLyrics && washFade > 0f
-                    if (sheetCard.owner == null && currentRoute != AuraDestination.NowPlaying.route && !fadingToLyrics) return@drawWithContent
+                    val isFadingRoute = fadingRoute && washFade > 0f
+                    if (sheetCard.owner == null && currentRoute != AuraDestination.NowPlaying.route && !isFadingRoute) return@drawWithContent
                     val edge = sheetCard.cardTop
                     if (edge <= 0f) {
                         drawContent()
@@ -627,12 +628,10 @@ fun MainLayout() {
                 },
                 exitTransition = {
                     if (isSheet(initialState)) sheetFlags.closing = false
-                    // Faded, not held still. Every screen here is transparent over the one shared
-                    // backdrop, so leaving this one fully drawn while the player rose over it
-                    // showed both at once.
                     when {
                         isSheet(targetState) -> AuraMotion.sheetUnderExit
-                        isLyrics(targetState) && isSheet(initialState) -> throughExit(toLeft = true)
+                        isLyrics(targetState) && isSheet(initialState) -> fadeOut(tween(THROUGH_OUT_MS))
+                        isSheet(initialState) -> fadeOut(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS))
                         else -> pushExit()
                     }
                 },
@@ -640,7 +639,8 @@ fun MainLayout() {
                     if (isSheet(targetState)) sheetFlags.opening = false
                     when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
-                        isSheet(targetState) && isLyrics(initialState) -> throughEnter(fromLeft = true)
+                        isSheet(targetState) && isLyrics(initialState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS - THROUGH_DELAY_MS, delayMillis = THROUGH_DELAY_MS))
+                        isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
                 },

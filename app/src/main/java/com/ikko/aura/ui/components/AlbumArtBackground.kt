@@ -105,7 +105,7 @@ fun AlbumArtBackground(
         //
         // Invisible, because the backdrop is a heavily blurred wash that then cross-fades over
         // 280ms anyway. Skipped on the very first cover, where there is nothing to wait for.
-        if (bitmap != null) delay(BACKDROP_SETTLE_MS)
+        if (bitmap != null && !forceArtwork) delay(BACKDROP_SETTLE_MS)
         val source = AlbumArtCache.load(context, artworkUri, BACKDROP_SIZE_PX, artworkKey)
         bitmap = source?.let { withContext(Dispatchers.Default) { boxBlurred(it) } }
     }
@@ -117,7 +117,7 @@ fun AlbumArtBackground(
         targetValue = if (blackedOut) 1f else 0f,
         // Quicker going than coming: the artwork is what is left behind as the player clears, and
         // it lingered for the whole 320ms after the page it sat behind had already returned.
-        animationSpec = tween(if (blackedOut) AuraMotion.SHEET_EXIT_MS else AuraMotion.SHEET_ARTWORK_IN_MS),
+        animationSpec = tween(durationMillis = if (blackedOut) AuraMotion.SHEET_EXIT_MS else AuraMotion.SHEET_ARTWORK_IN_MS, delayMillis = if (blackedOut) com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS else 0, easing = LinearEasing),
         label = "aura-backdrop-amoled",
     )
     // Composed until the black has finished covering it rather than the instant the setting says
@@ -174,7 +174,7 @@ fun AlbumArtBackground(
             outgoing = shown
             shown = current
             leaving.snapTo(1f)
-            leaving.animateTo(0f, tween(ARTWORK_CROSSFADE_MS, easing = FastOutSlowInEasing))
+            leaving.animateTo(0f, tween(ARTWORK_CROSSFADE_MS, easing = LinearEasing))
             outgoing = null
         }
     }
@@ -273,7 +273,7 @@ private const val BLUR_PASSES = 3
 // Shortened from 650ms: the crossfade draws two full-screen images at once and Haze re-samples
 // all of it every frame, so its length is also the length of the app's most expensive draw. A
 // swipe through the queue triggers one per track, and at 650ms they were overlapping.
-private const val ARTWORK_CROSSFADE_MS = 280
+private const val ARTWORK_CROSSFADE_MS = 150
 
 /** How long after a track change the backdrop waits before moving. See [AlbumArtBackground]. */
 private const val BACKDROP_SETTLE_MS = 320L

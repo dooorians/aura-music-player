@@ -2,6 +2,11 @@ package com.ikko.aura.ui.components
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -282,7 +287,8 @@ fun FloatingPlayerPill(
         AnimatedContent(
             targetState = queueIndex to track,
             transitionSpec = {
-                AuraMotion.queueSlide(forward = targetState.first >= initialState.first)
+                (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
+                    .using(SizeTransform(clip = false) { _, _ -> snap() })
             },
             modifier = Modifier.weight(1f).padding(start = ART_TEXT_GAP, end = ART_TEXT_GAP),
             label = "pill-track",

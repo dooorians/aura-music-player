@@ -25,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.components.backdrop.Backdrop
@@ -33,6 +36,7 @@ import com.ikko.aura.ui.components.backdrop.drawBackdrop
 import com.ikko.aura.ui.components.backdrop.effects.blur
 import com.ikko.aura.ui.components.backdrop.effects.colorControls
 import com.ikko.aura.ui.components.backdrop.effects.lens
+import com.ikko.aura.ui.components.backdrop.effects.effect
 import com.ikko.aura.ui.components.backdrop.highlight.Highlight
 import com.ikko.aura.ui.components.backdrop.shadow.Shadow
 import com.ikko.aura.ui.theme.AuraColors
@@ -107,8 +111,8 @@ fun Modifier.liquidGlass(
             lens(
                 refractionHeight = lensHeightPx,
                 refractionAmount = lensAmountPx,
-                depthEffect = true,
-                chromaticAberration = true,
+                depthEffect = false,
+                chromaticAberration = false,
             )
         },
         highlight = { Highlight.Default },
