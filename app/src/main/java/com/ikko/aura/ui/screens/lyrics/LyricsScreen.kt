@@ -19,6 +19,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,8 +62,16 @@ fun LyricsScreen(
 
     LaunchedEffect(currentTrack?.id) { lyricsViewModel.loadFor(currentTrack) }
 
-    GradientScreenScaffold {
-        Column(modifier = Modifier.fillMaxSize()) {
+    val density = LocalDensity.current
+    val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val listState = rememberLazyListState()
+    val scrollPx = remember { derivedStateOf { if (listState.firstVisibleItemIndex > 0) 1000f else listState.firstVisibleItemScrollOffset.toFloat() } }
+
+    GradientScreenScaffold(
+        applyStatusBarInset = false,
+        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { scrollPx.value },
+    ) {
+        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -66,17 +80,7 @@ fun LyricsScreen(
                 AuraIconButton(onClick = { navController.popBackStack() }, size = 42.dp) {
                     Icon(CupertinoIcons.ChevronLeft, contentDescription = "Retour", modifier = Modifier.size(20.dp))
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Paroles", style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
-                    // The source is named rather than hidden: these come off three different
-                    // hosts with very different timing quality, and when a line lands early
-                    // this is the first thing worth knowing.
-                    val subtitle = (lyricsState as? LyricsUiState.Available)?.sourceLabel
-                        ?: currentTrack?.title
-                    subtitle?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = AuraColors.TextSecondary, maxLines = 1)
-                    }
-                }
+                Spacer(Modifier.weight(1f))
                 AuraIconButton(onClick = { lyricsViewModel.refetch(currentTrack) }, size = 42.dp) {
                     Icon(CupertinoIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", modifier = Modifier.size(18.dp))
                 }
@@ -99,6 +103,7 @@ fun LyricsScreen(
                     lines = state.lines,
                     positionMs = { positionMs },
                     isPlaying = playerState.isPlaying,
+                    listState = listState,
                     onSeek = playerViewModel::seekTo,
                 )
             }
@@ -111,11 +116,11 @@ private fun SyncedLyrics(
     lines: List<LyricLine>,
     positionMs: () -> Long,
     isPlaying: Boolean,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     onSeek: (Long) -> Unit,
 ) {
     // Read here rather than by the screen: a playback tick recomposes the list alone, not the header above it.
     val position = positionMs()
-    val listState = rememberLazyListState()
     val clock = rememberLyricClock(position, isPlaying)
 
     // The scroll cursor stays on the coarse position: it only has to change when the line

@@ -28,6 +28,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.withFrameMillis
@@ -133,8 +137,14 @@ fun AlbumScreen(
     val accent = rememberUpdatedState(theme.accent)
     val accentSoft = rememberUpdatedState(theme.accentSoft)
 
+    val density = LocalDensity.current
+    val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-        GradientScreenScaffold(applyStatusBarInset = false) {
+        GradientScreenScaffold(
+            applyStatusBarInset = false,
+            modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { listState.headerScrollPx(1000f) },
+        ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AlbumGround(ground = theme.solid, listState = listState)
                 run {
@@ -208,7 +218,8 @@ private fun AlbumGround(ground: Color, listState: LazyListState) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { translationY = -listState.headerScrollPx(GROUND_TRAVEL_PX) }
+            .graphicsLayer { val fadeEnd = GROUND_SOLID_DP.dp.toPx()
+            translationY = -listState.headerScrollPx(fadeEnd) }
             .drawBehind {
                 val fadeStart = GROUND_CLEAR_DP.dp.toPx()
                 val fadeEnd = GROUND_SOLID_DP.dp.toPx()
