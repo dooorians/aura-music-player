@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -255,9 +256,10 @@ fun TabCapsule(
                 },
             contentAlignment = Alignment.Center,
         ) {
+            val dynamicTint = androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(CapsuleGlassTint.toArgb(), cover.accent.toArgb(), 0.18f))
             LiquidGlassPanel(
                 shape = CapsuleShape,
-                tint = CapsuleGlassTint,
+                tint = dynamicTint,
                 tintAlpha = CAPSULE_GLASS_ALPHA,
                 blurRadiusDp = CAPSULE_BLUR_DP,
                 dropShadow = false,

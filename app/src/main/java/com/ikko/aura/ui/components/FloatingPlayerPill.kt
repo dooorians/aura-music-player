@@ -45,6 +45,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -161,9 +162,10 @@ fun FloatingPlayerPill(
 
     val motion = LocalPageMotion.current
     val cover = LocalCoverColors.current
+    val dynamicTint = androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(PillGlassTint.toArgb(), cover.accent.toArgb(), 0.18f))
     LiquidGlassPanel(
         shape = PillShape,
-        tint = PillGlassTint,
+        tint = dynamicTint,
         tintAlpha = PILL_GLASS_ALPHA,
         blurRadiusDp = PILL_BLUR_DP,
         dropShadow = false,

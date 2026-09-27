@@ -68,25 +68,11 @@ fun LyricsScreen(
     val listState = rememberLazyListState()
     val scrollPx = remember { derivedStateOf { if (listState.firstVisibleItemIndex > 0) 1000f else listState.firstVisibleItemScrollOffset.toFloat() } }
 
-    GradientScreenScaffold(
-        applyStatusBarInset = false,
-        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { scrollPx.value },
-    ) {
-        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                AuraIconButton(onClick = { navController.popBackStack() }, size = 42.dp) {
-                    Icon(CupertinoIcons.ChevronLeft, contentDescription = "Retour", modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                AuraIconButton(onClick = { lyricsViewModel.refetch(currentTrack) }, size = 42.dp) {
-                    Icon(CupertinoIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", modifier = Modifier.size(18.dp))
-                }
-            }
-
+    Box(modifier = Modifier.fillMaxSize()) {
+        GradientScreenScaffold(
+            applyStatusBarInset = false,
+            modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { scrollPx.value },
+        ) {
             when (val state = lyricsState) {
                 is LyricsUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AuraColors.TextPrimary)
@@ -107,6 +93,23 @@ fun LyricsScreen(
                     listState = listState,
                     onSeek = playerViewModel::seekTo,
                 )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            AuraIconButton(onClick = { navController.popBackStack() }, size = 42.dp) {
+                Icon(CupertinoIcons.ChevronLeft, contentDescription = "Retour", modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            AuraIconButton(onClick = { lyricsViewModel.refetch(currentTrack) }, size = 42.dp) {
+                Icon(CupertinoIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", modifier = Modifier.size(18.dp))
             }
         }
     }
