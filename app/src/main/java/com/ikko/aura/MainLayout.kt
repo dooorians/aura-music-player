@@ -293,25 +293,6 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            // Subtle depth effect: background page recedes, slides down slightly, and rounds its top corners
-            .graphicsLayer {
-                val t = card.openProgress
-                if (t > 0.001f) {
-                    val s = 1f - 0.055f * t
-                    scaleX = s
-                    scaleY = s
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
-                    translationY = maxShiftY * t
-                    val corner = maxCornerRadius * t
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(
-                        topStart = corner,
-                        topEnd = corner,
-                        bottomStart = 0f,
-                        bottomEnd = 0f,
-                    )
-                    clip = true
-                }
-            }
             .drawWithContent {
                 val o = card.edge
                 // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
@@ -320,10 +301,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                     drawContent()
                     return@drawWithContent
                 }
-                val t = card.openProgress
-                val s = if (t > 0.001f) 1f - 0.055f * t else 1f
-                val shiftY = if (t > 0.001f) maxShiftY * t else 0f
-                setToCardScaled(cutout, o, size, AuraMotion.cornerAt(o).toPx(), s, shiftY)
+                setToCard(cutout, o, size, AuraMotion.cornerAt(o).toPx())
                 clipPath(cutout, androidx.compose.ui.graphics.ClipOp.Difference) {
                     this@drawWithContent.drawContent()
                 }
@@ -336,10 +314,38 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                         drawContext.canvas.restore()
                     }
                 }
-            },
+            }
+            .graphicsLayer { },
     ) {
-        content()
-        // Its own node, so the dimming — which follows openProgress continuously — costs one rectangle
+        // Subtle depth effect: background page recedes, slides down slightly, and rounds its top corners
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val t = card.openProgress
+                    if (t > 0.001f) {
+                        val s = 1f - 0.055f * t
+                        scaleX = s
+                        scaleY = s
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                        translationY = maxShiftY * t
+                        val corner = maxCornerRadius * t
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                            topStart = corner,
+                            topEnd = corner,
+                            bottomStart = 0f,
+                            bottomEnd = 0f,
+                        )
+                        clip = true
+                    }
+                },
+        ) {
+            content()
+        }
+
+        // Full-screen dimming overlay: spans the full un-shifted bounds from y=0
+        // all the way down to the player card cutout, so the darkening covers
+        // the top contours and corners of the screen seamlessly.
         Box(
             Modifier
                 .matchParentSize()
@@ -378,43 +384,6 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
     )
 }
 
-/**
- * Sets [path] to the player's card, projected into the local coordinate space of a layer with [layerScale]
- * and [layerShiftY] applied about top-center.
- */
-private fun setToCardScaled(
-    path: androidx.compose.ui.graphics.Path,
-    edge: Float,
-    size: Size,
-    radiusPx: Float,
-    layerScale: Float,
-    layerShiftY: Float,
-) {
-    val s = 1f - AuraMotion.SHEET_NARROWING * edge
-    val screenWidth = size.width * s
-    val screenLeft = (size.width - screenWidth) / 2f
-    val screenTop = edge * size.height
-    val screenRadius = radiusPx * s
-
-    val localLeft = (size.width / 2f) + (screenLeft - size.width / 2f) / layerScale
-    val localWidth = screenWidth / layerScale
-    val localTop = (screenTop - layerShiftY) / layerScale
-    val localRadius = screenRadius / layerScale
-
-    path.reset()
-    path.addRoundRect(
-        androidx.compose.ui.geometry.RoundRect(
-            left = localLeft,
-            top = localTop,
-            right = localLeft + localWidth,
-            bottom = localTop + (size.height * s) / layerScale,
-            topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
-            topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
-            bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
-            bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
-        ),
-    )
-}
 
 private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.NowPlaying.route
 
