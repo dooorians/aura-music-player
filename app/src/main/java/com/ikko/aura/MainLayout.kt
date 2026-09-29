@@ -435,6 +435,13 @@ private const val THROUGH_OUT_MS = 90
 private const val LYRICS_WASH_FADE_MS = 300
 private const val THROUGH_DELAY_MS = 50
 
+private data class CapsuleTrigger(
+    val wanted: Boolean,
+    val windUp: Boolean,
+    val leftTabs: Boolean,
+    val isOpening: Boolean,
+)
+
 @Composable
 fun MainLayout() {
     val navController = rememberNavController()
@@ -473,18 +480,32 @@ fun MainLayout() {
         tabsShown = currentRoute == AuraDestination.Tabs.route
         isPlayerRoute = currentRoute == AuraDestination.NowPlaying.route
     }
-    LaunchedEffect(capsule, pageMotion) {
+    LaunchedEffect(capsule, pageMotion, currentRoute) {
         // Whether the capsule is out, and if not, whether it was the list's scrolling that put it away
         // (which earns the wind-up) rather than the page leaving (which just sinks).
         snapshotFlow {
-            val wanted = capsuleWanted(pageMotion.p, pageMotion.dragging, capsule.scrolledAway, tabsShown)
-            Triple(wanted, !wanted && capsule.scrolledAway && pageMotion.p in 0.95f..1.05f, !tabsShown)
+            val isTabs = currentRoute == AuraDestination.Tabs.route
+            val isOpening = (currentRoute == AuraDestination.NowPlaying.route || sheetCard.owner != null) && !sheetCard.sinking
+            val wanted = capsuleWanted(pageMotion.p, pageMotion.dragging, capsule.scrolledAway, isTabs)
+            CapsuleTrigger(wanted, !wanted && capsule.scrolledAway && pageMotion.p in 0.95f..1.05f, !isTabs, isOpening)
         }
             .distinctUntilChanged()
-            .collectLatest { (wanted, windUp, leftTabs) ->
-                if (!isPlayerRoute) {
+            .collectLatest { (wanted, windUp, leftTabs, isOpening) ->
+                if (!isOpening && currentRoute != AuraDestination.NowPlaying.route) {
                     launch { capsule.inset.animateTo(if (wanted) PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP else 0f, tween(300)) }
                     if (leftTabs && !wanted) capsule.shown.snapTo(0f) else capsule.shown.capsuleTo(wanted, windUp)
+                }
+            }
+    }
+
+    // When the player sheet is fully open, silently reset capsule.shown to 0f without animation
+    // so that on closing it can execute its natural spring entrance back into place.
+    LaunchedEffect(capsule) {
+        snapshotFlow { sheetCard.openProgress >= 0.85f && !sheetCard.sinking }
+            .distinctUntilChanged()
+            .collect { fullyOpen ->
+                if (fullyOpen && capsule.shown.value > 0f) {
+                    capsule.shown.snapTo(0f)
                 }
             }
     }
@@ -810,7 +831,14 @@ fun MainLayout() {
                             !isTabs && !isNowPlaying -> 0f
                             sheetCard.owner == null -> if (isTabs) 1f else 0f
                             sheetCard.waitingToShow || (isNowPlaying && !sheetCard.ready) -> 1f
-                            else -> ((sheetCard.edge - 0.65f) / (AuraMotion.SHEET_PILL_TOP_FRACTION - 0.65f)).coerceIn(0f, 1f)
+                            !sheetCard.sinking -> {
+                                // Light, smooth fade out on opening: dissolves over the first ~40% of the rise
+                                (1f - sheetCard.openProgress * 2.5f).coerceIn(0f, 1f)
+                            }
+                            else -> {
+                                // Smooth return on closing as the player card sinks back to the pill
+                                ((sheetCard.edge - 0.60f) / (AuraMotion.SHEET_PILL_TOP_FRACTION - 0.60f)).coerceIn(0f, 1f)
+                            }
                         }
                     },
             )
