@@ -139,7 +139,6 @@ import kotlinx.coroutines.flow.map
 
 /** The pill comes back as the closing card reaches its place (the card takes 320 ms to get there). */
 private const val PILL_RETURN_DELAY_MS = 210L
-private const val CAPSULE_RETURN_DELAY_MS = 260L
 private const val PILL_FADE_IN_MS = 110
 private const val PILL_FADE_OUT_MS = 30
 
@@ -451,33 +450,25 @@ fun MainLayout() {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showPill = currentRoute !in AuraDestination.fullScreenRoutes
-    // The tab capsule comes back a beat after the player starts to leave: it is drawn above the screens, and
-    // popping in over a card that is still most of the way up looked like a mistake.
     var tabsShown by remember { mutableStateOf(true) }
-    val lastRoute = remember { arrayOfNulls<String>(1) }
+    var isPlayerRoute by remember { mutableStateOf(false) }
     LaunchedEffect(currentRoute) {
-        if (currentRoute == AuraDestination.Tabs.route) {
-            if (lastRoute[0] == AuraDestination.NowPlaying.route) delay(CAPSULE_RETURN_DELAY_MS)
-            tabsShown = true
-        } else {
-            tabsShown = false
-        }
-        lastRoute[0] = currentRoute
+        tabsShown = currentRoute == AuraDestination.Tabs.route
+        isPlayerRoute = currentRoute == AuraDestination.NowPlaying.route
     }
-    val onTabs by rememberUpdatedState(tabsShown)
     LaunchedEffect(capsule, pageMotion) {
         // Whether the capsule is out, and if not, whether it was the list's scrolling that put it away
         // (which earns the wind-up) rather than the page leaving (which just sinks).
         snapshotFlow {
-            val wanted = capsuleWanted(pageMotion.p, pageMotion.dragging, capsule.scrolledAway, onTabs)
-            Triple(wanted, !wanted && capsule.scrolledAway && pageMotion.p in 0.95f..1.05f, !onTabs)
+            val wanted = capsuleWanted(pageMotion.p, pageMotion.dragging, capsule.scrolledAway, tabsShown)
+            Triple(wanted, !wanted && capsule.scrolledAway && pageMotion.p in 0.95f..1.05f, !tabsShown)
         }
             .distinctUntilChanged()
             .collectLatest { (wanted, windUp, leftTabs) ->
-                launch { capsule.inset.animateTo(if (wanted) PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP else 0f, tween(300)) }
-                // Leaving the tabs altogether (for the player's card, say) it is simply gone: the card covers
-                // it in the same frame, and a capsule sinking through the card's first frames would show.
-                if (leftTabs && !wanted) capsule.shown.snapTo(0f) else capsule.shown.capsuleTo(wanted, windUp)
+                if (!isPlayerRoute) {
+                    launch { capsule.inset.animateTo(if (wanted) PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP else 0f, tween(300)) }
+                    if (leftTabs && !wanted) capsule.shown.snapTo(0f) else capsule.shown.capsuleTo(wanted, windUp)
+                }
             }
     }
     val density = LocalDensity.current
@@ -764,7 +755,9 @@ fun MainLayout() {
             // The pill's arrival: when a track starts and there was no pill, it comes in the way the tab
             // capsule does — a spring with a little overshoot, rising, growing and stretching with its own
             // speed. Reading `arrival` only in a graphics layer, so it costs no recomposition.
-            val hasPill = showPill && backdrop.hasTrack
+            val isNowPlayingRoute = currentRoute == AuraDestination.NowPlaying.route
+            val isTabsRoute = currentRoute == AuraDestination.Tabs.route
+            val hasPill = (showPill || isNowPlayingRoute || sheetCard.owner != null) && backdrop.hasTrack
             val arrival = remember { Animatable(if (backdrop.hasTrack) 1f else 0f) }
             LaunchedEffect(backdrop.hasTrack) {
                 if (backdrop.hasTrack) arrival.capsuleTo(true) else arrival.capsuleTo(false, windUp = false)
@@ -781,27 +774,27 @@ fun MainLayout() {
             // animation that only holds it at 0 — the one run when the player returns to a page the capsule does not
             // belong to — used to count, and composed an invisible capsule (alpha 0) in the very frame the closing card
             // uncovered the mini player: that frame's missed deadline, measured on every close from the home page.
-            val capsuleLayer by remember {
-                derivedStateOf {
-                    capsule.shown.value > 0.002f || (capsule.shown.isRunning && capsule.shown.targetValue > 0f)
-                }
-            }
-            // We ALWAYS compose it so that going to the Library tab doesn't cause a massive jank frame, 
-            // but we hide it via alpha if it shouldn't be drawn (like when opening the player card).
-            val showCapsuleNow = currentRoute == AuraDestination.Tabs.route && !cardOverPill
+            val capsuleEnabled = isTabsRoute && !cardOverPill
             
             TabCapsule(
                 state = capsule,
                 selected = selectedFilter,
                 onSelect = capsuleViewModel.selection::select,
                 backdrop = pillBackdrop,
+                enabled = capsuleEnabled,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 21.dp)
                     .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) }
                     .graphicsLayer {
-                        // Instant hide if the route leaves the tabs, bypassing the animation delay
-                        alpha = if (capsuleLayer && showCapsuleNow) 1f else 0f
+                        val isTabs = currentRoute == AuraDestination.Tabs.route
+                        val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
+                        alpha = when {
+                            !isTabs && !isNowPlaying -> 0f
+                            sheetCard.owner == null -> if (isTabs) 1f else 0f
+                            sheetCard.waitingToShow || (isNowPlaying && !sheetCard.ready) -> 1f
+                            else -> ((sheetCard.edge - 0.65f) / (AuraMotion.SHEET_PILL_TOP_FRACTION - 0.65f)).coerceIn(0f, 1f)
+                        }
                     },
             )
             // The player is being opened but has not claimed the card yet: the route changes a frame or more

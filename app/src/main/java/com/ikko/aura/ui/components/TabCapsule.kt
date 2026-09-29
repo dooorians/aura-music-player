@@ -147,6 +147,7 @@ fun TabCapsule(
     onSelect: (LibraryFilter) -> Unit,
     backdrop: LayerBackdrop,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val sheen = remember { Animatable(0f) }
     LaunchedEffect(state) {
@@ -214,7 +215,8 @@ fun TabCapsule(
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
                 // One handler for the whole capsule, so a finger can go down on one tab, slide to another
                 // and lift: what is chosen is where it lifts, not where it landed.
-                .pointerInput(Unit) {
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
                     val pad = TAB_PAD.toPx()
                     val gap = TAB_GAP.toPx()
                     fun tabAt(x: Float): Int {
@@ -256,7 +258,7 @@ fun TabCapsule(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            val dynamicTint = androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(CapsuleGlassTint.toArgb(), cover.accent.toArgb(), 0.18f))
+            val dynamicTint = androidx.compose.runtime.remember(cover.accent) { androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(CapsuleGlassTint.toArgb(), cover.accent.toArgb(), 0.18f)) }
             LiquidGlassPanel(
                 shape = CapsuleShape,
                 tint = dynamicTint,
