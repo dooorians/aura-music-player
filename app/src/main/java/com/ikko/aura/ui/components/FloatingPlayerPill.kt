@@ -73,9 +73,9 @@ private val PillShape = AuraShapes.MiniPlayer
 // Proportions taken from iOS's mini player, scaled to this screen's width (the two are the same
 // width once the screen margins are the same fraction of it, which is what makes the ratios carry
 // over): a capsule 46dp tall, artwork 30dp, text set at 12sp.
-private val PILL_HEIGHT = 47.5.dp
-private val ART_SIZE = 37.dp
-private val ART_SHAPE = RoundedCornerShape(10.dp)
+private val PILL_HEIGHT = 58.dp
+private val ART_SIZE = 44.dp
+private val ART_SHAPE = RoundedCornerShape(12.dp)
 // 7 dp rather than the spec's 5: at 5 the cover's corners ran into the curve of the pill's end and were
 // clipped by it, most of all at the bottom-left, where the pill's rim highlight also lies over them.
 private val START_INSET = 7.dp
@@ -83,7 +83,7 @@ private val ART_TEXT_GAP = 10.dp
 private val END_INSET = 17.7.dp
 
 // The transport glyphs are drawn in a 22dp box, centred, so play and pause sit on the same axis.
-private val GLYPH_SIZE = 22.dp
+private val GLYPH_SIZE = 26.dp
 private val GLYPH_GAP = 20.6.dp
 
 // The two glyphs are drawn apart, but the taps are not: each keeps a zone as wide as the glyph
@@ -111,14 +111,7 @@ private const val PILL_GLASS_ALPHA = 0.56f
 private const val PILL_BLUR_DP = 16f
 
 private const val HALO_MS = 720
-private const val PRESSED_SCALE = 0.97f
-
-/**
- * How close to 1 the press spring runs before it is called done. The default, 0.01, is a third of
- * this spring's whole travel: the bounce was cut off with the pill still visibly a hair small, and it
- * snapped the rest of the way.
- */
-private const val PRESS_REST_THRESHOLD = 0.0004f
+private const val PRESSED_SCALE = 0.94f
 private const val GLYPH_SWAP_MS = 120
 
 /**
@@ -142,27 +135,14 @@ fun FloatingPlayerPill(
 ) {
     val scope = rememberCoroutineScope()
 
-    var pressed by remember { mutableStateOf(false) }
     var haloCenter by remember { mutableStateOf(Offset.Unspecified) }
     val halo = remember { Animatable(1f) }
-
-    // Sinks slightly under the finger, then springs back — the overshoot on release is what makes
-    // it read as a physical press rather than a colour change.
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) PRESSED_SCALE else 1f,
-        // Deliberately soft: at StiffnessMedium the sink-and-return was over almost before the
-        // finger registered it, which read as a flicker rather than a press.
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessVeryLow,
-            visibilityThreshold = PRESS_REST_THRESHOLD,
-        ),
-        label = "pill-press-depth",
-    )
+    val scale = remember { Animatable(1f) }
+    var pressAnimJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val motion = LocalPageMotion.current
     val cover = LocalCoverColors.current
-    val dynamicTint = androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(PillGlassTint.toArgb(), cover.accent.toArgb(), 0.18f))
+    val dynamicTint = androidx.compose.runtime.remember(cover.accent) { androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(PillGlassTint.toArgb(), cover.accent.toArgb(), 0.18f)) }
     LiquidGlassPanel(
         shape = PillShape,
         tint = dynamicTint,
@@ -175,8 +155,9 @@ fun FloatingPlayerPill(
             .graphicsLayer {
                 val w = motion?.takeIf { !it.reduceMotion }
                     ?.let { min(abs(it.velocity) / PageMotionSpec.PLAYER_STRETCH_FULL_AT_PAGES_S, 1f) } ?: 0f
-                scaleX = scale * (1f + PageMotionSpec.PLAYER_STRETCH_X * w)
-                scaleY = scale * (1f - PageMotionSpec.PLAYER_STRETCH_Y * w)
+                val s = scale.value
+                scaleX = s * (1f + PageMotionSpec.PLAYER_STRETCH_X * w)
+                scaleY = s * (1f - PageMotionSpec.PLAYER_STRETCH_Y * w)
             }
             .clip(PillShape)
             // Clears what the page drew here before the glass draws. The page has no background of its
@@ -223,22 +204,52 @@ fun FloatingPlayerPill(
                 val playZoneStart = size.width - PLAY_ZONE.toPx()
                 detectTapGestures(
                     onPress = { offset ->
-                        pressed = true
+                        val pressStart = System.currentTimeMillis()
                         haloCenter = offset
                         val spread = scope.launch {
                             halo.snapTo(0f)
                             halo.animateTo(1f, tween(HALO_MS, easing = LinearOutSlowInEasing))
                         }
-                        // onPress fires on every touch down, including the start of a swipe, so
-                        // without this every drag also painted a full-width gradient over the pill
-                        // for the better part of a second — GPU work for a tap that never came.
-                        // tryAwaitRelease returns false when the gesture was cancelled, which is
-                        // exactly the case where the drag detector took it over.
+                        pressAnimJob?.cancel()
+                        pressAnimJob = scope.launch {
+                            scale.animateTo(
+                                targetValue = PRESSED_SCALE,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = 380f,
+                                ),
+                            )
+                        }
                         val released = tryAwaitRelease()
-                        pressed = false
-                        if (!released) {
+                        if (released) {
+                            val elapsed = System.currentTimeMillis() - pressStart
+                            pressAnimJob?.cancel()
+                            pressAnimJob = scope.launch {
+                                val minSinkMs = 85L
+                                if (elapsed < minSinkMs) {
+                                    kotlinx.coroutines.delay(minSinkMs - elapsed)
+                                }
+                                scale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.54f,
+                                        stiffness = 260f,
+                                    ),
+                                )
+                            }
+                        } else {
                             spread.cancel()
                             halo.snapTo(1f)
+                            pressAnimJob?.cancel()
+                            pressAnimJob = scope.launch {
+                                scale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMedium,
+                                    ),
+                                )
+                            }
                         }
                     },
                     onTap = { offset ->
@@ -277,14 +288,23 @@ fun FloatingPlayerPill(
         modifier = Modifier.fillMaxSize().padding(start = START_INSET, end = END_INSET),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AlbumArt(
-            uri = track.artworkUri,
-            contentDescription = track.album,
-            shape = ART_SHAPE,
-            modifier = Modifier.size(ART_SIZE),
-            targetSizeDp = ART_SIZE,
-            cacheKey = track.albumId.toString(),
-        )
+        androidx.compose.animation.AnimatedContent(
+            targetState = queueIndex to track,
+            transitionSpec = {
+                (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) togetherWith androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(150)))
+                    .using(androidx.compose.animation.SizeTransform(clip = false) { _, _ -> snap() })
+            },
+            label = "pill-art",
+        ) { (_, shown) ->
+            AlbumArt(
+                uri = shown.artworkUri,
+                contentDescription = shown.album,
+                shape = ART_SHAPE,
+                modifier = Modifier.size(ART_SIZE),
+                targetSizeDp = ART_SIZE,
+                cacheKey = shown.albumId.toString(),
+            )
+        }
 
         AnimatedContent(
             targetState = queueIndex to track,
