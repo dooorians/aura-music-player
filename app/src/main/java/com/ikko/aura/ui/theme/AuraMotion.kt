@@ -98,7 +98,7 @@ object AuraMotion {
     const val SHEET_ARTWORK_IN_MS = 0
 
     /** From where the card starts to clear on its way down, into the mini player. */
-    const val SHEET_CLEAR_FROM = 0.84f
+    const val SHEET_CLEAR_FROM = 0.70f
 
     val EaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
 

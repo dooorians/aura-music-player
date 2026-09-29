@@ -254,7 +254,7 @@ class SheetCard {
 val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf { SheetCard() }
 
 /** The card covers the mini player and the tab capsule from here down: they stay away while it is over them. */
-private const val CARD_COVERS_PILL_BELOW = 0.88f
+private const val CARD_COVERS_PILL_BELOW = 0.70f
 
 /** What the navigation transitions have worked out about the player, for the screen itself to read. */
 private class SheetFlags {
