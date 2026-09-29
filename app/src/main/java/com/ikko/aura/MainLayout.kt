@@ -881,8 +881,15 @@ fun MainLayout() {
                             val pAlpha = when {
                                 waiting -> 1f
                                 sheetCard.owner != null -> {
-                                    if (sheetCard.coversPill) 0f
-                                    else ((sheetCard.edge - CARD_COVERS_PILL_BELOW) / (AuraMotion.SHEET_PILL_TOP_FRACTION - CARD_COVERS_PILL_BELOW)).coerceIn(0f, 1f)
+                                    if (sheetCard.sinking) {
+                                        // On closing: card clears via cardAlpha; keep mini player opaque (1f) once card is near pill,
+                                        // avoiding any semi-transparent phase that exposes the underlying list.
+                                        if (sheetCard.coversPill) 0f else 1f
+                                    } else {
+                                        // On opening: gentle fade out as the card rises
+                                        if (sheetCard.coversPill) 0f
+                                        else ((sheetCard.edge - CARD_COVERS_PILL_BELOW) / (AuraMotion.SHEET_PILL_TOP_FRACTION - CARD_COVERS_PILL_BELOW)).coerceIn(0f, 1f)
+                                    }
                                 }
                                 showPill -> pillAlpha.value
                                 else -> 0f
