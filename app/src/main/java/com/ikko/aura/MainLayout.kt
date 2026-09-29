@@ -254,7 +254,7 @@ class SheetCard {
 val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf { SheetCard() }
 
 /** The card covers the mini player and the tab capsule from here down: they stay away while it is over them. */
-private const val CARD_COVERS_PILL_BELOW = 0.70f
+private const val CARD_COVERS_PILL_BELOW = 0.88f
 
 /** What the navigation transitions have worked out about the player, for the screen itself to read. */
 private class SheetFlags {
@@ -400,6 +400,10 @@ private fun popExit() =
  * hundred milliseconds. The slide is unchanged.
  */
 private fun isLyrics(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.Lyrics.route
+private fun isLyricsOrAlbum(entry: NavBackStackEntry): Boolean {
+    val route = entry.destination.route ?: return false
+    return route == AuraDestination.Lyrics.route || route.startsWith("album/")
+}
 
 private fun throughEnter(fromLeft: Boolean) =
     slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { if (fromLeft) -it / 4 else it / 4 } +
@@ -497,12 +501,12 @@ fun MainLayout() {
 
     BackHandler(enabled = searchOpen) { closeSearch() }
 
-    var pillHeightPx by remember { mutableStateOf(0) }
+    // pillHeightPx removed to avoid mid-animation recomposition
     // The navigation bar is part of what a list has to clear: pages run beneath it now, so the
     // last row needs the bar's height as well as the pill's to be reachable.
     val navigationBarHeight = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
     val reservedPillHeight = navigationBarHeight +
-        if (showPill && backdrop.hasTrack) with(density) { pillHeightPx.toDp() } else 0.dp
+        if (showPill && backdrop.hasTrack) 70.dp else 0.dp
 
     Surface(color = AuraColors.Black, modifier = Modifier.fillMaxSize()) {
         PermissionGate {
@@ -538,7 +542,7 @@ fun MainLayout() {
         // Between the player and its lyrics the cover's wash cross-fades with the aurora the lyrics sit on, both
         // ways, rather than cutting: it came on at once going back to the player and was dropped outright once the
         // player had left for the lyrics. Only there — opening and closing the player keep their own timing.
-        val fadingRoute = currentRoute == AuraDestination.Lyrics.route || currentRoute?.startsWith(AuraDestination.AlbumPattern.route) == true || currentRoute?.startsWith(AuraDestination.ArtistPattern.route) == true
+        val fadingRoute = currentRoute == AuraDestination.Lyrics.route || currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true
         val washFade by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (fadingRoute) 0f else 1f,
             animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
@@ -622,7 +626,7 @@ fun MainLayout() {
                 enterTransition = {
                     when {
                         isSheet(targetState) -> { sheetFlags.opening = true; AuraMotion.sheetEnter }
-                        isLyrics(targetState) && isSheet(initialState) -> throughEnter(fromLeft = false)
+                        isLyricsOrAlbum(targetState) && isSheet(initialState) -> throughEnter(fromLeft = false)
                         else -> pushEnter()
                     }
                 },
@@ -630,7 +634,7 @@ fun MainLayout() {
                     if (isSheet(initialState)) sheetFlags.closing = false
                     when {
                         isSheet(targetState) -> AuraMotion.sheetUnderExit
-                        isLyrics(targetState) && isSheet(initialState) -> throughExit(toLeft = true)
+                        isLyricsOrAlbum(targetState) && isSheet(initialState) -> throughExit(toLeft = true)
                         isSheet(initialState) -> fadeOut(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS))
                         else -> pushExit()
                     }
@@ -639,16 +643,16 @@ fun MainLayout() {
                     if (isSheet(targetState)) sheetFlags.opening = false
                     when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
-                        isSheet(targetState) && isLyrics(initialState) -> throughEnter(fromLeft = true)
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughEnter(fromLeft = true)
                         isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
                 },
                 popExitTransition = {
-                    if (isSheet(initialState)) sheetFlags.closing = !isLyrics(targetState)
+                    if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
                     when {
                         isSheet(initialState) -> AuraMotion.sheetExit
-                        isSheet(targetState) && isLyrics(initialState) -> throughExit(toLeft = false)
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughExit(toLeft = false)
                         else -> popExit()
                     }
                 },
@@ -743,8 +747,12 @@ fun MainLayout() {
             val pillAlpha = remember { Animatable(if (showPill) 1f else 0f) }
             LaunchedEffect(showPill) {
                 if (showPill) {
-                    delay(PILL_RETURN_DELAY_MS)
-                    pillAlpha.animateTo(1f, tween(PILL_FADE_IN_MS))
+                    if (sheetCard.owner != null) {
+                        pillAlpha.snapTo(1f)
+                    } else {
+                        delay(PILL_RETURN_DELAY_MS)
+                        pillAlpha.animateTo(1f, tween(PILL_FADE_IN_MS))
+                    }
                 } else {
                     // Gone in the same frame the card appears over it, as in Apple's: no fade to show through.
                     pillAlpha.snapTo(0f)
@@ -778,20 +786,24 @@ fun MainLayout() {
                     capsule.shown.value > 0.002f || (capsule.shown.isRunning && capsule.shown.targetValue > 0f)
                 }
             }
-            // Not composed at all the moment the route leaves the tabs, in the same frame — waiting for the
-            // capsule's own animation to notice left it drawn over the player's card for several frames.
-            if (capsuleLayer && currentRoute == AuraDestination.Tabs.route && !cardOverPill) {
-                TabCapsule(
-                    state = capsule,
-                    selected = selectedFilter,
-                    onSelect = capsuleViewModel.selection::select,
-                    backdrop = pillBackdrop,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 21.dp)
-                        .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) },
-                )
-            }
+            // We ALWAYS compose it so that going to the Library tab doesn't cause a massive jank frame, 
+            // but we hide it via alpha if it shouldn't be drawn (like when opening the player card).
+            val showCapsuleNow = currentRoute == AuraDestination.Tabs.route && !cardOverPill
+            
+            TabCapsule(
+                state = capsule,
+                selected = selectedFilter,
+                onSelect = capsuleViewModel.selection::select,
+                backdrop = pillBackdrop,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 21.dp)
+                    .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) }
+                    .graphicsLayer {
+                        // Instant hide if the route leaves the tabs, bypassing the animation delay
+                        alpha = if (capsuleLayer && showCapsuleNow) 1f else 0f
+                    },
+            )
             // The player is being opened but has not claimed the card yet: the route changes a frame or more
             // before the player's first composition, and the mini player stays until the card replaces it.
             val playerComing = currentRoute == AuraDestination.NowPlaying.route
@@ -815,7 +827,6 @@ fun MainLayout() {
                             navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
                         }
                     },
-                    onHeightMeasured = { pillHeightPx = it },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
@@ -837,10 +848,6 @@ fun MainLayout() {
                             alpha = (if (waiting) 1f else pillAlpha.value) * (1.6f * a).coerceIn(0f, 1f)
                         }
                         .windowInsetsPadding(WindowInsets.navigationBars)
-                        // Measured inside the window inset (which GradientScreenScaffold applies
-                        // on its own) but outside the pill's own margins, so what screens reserve
-                        // is exactly the space the pill visually occupies above the nav bar.
-                        .onSizeChanged { pillHeightPx = it.height }
                         .padding(horizontal = 21.dp, vertical = 6.dp),
                 )
             }
@@ -896,7 +903,7 @@ private fun PlayerPillHost(
     playerViewModel: PlayerViewModel,
     backdrop: LayerBackdrop,
     onOpenNowPlaying: () -> Unit,
-    onHeightMeasured: (Int) -> Unit,
+    
     modifier: Modifier = Modifier,
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()

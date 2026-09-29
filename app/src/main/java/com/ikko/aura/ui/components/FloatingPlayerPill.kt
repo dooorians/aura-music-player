@@ -216,7 +216,7 @@ fun FloatingPlayerPill(
                                 targetValue = PRESSED_SCALE,
                                 animationSpec = spring(
                                     dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = 380f,
+                                    stiffness = 200f,
                                 ),
                             )
                         }
@@ -225,15 +225,15 @@ fun FloatingPlayerPill(
                             val elapsed = System.currentTimeMillis() - pressStart
                             pressAnimJob?.cancel()
                             pressAnimJob = scope.launch {
-                                val minSinkMs = 85L
+                                val minSinkMs = 120L
                                 if (elapsed < minSinkMs) {
                                     kotlinx.coroutines.delay(minSinkMs - elapsed)
                                 }
                                 scale.animateTo(
                                     targetValue = 1f,
                                     animationSpec = spring(
-                                        dampingRatio = 0.54f,
-                                        stiffness = 260f,
+                                        dampingRatio = 0.58f,
+                                        stiffness = 150f,
                                     ),
                                 )
                             }
