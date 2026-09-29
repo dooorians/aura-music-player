@@ -245,9 +245,13 @@ class SheetCard {
     /** Where the card's top edge is while it travels, as a fraction of the screen's height; 0 when it is up or absent. */
     val cardTop: Float get() = if (owner == null || edge >= 1f) 0f else edge.coerceIn(0f, 1f)
 
+    /** Progress of opening the player sheet: 0f at mini player or closed, 1f at fullscreen. */
+    val openProgress: Float
+        get() = if (owner == null || !ready) 0f else (1f - (edge / AuraMotion.SHEET_PILL_TOP_FRACTION)).coerceIn(0f, 1f)
+
     /** How dark the page under the card is: none of it when the card is at the mini player, all of it when the card is up. */
     val dim: Float
-        get() = if (owner == null) 0f else AuraMotion.SHEET_DIM * (1f - (edge / AuraMotion.SHEET_START_FRACTION)).coerceIn(0f, 1f)
+        get() = if (owner == null || !ready) 0f else (AuraMotion.SHEET_DIM * openProgress).coerceIn(0f, 1f)
 }
 
 val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf { SheetCard() }
@@ -282,29 +286,44 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     }
     val cutout = remember { androidx.compose.ui.graphics.Path() }
     val revealPaint = remember { androidx.compose.ui.graphics.Paint() }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val maxShiftY = with(density) { 14.dp.toPx() }
+    val maxCornerRadius = with(density) { 26.dp.toPx() }
+
     Box(
         Modifier
             .fillMaxSize()
-            // The page is hidden under the card only — the card's own rectangle, as narrow as it is and with
-            // its rounded top corners — and drawn everywhere else. It used to be cut at the card's top edge in
-            // a straight line across the whole width, which left nothing at all (black) beside the narrower
-            // card and in the notches of its rounded corners: rounded and square at once.
-            //
-            // Cut for the card's whole travel: the card no longer has an opaque face of its own, it shows the
-            // player's own background (the cover's wash, drawn under the page), so nothing of the page may show
-            // inside it. On the way down, as the card clears into the mini player, the page comes back inside it
-            // at the same rate, so that once the card has gone nothing appears at once.
+            // Subtle depth effect: background page recedes, slides down slightly, and rounds its top corners
+            .graphicsLayer {
+                val t = card.openProgress
+                if (t > 0.001f) {
+                    val s = 1f - 0.055f * t
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                    translationY = maxShiftY * t
+                    val corner = maxCornerRadius * t
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                        topStart = corner,
+                        topEnd = corner,
+                        bottomStart = 0f,
+                        bottomEnd = 0f,
+                    )
+                    clip = true
+                }
+            }
             .drawWithContent {
                 val o = card.edge
                 // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
-                // drawn whole. The player keeps the card for another ~0.2 s until it is disposed, and cutting the page
-                // and redrawing it a second time into a layer at full strength cost a full-screen offscreen pass per
-                // frame for a picture identical to the plain one — right while the mini player and the tabs come back.
+                // drawn whole.
                 if (card.owner == null || !card.ready || o >= 1f || card.cardAlpha <= 0f) {
                     drawContent()
                     return@drawWithContent
                 }
-                setToCard(cutout, o, size, AuraMotion.cornerAt(o).toPx())
+                val t = card.openProgress
+                val s = if (t > 0.001f) 1f - 0.055f * t else 1f
+                val shiftY = if (t > 0.001f) maxShiftY * t else 0f
+                setToCardScaled(cutout, o, size, AuraMotion.cornerAt(o).toPx(), s, shiftY)
                 clipPath(cutout, androidx.compose.ui.graphics.ClipOp.Difference) {
                     this@drawWithContent.drawContent()
                 }
@@ -317,14 +336,10 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                         drawContext.canvas.restore()
                     }
                 }
-            }
-            // The page in a layer of its own, so a frame of the card's travel redraws the cut above and reuses
-            // the page's picture as it is.
-            .graphicsLayer { },
+            },
     ) {
         content()
-        // Its own node, so the dimming — which animates on its own clock — costs one rectangle rather than
-        // another pass over the page under it.
+        // Its own node, so the dimming — which follows openProgress continuously — costs one rectangle
         Box(
             Modifier
                 .matchParentSize()
@@ -357,13 +372,46 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
             bottom = top + size.height * s,
             topLeftCornerRadius = radius,
             topRightCornerRadius = radius,
-            // Rounded like the top, though they are never seen: the card's bottom stays below the screen's (checked
-            // at this density, the arc never reaches it). One radius all round makes this a *simple* rounded rect,
-            // which the GPU clips by itself; top-only rounding is a "complex" one, which Skia can only clip through a
-            // mask drawn on the CPU and uploaded again on every frame of the travel — a full-screen texture per
-            // frame, for the page and for the cover's wash, measured.
             bottomRightCornerRadius = radius,
             bottomLeftCornerRadius = radius,
+        ),
+    )
+}
+
+/**
+ * Sets [path] to the player's card, projected into the local coordinate space of a layer with [layerScale]
+ * and [layerShiftY] applied about top-center.
+ */
+private fun setToCardScaled(
+    path: androidx.compose.ui.graphics.Path,
+    edge: Float,
+    size: Size,
+    radiusPx: Float,
+    layerScale: Float,
+    layerShiftY: Float,
+) {
+    val s = 1f - AuraMotion.SHEET_NARROWING * edge
+    val screenWidth = size.width * s
+    val screenLeft = (size.width - screenWidth) / 2f
+    val screenTop = edge * size.height
+    val screenRadius = radiusPx * s
+
+    val localLeft = (size.width / 2f) + (screenLeft - size.width / 2f) / layerScale
+    val localWidth = screenWidth / layerScale
+    val localTop = (screenTop - layerShiftY) / layerScale
+    val localRadius = screenRadius / layerScale
+
+    path.reset()
+    path.addRoundRect(
+        androidx.compose.ui.geometry.RoundRect(
+            left = localLeft,
+            top = localTop,
+            right = localLeft + localWidth,
+            bottom = localTop + (size.height * s) / layerScale,
+            topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
+            topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
+            bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
+            bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(localRadius),
         ),
     )
 }
