@@ -132,6 +132,7 @@ fun FloatingPlayerPill(
     onPrevious: () -> Unit,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -199,7 +200,8 @@ fun FloatingPlayerPill(
                     center = centre,
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
                 val nextZoneStart = size.width - NEXT_ZONE.toPx()
                 val playZoneStart = size.width - PLAY_ZONE.toPx()
                 detectTapGestures(
@@ -261,7 +263,8 @@ fun FloatingPlayerPill(
                     },
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
                 // One drag detector for both axes rather than two competing ones: the dominant
                 // axis at release decides, so a slightly diagonal swipe still does what was meant.
                 val threshold = 40.dp.toPx()

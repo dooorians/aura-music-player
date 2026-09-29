@@ -621,7 +621,7 @@ fun MainLayout() {
         // every time the page draws, and while the player's card is over the mini player and the tab capsule
         // — the only two things that sample it — that was a full-screen recording per frame of the card's
         // travel, for a picture nobody was looking through.
-        val pageBackdropNeeded = showPill && !cardOverPill
+        val pageBackdropNeeded = (showPill || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
         // A layer of its own, before the recording. Without one, the page shares its picture with everything
         // drawn beside it — the mini player, the tab capsule — so each frame of their own arrival had the
         // whole page recorded again for a backdrop whose content had not changed.
@@ -845,15 +845,21 @@ fun MainLayout() {
             // The player is being opened but has not claimed the card yet: the route changes a frame or more
             // before the player's first composition, and the mini player stays until the card replaces it.
             val playerComing = currentRoute == AuraDestination.NowPlaying.route
-            val pillComposed by remember(showPill) {
+            val pillComposed by remember(showPill, currentRoute) {
                 derivedStateOf {
-                    showPill || pillAlpha.value > 0f || sheetCard.waitingToShow || (playerComing && sheetCard.owner == null)
+                    showPill ||
+                        pillAlpha.value > 0f ||
+                        sheetCard.waitingToShow ||
+                        (playerComing && sheetCard.owner == null) ||
+                        (sheetCard.owner != null && !sheetCard.coversPill)
                 }
             }
             if (pillComposed) {
+                val pillInteractive = showPill && sheetCard.owner == null
                 PlayerPillHost(
                     playerViewModel = playerViewModel,
                     backdrop = pillBackdrop,
+                    enabled = pillInteractive,
                     onOpenNowPlaying = {
                         // Once per opening. The mini player stays on screen (and under the finger) until the player's card
                         // replaces it, and every further tap navigated to the player again: launchSingleTop still swaps
@@ -872,7 +878,19 @@ fun MainLayout() {
                             // Kept, as it is, while the card waits for the player to draw: it goes in the
                             // frame the card comes in (see SheetCard.ready), so the two never leave a gap.
                             val waiting = sheetCard.waitingToShow || (playerComing && sheetCard.owner == null)
-                            if (!waiting && (!showPill || sheetCard.coversPill)) { alpha = 0f; return@graphicsLayer }
+                            val pAlpha = when {
+                                waiting -> 1f
+                                sheetCard.owner != null -> {
+                                    if (sheetCard.coversPill) 0f
+                                    else ((sheetCard.edge - CARD_COVERS_PILL_BELOW) / (AuraMotion.SHEET_PILL_TOP_FRACTION - CARD_COVERS_PILL_BELOW)).coerceIn(0f, 1f)
+                                }
+                                showPill -> pillAlpha.value
+                                else -> 0f
+                            }
+                            if (pAlpha <= 0f) {
+                                alpha = 0f
+                                return@graphicsLayer
+                            }
                             val a = arrival.value
                             val speed = if (arrival.isRunning) {
                                 min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)
@@ -883,7 +901,7 @@ fun MainLayout() {
                             scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
                             scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
                             translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                            alpha = (if (waiting) 1f else pillAlpha.value) * (1.6f * a).coerceIn(0f, 1f)
+                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f)
                         }
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(horizontal = 21.dp, vertical = 6.dp),
@@ -941,8 +959,8 @@ private fun PlayerPillHost(
     playerViewModel: PlayerViewModel,
     backdrop: LayerBackdrop,
     onOpenNowPlaying: () -> Unit,
-    
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
@@ -957,6 +975,7 @@ private fun PlayerPillHost(
             onPrevious = playerViewModel::skipPrevious,
             onOpen = onOpenNowPlaying,
             modifier = modifier,
+            enabled = enabled,
         )
     }
 }
