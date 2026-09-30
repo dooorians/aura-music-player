@@ -45,12 +45,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,7 +113,7 @@ private const val PILL_GLASS_ALPHA = 0.56f
 private const val PILL_BLUR_DP = 16f
 
 private const val HALO_MS = 720
-private const val PRESSED_SCALE = 0.94f
+private const val PRESSED_SCALE = 1.045f
 private const val GLYPH_SWAP_MS = 120
 
 /**
@@ -139,6 +141,7 @@ fun FloatingPlayerPill(
     var haloCenter by remember { mutableStateOf(Offset.Unspecified) }
     val halo = remember { Animatable(1f) }
     val scale = remember { Animatable(1f) }
+    var touchPivot by remember { mutableStateOf(TransformOrigin.Center) }
     var pressAnimJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val motion = LocalPageMotion.current
@@ -159,6 +162,7 @@ fun FloatingPlayerPill(
                 val s = scale.value
                 scaleX = s * (1f + PageMotionSpec.PLAYER_STRETCH_X * w)
                 scaleY = s * (1f - PageMotionSpec.PLAYER_STRETCH_Y * w)
+                transformOrigin = touchPivot
             }
             .clip(PillShape)
             // Clears what the page drew here before the glass draws. The page has no background of its
@@ -207,6 +211,14 @@ fun FloatingPlayerPill(
                 detectTapGestures(
                     onPress = { offset ->
                         val pressStart = System.currentTimeMillis()
+                        val w = size.width.toFloat()
+                        val h = size.height.toFloat()
+                        if (w > 0f && h > 0f) {
+                            touchPivot = TransformOrigin(
+                                (offset.x / w).coerceIn(0f, 1f),
+                                (offset.y / h).coerceIn(0f, 1f),
+                            )
+                        }
                         haloCenter = offset
                         val spread = scope.launch {
                             halo.snapTo(0f)
@@ -217,8 +229,8 @@ fun FloatingPlayerPill(
                             scale.animateTo(
                                 targetValue = PRESSED_SCALE,
                                 animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = 200f,
+                                    dampingRatio = 0.82f, // Apple interactive soft cushion
+                                    stiffness = 160f,
                                 ),
                             )
                         }
@@ -227,15 +239,15 @@ fun FloatingPlayerPill(
                             val elapsed = System.currentTimeMillis() - pressStart
                             pressAnimJob?.cancel()
                             pressAnimJob = scope.launch {
-                                val minSinkMs = 120L
+                                val minSinkMs = 100L
                                 if (elapsed < minSinkMs) {
                                     kotlinx.coroutines.delay(minSinkMs - elapsed)
                                 }
                                 scale.animateTo(
                                     targetValue = 1f,
                                     animationSpec = spring(
-                                        dampingRatio = 0.58f,
-                                        stiffness = 150f,
+                                        dampingRatio = 0.58f, // Apple .bouncy: soft organic overshoot
+                                        stiffness = 135f,
                                     ),
                                 )
                             }
@@ -247,8 +259,8 @@ fun FloatingPlayerPill(
                                 scale.animateTo(
                                     targetValue = 1f,
                                     animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMedium,
+                                        dampingRatio = 0.82f,
+                                        stiffness = 160f,
                                     ),
                                 )
                             }
@@ -328,16 +340,18 @@ fun FloatingPlayerPill(
                     style = LibraryTypography.PlayerTitle,
                     color = Color.White,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
+                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                 )
                 Text(
                     text = shown.artist,
                     style = LibraryTypography.PlayerArtist,
                     color = cover.tint.copy(alpha = 0.72f),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
+                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                 )
             }
         }

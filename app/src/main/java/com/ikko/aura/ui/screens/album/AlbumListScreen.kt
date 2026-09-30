@@ -28,6 +28,7 @@ import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SquircleCard
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
+import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.viewmodel.AlbumListViewModel
 
 @Composable
@@ -39,12 +40,7 @@ fun AlbumListScreen(
     val uiState by albumListViewModel.uiState.collectAsStateWithLifecycle()
 
     GradientScreenScaffold {
-        Text(
-            text = uiState.title,
-            style = MaterialTheme.typography.headlineLarge,
-            color = AuraColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        PageHeader(title = uiState.title)
 
         if (uiState.albums.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -57,7 +53,7 @@ fun AlbumListScreen(
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().weight(1f),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

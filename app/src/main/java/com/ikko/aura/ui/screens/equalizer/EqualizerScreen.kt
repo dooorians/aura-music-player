@@ -33,6 +33,7 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
+import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.viewmodel.EqBand
 import com.ikko.aura.viewmodel.EqualizerViewModel
@@ -48,12 +49,7 @@ fun EqualizerScreen(
     val uiState by equalizerViewModel.uiState.collectAsStateWithLifecycle()
 
     GradientScreenScaffold {
-        Text(
-            text = "Égaliseur",
-            style = MaterialTheme.typography.headlineLarge,
-            color = AuraColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        PageHeader(title = "Égaliseur")
 
         if (!uiState.available) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -68,7 +64,7 @@ fun EqualizerScreen(
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {

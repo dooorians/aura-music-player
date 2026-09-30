@@ -133,13 +133,13 @@ import androidx.compose.foundation.layout.width
  * 89 dp down, the count's 111, and the first row of covers starts at 129. One margin, 21 dp, at both sides.
  */
 private val PAGE_MARGIN = 21.dp
-// 2.4 dp higher than the mockup's 89 and 111: the title then sits at exactly the height of Home's "Favoris" and
-// Settings' "Réglages" (it was 6 px below them); the count and buttons follow it, the covers stay at 129.
-private val TITLE_BASELINE = 86.6.dp
-private val COUNT_BASELINE = 108.6.dp
-private val GRID_TOP = 129.dp
+// The baseline is placed exactly at 45.dp relative to the status bar, which perfectly aligns
+// with Home's "Favoris" and Settings' "Réglages" (which are centered in a 56dp box starting at 8dp).
+private val TITLE_RELATIVE_BASELINE = 45.dp
+private val COUNT_RELATIVE_BASELINE = 67.dp
+private val HEADER_RELATIVE_HEIGHT = 88.dp
 private val HEADER_BUTTON = 47.dp
-private val STRIP_TOP = 119.dp
+private val STRIP_RELATIVE_TOP = 78.dp
 private val HEADER_BUTTON_GAP = 10.dp
 
 /** How long the list takes to slide when the capsule changes the view. */
@@ -159,7 +159,7 @@ fun LibraryScreen(
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     // The header folds away with the status bar's height included: the page runs under the bar (see HomeScreen),
     // so once folded the list goes on up beneath it and melts into it. At rest the list starts where it did.
-    val headerHeight = GRID_TOP
+    val headerHeight = statusBarTop + HEADER_RELATIVE_HEIGHT
     val headerHeightPx = with(density) { headerHeight.toPx() }
     var headerOffsetPx by rememberCollapseOffset()
     // Same rule as the top nav row: collapse while scrolling down, and only come back once the
@@ -227,7 +227,7 @@ fun LibraryScreen(
         playerViewModel = playerViewModel,
         onLibraryChanged = libraryViewModel::rescan,
     ) { context ->
-    val stripTopPx = with(density) { STRIP_TOP.toPx() }
+    val stripTopPx = with(density) { (statusBarTop + STRIP_RELATIVE_TOP).toPx() }
     val listTopBasePx = headerHeightPx
     androidx.compose.runtime.CompositionLocalProvider(
         // The strip holds still on the screen — 119 dp from the top — while the header above the list folds.
@@ -360,7 +360,7 @@ private fun LibraryHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(GRID_TOP - statusBarTop)
+            .height(HEADER_RELATIVE_HEIGHT)
             // Moves with its page, like the headers of the other pages: it used to trail behind it, which on a
             // fast swipe left it lagging and then catching up — a bounce of its own the other pages do not have.
             .padding(horizontal = PAGE_MARGIN),
@@ -372,37 +372,38 @@ private fun LibraryHeader(
             style = LibraryTypography.PageTitle,
             color = cover.tint,
             maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = TITLE_BASELINE - statusBarTop),
+            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = TITLE_RELATIVE_BASELINE),
         )
         Text(
             text = countText,
             style = LibraryTypography.PageCount,
             color = cover.tint.copy(alpha = 0.66f),
             maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = COUNT_BASELINE - statusBarTop),
+            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = COUNT_RELATIVE_BASELINE),
         )
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 // The discs' centre sits level with the middle of the title's capitals.
-                .padding(top = (TITLE_BASELINE - statusBarTop) - 9.dp - HEADER_BUTTON / 2),
+                .padding(top = TITLE_RELATIVE_BASELINE - 9.dp - HEADER_BUTTON / 2),
             horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val openSearch = LocalSearchOpener.current
-            AuraIconButton(onClick = openSearch, size = HEADER_BUTTON, light = 12f) {
-                Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(22.dp))
-            }
-            // Shuffle and sort share one capsule — the two ways of ordering the list, as a toolbar groups
-            // related actions — while search keeps its own round button.
+            // Shuffle and sort share one capsule: presses tilt and expand more on the touched side
             AuraIconGroup(light = 80f) {
-                // Not the plain shuffle: this one sequences the set so consecutive tracks are ones
-                // Automix can actually mix — see SmartShuffle.
-                AuraGroupIcon(onClick = onSmartShuffle, size = HEADER_BUTTON) {
+                AuraGroupIcon(
+                    onClick = onSmartShuffle,
+                    size = HEADER_BUTTON,
+                    side = -1f,
+                ) {
                     Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(22.dp))
                 }
                 Box {
-                    AuraGroupIcon(onClick = { menuExpanded = true }, size = HEADER_BUTTON) {
+                    AuraGroupIcon(
+                        onClick = { menuExpanded = true },
+                        size = HEADER_BUTTON,
+                        side = 1f,
+                    ) {
                         Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(22.dp))
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {

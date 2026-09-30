@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -178,6 +179,10 @@ fun TabCapsule(
     var finger by remember { mutableFloatStateOf(selectedIndex.toFloat()) }
     val grip = remember { Animatable(0f) }
 
+    val pressScale = remember { Animatable(1f) }
+    var touchPivot by remember { mutableStateOf(TransformOrigin.Center) }
+    var pressAnimJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
     /** Where, in tabs from the first, a finger at [x] puts the pastille's left edge (fractional). */
     fun pastilleAt(x: Float): Float {
         val pad = with(density) { TAB_PAD.toPx() }
@@ -227,6 +232,25 @@ fun TabCapsule(
                         while (true) {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             if (state.shown.value <= PageMotionSpec.CAPSULE_INTERACTIVE_ABOVE) continue
+                            val pressStart = System.currentTimeMillis()
+                            val wPx = this.size.width.toFloat()
+                            val hPx = this.size.height.toFloat()
+                            if (wPx > 0f && hPx > 0f) {
+                                touchPivot = TransformOrigin(
+                                    (down.position.x / wPx).coerceIn(0f, 1f),
+                                    (down.position.y / hPx).coerceIn(0f, 1f),
+                                )
+                            }
+                            pressAnimJob?.cancel()
+                            pressAnimJob = scope.launch {
+                                pressScale.animateTo(
+                                    targetValue = 1.045f,
+                                    animationSpec = androidx.compose.animation.core.spring(
+                                        dampingRatio = 0.82f, // Apple interactive soft cushion
+                                        stiffness = 160f,
+                                    ),
+                                )
+                            }
                             finger = pastilleAt(down.position.x)
                             dragging = true
                             scope.launch {
@@ -242,6 +266,19 @@ fun TabCapsule(
                                     change.consume()
                                 }
                             } while (change.pressed)
+                            val elapsed = System.currentTimeMillis() - pressStart
+                            pressAnimJob?.cancel()
+                            pressAnimJob = scope.launch {
+                                val minHoldMs = 100L
+                                if (elapsed < minHoldMs) kotlinx.coroutines.delay(minHoldMs - elapsed)
+                                pressScale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = androidx.compose.animation.core.spring(
+                                        dampingRatio = 0.58f, // Apple .bouncy: soft organic overshoot
+                                        stiffness = 135f,
+                                    ),
+                                )
+                            }
                             val index = tabAt(last)
                             chosen = index
                             val from = shownAt()
@@ -268,9 +305,13 @@ fun TabCapsule(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(PageMotionSpec.CAPSULE_HEIGHT_DP.dp)
+                    .graphicsLayer {
+                        scaleX = pressScale.value
+                        scaleY = pressScale.value
+                        transformOrigin = touchPivot
+                    }
                     .clip(CapsuleShape)
-                    // The page has no background of its own, so the glass's blurred copy of it must replace
-                    // what the page drew here rather than sit over it — see the mini player.
+                    // Clears what the page drew here before the glass draws. See FloatingPlayerPill for what that buys.
                     .drawBehind { drawRect(Color.Transparent, blendMode = BlendMode.Clear) }
                     .sheen(position = { 1.3f - 1.7f * sheen.value }, strength = { if (sheen.value in 0.001f..0.999f) 1f else 0f }),
             ) {

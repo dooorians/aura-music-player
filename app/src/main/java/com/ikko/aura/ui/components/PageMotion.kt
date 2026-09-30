@@ -71,11 +71,11 @@ object PageMotionSpec {
     const val EDGE_RESISTANCE = 0.35f
 
     // --- Tab capsule ---
-    const val CAPSULE_HEIGHT_DP = 45f
+    const val CAPSULE_HEIGHT_DP = 52f
 
     /** The touch zone is taller than the drawing, so a thumb does not have to be exact. */
-    const val CAPSULE_TOUCH_HEIGHT_DP = 48f
-    const val CAPSULE_GAP_TO_PLAYER_DP = 7f
+    const val CAPSULE_TOUCH_HEIGHT_DP = 56f
+    const val CAPSULE_GAP_TO_PLAYER_DP = 8f
     const val CAPSULE_SHOW_DAMPING = 0.5f
     const val CAPSULE_SHOW_STIFFNESS = 200f
     const val CAPSULE_HIDE_MS = 450

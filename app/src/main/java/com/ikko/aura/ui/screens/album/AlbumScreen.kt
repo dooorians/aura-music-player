@@ -100,6 +100,7 @@ fun AlbumScreen(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
     albumViewModel: AlbumViewModel = hiltViewModel(),
+    isTransitioning: Boolean = false,
 ) {
     val uiState by albumViewModel.uiState.collectAsStateWithLifecycle()
     val page by albumViewModel.page.collectAsStateWithLifecycle()
@@ -142,7 +143,7 @@ fun AlbumScreen(
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(
             applyStatusBarInset = false,
-            modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { listState.headerScrollPx(1000f) },
+            modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { if (isTransitioning) 0f else listState.headerScrollPx(1000f) },
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AlbumGround(ground = theme.solid, listState = listState)
@@ -453,7 +454,7 @@ private fun AlbumTrackRow(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
@@ -512,9 +513,13 @@ private fun PlayingBars(color: Color, animate: Boolean) {
     val clock = remember { mutableFloatStateOf(0f) }
     if (animate) {
         LaunchedEffect(Unit) {
+            var lastTime = 0L
             while (true) {
-                withFrameMillis { clock.floatValue = it / 1000f }
-                delay(BARS_STEP_MS)
+                withFrameMillis { time ->
+                    if (lastTime == 0L) lastTime = time
+                    clock.floatValue += (time - lastTime) / 1000f
+                    lastTime = time
+                }
             }
         }
     }

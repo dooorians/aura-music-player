@@ -1,11 +1,9 @@
 package com.ikko.aura.ui.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,19 +19,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.currentCompositeKeyHash
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** [Primary] is the pale tile (the player's play button); [Neutral] is the dark glass one. */
 enum class ButtonTone { Primary, Neutral }
@@ -45,7 +55,7 @@ enum class ButtonTone { Primary, Neutral }
  */
 val TileShape = RoundedCornerShape(percent = 34)
 
-private const val PRESSED_SCALE = 0.96f
+private const val PRESSED_SCALE = 1.05f
 
 /** Round icon buttons carry a softer edge than the transport tiles: a hint of relief, not a frame. */
 private const val ICON_RIM_STRENGTH = 0.45f
@@ -66,9 +76,8 @@ private val PrimaryContent = Color(0xFF23232B)
 
 /**
  * A button in the player's own style: the transport tiles' rounded shape, their darkening and their
- * rim (see [playerRim]), and the same soft press — it sinks under the finger and springs back with a
- * little overshoot. No colour of its own: the buttons take nothing from the page, so they cannot
- * clash with it.
+ * rim (see [playerRim]), and an inverted press — it pops forward towards the user from the exact
+ * touch contact point and springs back with a lively bounce.
  */
 @Composable
 fun AuraButton(
@@ -113,10 +122,21 @@ fun AuraIconButton(
     }
 }
 
+class AuraGroupPressState {
+    val scale = Animatable(1f)
+    val tiltY = Animatable(0f)
+    val tiltX = Animatable(0f)
+    val translationX = Animatable(0f)
+    val translationY = Animatable(0f)
+    var touchPivot by mutableStateOf(TransformOrigin.Center)
+}
+
+val LocalAuraGroupPressState = compositionLocalOf<AuraGroupPressState?> { null }
+
 /**
  * Several icon buttons joined into one capsule of the round buttons' own glass — one fill, one rim, one light —
- * the way a toolbar groups related actions. Each [AuraGroupIcon] inside is still its own button, with its own
- * press; the capsule itself does nothing when touched.
+ * the way a toolbar groups related actions. The capsule dynamically expands and tilts towards the user on
+ * the pressed side, with bounce physics and directional 3D relief.
  */
 @Composable
 fun AuraIconGroup(
@@ -124,44 +144,282 @@ fun AuraIconGroup(
     light: Float = 45f,
     content: @Composable RowScope.() -> Unit,
 ) {
-    Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .drawBehind { drawRect(NeutralFill) }
-            .playerRim(CircleShape, ICON_RIM_STRENGTH, light),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+    val groupState = remember { AuraGroupPressState() }
+
+    CompositionLocalProvider(LocalAuraGroupPressState provides groupState) {
+        Row(
+            modifier = modifier
+                .graphicsLayer {
+                    scaleX = groupState.scale.value
+                    scaleY = groupState.scale.value
+                    rotationX = groupState.tiltX.value
+                    rotationY = groupState.tiltY.value
+                    translationX = groupState.translationX.value
+                    translationY = groupState.translationY.value
+                    cameraDistance = 12f
+                    transformOrigin = groupState.touchPivot
+                }
+                .clip(CircleShape)
+                .drawBehind { drawRect(NeutralFill) }
+                .playerRim(CircleShape, ICON_RIM_STRENGTH, light),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
 }
 
-/** One button of an [AuraIconGroup]: a square slot of [size], its glyph sinking under the finger like a tile's. */
+/** One button of an [AuraIconGroup]: expanding towards the user from the touch point with asymmetric emphasis. */
 @Composable
 fun AuraGroupIcon(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 46.dp,
+    side: Float = 0f, // -1f = left, 0f = center, +1f = right
     content: @Composable () -> Unit,
 ) {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) GROUP_PRESSED_SCALE else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessVeryLow, visibilityThreshold = 0.0004f),
-        label = "group-icon-press",
-    )
+    val groupState = LocalAuraGroupPressState.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val scale = remember { Animatable(1f) }
+    var touchPivot by remember { mutableStateOf(TransformOrigin.Center) }
+    var pressJob by remember { mutableStateOf<Job?>(null) }
+
     CompositionLocalProvider(LocalContentColor provides Color.White) {
         Box(
             modifier = modifier
                 .size(size)
-                .clickable(interactionSource = source, indication = null, onClick = onClick)
-                .graphicsLayer { scaleX = scale; scaleY = scale },
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                    transformOrigin = touchPivot
+                }
+                .semantics { role = Role.Button }
+                .pointerInput(onClick, side) {
+                    detectTapGestures(
+                        onPress = { offset ->
+                            val pressStart = System.currentTimeMillis()
+                            val w = this@pointerInput.size.width.toFloat()
+                            val h = this@pointerInput.size.height.toFloat()
+                            val normX = if (w > 0f) (offset.x / w).coerceIn(0f, 1f) else 0.5f
+                            val normY = if (h > 0f) (offset.y / h).coerceIn(0f, 1f) else 0.5f
+                            touchPivot = TransformOrigin(normX, normY)
+
+                            pressJob?.cancel()
+                            pressJob = scope.launch {
+                                launch {
+                                    scale.animateTo(
+                                        targetValue = GROUP_PRESSED_SCALE,
+                                        animationSpec = spring(
+                                            dampingRatio = 0.82f,
+                                            stiffness = 160f,
+                                        ),
+                                    )
+                                }
+                                groupState?.let { group ->
+                                    val isRight = side > 0f
+                                    val isLeft = side < 0f
+
+                                    // When pressing right: anchor at left so expansion blooms towards the right.
+                                    // When pressing left: anchor at right so expansion blooms towards the left.
+                                    val targetPivot = if (isRight) TransformOrigin(0.20f, normY)
+                                        else if (isLeft) TransformOrigin(0.80f, normY)
+                                        else TransformOrigin.Center
+
+                                    // 3D perspective tilt:
+                                    // Right side rotates towards the viewer (negative rotationY)
+                                    // Left side rotates towards the viewer (positive rotationY)
+                                    val targetTiltY = if (isRight) -5.0f else if (isLeft) 5.0f else 0f
+                                    val targetTiltX = -(normY - 0.5f) * 3.5f
+
+                                    // Physical translation: the glass visibly springs outwards in the direction pressed
+                                    val shiftXDist = 3.5f * density.density
+                                    val targetShiftX = if (isRight) shiftXDist else if (isLeft) -shiftXDist else 0f
+                                    val targetShiftY = (normY - 0.5f) * 1.5f * density.density
+
+                                    group.touchPivot = targetPivot
+                                    launch {
+                                        group.scale.animateTo(
+                                            targetValue = 1.05f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    launch {
+                                        group.tiltY.animateTo(
+                                            targetValue = targetTiltY,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    launch {
+                                        group.tiltX.animateTo(
+                                            targetValue = targetTiltX,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    launch {
+                                        group.translationX.animateTo(
+                                            targetValue = targetShiftX,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    launch {
+                                        group.translationY.animateTo(
+                                            targetValue = targetShiftY,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
+                            val released = tryAwaitRelease()
+                            if (released) {
+                                val elapsed = System.currentTimeMillis() - pressStart
+                                pressJob?.cancel()
+                                pressJob = scope.launch {
+                                    val minHoldMs = 100L
+                                    if (elapsed < minHoldMs) delay(minHoldMs - elapsed)
+                                    launch {
+                                        scale.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.58f, // Apple .bouncy
+                                                stiffness = 135f,
+                                            ),
+                                        )
+                                    }
+                                    groupState?.let { group ->
+                                        launch {
+                                            group.scale.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.58f, // Apple .bouncy
+                                                    stiffness = 135f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.tiltY.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.58f, // Apple .bouncy
+                                                    stiffness = 135f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.tiltX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.58f, // Apple .bouncy
+                                                    stiffness = 135f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.translationX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.58f, // Apple .bouncy
+                                                    stiffness = 135f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.translationY.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.58f, // Apple .bouncy
+                                                    stiffness = 135f,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                pressJob?.cancel()
+                                pressJob = scope.launch {
+                                    launch {
+                                        scale.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    groupState?.let { group ->
+                                        launch {
+                                            group.scale.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.tiltY.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.tiltX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.translationX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                ),
+                                            )
+                                        }
+                                        launch {
+                                            group.translationY.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        onTap = { onClick() },
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) { content() }
     }
 }
 
-/** A glyph inside a group sinks a little further than a whole tile does, so the press still reads on its own. */
-private const val GROUP_PRESSED_SCALE = 0.88f
+/** A glyph inside a group pops towards the user when pressed. */
+private const val GROUP_PRESSED_SCALE = 1.055f
 
 /** A selectable tile: the pale one when chosen, the dark one otherwise. */
 @Composable
@@ -193,25 +451,78 @@ private fun TileSurface(
     lightDegrees: Float = 45f,
     content: @Composable (contentColor: Color) -> Unit,
 ) {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    // The transport tiles' own press, spring and all — deliberately soft: at a stiffer spring the
-    // sink-and-return is over before the finger registers it, which reads as a flicker.
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) PRESSED_SCALE else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessVeryLow, visibilityThreshold = 0.0004f),
-        label = "tile-press-depth",
-    )
+    val scope = rememberCoroutineScope()
+    val scale = remember { Animatable(1f) }
+    var touchPivot by remember { mutableStateOf(TransformOrigin.Center) }
+    var pressJob by remember { mutableStateOf<Job?>(null) }
+
     val fill = if (tone == ButtonTone.Primary) PrimaryFill else NeutralFill
     val contentColor = if (tone == ButtonTone.Primary) PrimaryContent else Color.White
 
     Box(
         modifier = modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+                transformOrigin = touchPivot
+            }
             .clip(shape)
             .drawBehind { drawRect(fill) }
             .playerRim(shape, rimStrength, lightDegrees)
-            .clickable(interactionSource = source, indication = null, onClick = onClick),
+            .semantics { role = Role.Button }
+            .pointerInput(onClick) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        val pressStart = System.currentTimeMillis()
+                        val w = this@pointerInput.size.width.toFloat()
+                        val h = this@pointerInput.size.height.toFloat()
+                        if (w > 0f && h > 0f) {
+                            touchPivot = TransformOrigin(
+                                (offset.x / w).coerceIn(0f, 1f),
+                                (offset.y / h).coerceIn(0f, 1f),
+                            )
+                        }
+                        pressJob?.cancel()
+                        pressJob = scope.launch {
+                            scale.animateTo(
+                                targetValue = PRESSED_SCALE,
+                                animationSpec = spring(
+                                    dampingRatio = 0.82f, // Apple interactive soft cushion
+                                    stiffness = 160f,
+                                ),
+                            )
+                        }
+                        val released = tryAwaitRelease()
+                        if (released) {
+                            val elapsed = System.currentTimeMillis() - pressStart
+                            pressJob?.cancel()
+                            pressJob = scope.launch {
+                                val minHoldMs = 100L
+                                if (elapsed < minHoldMs) delay(minHoldMs - elapsed)
+                                scale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.58f, // Apple .bouncy: soft organic overshoot
+                                        stiffness = 135f,
+                                    ),
+                                )
+                            }
+                        } else {
+                            pressJob?.cancel()
+                            pressJob = scope.launch {
+                                scale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.82f,
+                                        stiffness = 160f,
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                    onTap = { onClick() },
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
         content(contentColor)

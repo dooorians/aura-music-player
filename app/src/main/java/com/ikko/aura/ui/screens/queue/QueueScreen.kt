@@ -44,6 +44,7 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
+import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.viewmodel.PlayerViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt

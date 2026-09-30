@@ -630,9 +630,10 @@ private fun HeroPanel(
         // the lyric bubble above.
         AnimatedContent(
             targetState = queueIndex to currentTrack,
-                transitionSpec = {
-                                    AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
-                },
+            transitionSpec = {
+                (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
+                    .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
+            },
             modifier = Modifier.size(HERO_ART_SIZE),
             label = "hero-art",
         ) { (_, shown) ->
@@ -656,7 +657,8 @@ private fun HeroPanel(
             AnimatedContent(
                 targetState = queueIndex to currentTrack,
                 transitionSpec = {
-                                    AuraMotion.heroSlide(forward = targetState.first >= initialState.first, distancePx = panelWidthPx)
+                    (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
+                        .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
                 },
                 contentAlignment = Alignment.CenterStart,
                 label = "hero-label",
