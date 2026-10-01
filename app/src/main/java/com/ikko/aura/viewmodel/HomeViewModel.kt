@@ -71,7 +71,8 @@ class HomeViewModel @Inject constructor(
         val keptStreamedAlbums = com.ikko.aura.source.ytm.YtmLibrary.albumsOf(keptStreamed)
         val albumsById = (albums + playedStreamedAlbums).associateBy { it.id }
         HomeUiState(
-            favoriteAlbums = albums.filter { it.id in favoriteIds },
+            // A starred streamed album is a favourite like any other.
+            favoriteAlbums = (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf((streamed + keptStreamed).distinctBy { it.id })).distinctBy { it.id }.filter { it.id in favoriteIds },
             recentAlbums = recentIds.mapNotNull { albumsById[it] },
             // What was actually played, newest first — not simply the first tracks of the library.
             // Streamed songs count, kept or not (their ids resolve against what the app has met).

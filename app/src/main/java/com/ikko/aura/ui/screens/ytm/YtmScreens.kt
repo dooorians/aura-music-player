@@ -46,10 +46,13 @@ import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.ui.screens.album.AlbumPageContent
+import com.ikko.aura.ui.screens.album.StreamedAlbumControls
+import com.ikko.aura.ui.screens.artist.ArtistPageContent
 import com.ikko.aura.viewmodel.YtmAlbumViewModel
 import com.ikko.aura.viewmodel.YtmArtistViewModel
 
-/** An album of YouTube Music: its cover, its songs in order, and the keys to play or keep them. */
+/** An album of YouTube Music, drawn by the very page a local album uses. */
 @Composable
 fun YtmAlbumScreen(
     navController: NavHostController,
@@ -57,73 +60,34 @@ fun YtmAlbumScreen(
     viewModel: YtmAlbumViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val page by viewModel.page.collectAsStateWithLifecycle()
     val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
-    GradientScreenScaffold {
-        MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-            when {
-                state.loading -> Centered("Chargement…")
-                state.failed -> Failed(onRetry = viewModel::load)
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
-                ) {
-                    item {
-                        Row(modifier = Modifier.padding(top = 16.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AlbumArt(
-                                uri = state.tracks.firstOrNull()?.artworkUri,
-                                contentDescription = state.title,
-                                shape = AuraShapes.SquircleLarge,
-                                modifier = Modifier.size(120.dp),
-                                targetSizeDp = 120.dp,
-                                cacheKey = state.tracks.firstOrNull()?.albumId?.toString(),
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(state.title, style = MaterialTheme.typography.headlineMedium, color = AuraColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                Text(state.artist, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    "${state.tracks.size} titre${if (state.tracks.size > 1) "s" else ""} · YouTube Music",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = AuraColors.TextSecondary,
-                                )
-                            }
-                        }
-                    }
-                    item {
-                        val allKept = state.tracks.all { it.id in kept }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AuraButton(onClick = { playerViewModel.playQueue(state.tracks, 0) }, tone = ButtonTone.Primary) {
-                                Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(7.dp))
-                                Text("Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            AuraButton(onClick = { playerViewModel.playQueue(state.tracks.shuffled(), 0) }) {
-                                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(7.dp))
-                                Text("Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            IconButton(onClick = {
-                                if (allKept) playerViewModel.unkeepStreamed(state.tracks) else playerViewModel.keepStreamed(state.tracks)
-                            }) {
-                                Icon(
-                                    if (allKept) CupertinoIcons.Check else CupertinoIcons.Add,
-                                    contentDescription = if (allKept) "Retirer l'album de la bibliothèque" else "Ajouter l'album à la bibliothèque",
-                                    tint = AuraColors.TextPrimary,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    itemsIndexed(state.tracks, key = { _, t -> t.id }) { index, track ->
-                        StreamedRow(track, track.id in kept, playerViewModel, menu::show) { playerViewModel.playQueue(state.tracks, index) }
-                    }
-                }
-            }
+    when {
+        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
+        state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
+        else -> {
+            val tracks = uiState.tracks
+            AlbumPageContent(
+                uiState = uiState,
+                page = page,
+                navController = navController,
+                playerViewModel = playerViewModel,
+                isTransitioning = false,
+                onFavorite = viewModel::toggleFavorite,
+                streamed = StreamedAlbumControls(
+                    kept = tracks.isNotEmpty() && tracks.all { it.id in kept },
+                    onToggleKeep = {
+                        if (tracks.all { it.id in kept }) playerViewModel.unkeepStreamed(tracks) else playerViewModel.keepStreamed(tracks)
+                    },
+                    prepare = { playerViewModel.rememberForUse(tracks) },
+                ),
+            )
         }
     }
 }
 
-/** An artist of YouTube Music, by name: their albums, then their songs. */
+/** An artist of YouTube Music, drawn by the very page a local artist uses. */
 @Composable
 fun YtmArtistScreen(
     navController: NavHostController,
@@ -131,61 +95,12 @@ fun YtmArtistScreen(
     viewModel: YtmArtistViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
-    GradientScreenScaffold {
-        MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-            when {
-                state.loading -> Centered("Chargement…")
-                state.failed -> Failed(onRetry = viewModel::load)
-                state.tracks.isEmpty() && state.albums.isEmpty() -> Centered("Rien trouvé pour ${state.name}")
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
-                ) {
-                    item {
-                        Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp)) {
-                            Text(state.name, style = MaterialTheme.typography.headlineLarge, color = AuraColors.TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text("YouTube Music", style = MaterialTheme.typography.bodyMedium, color = AuraColors.TextSecondary)
-                        }
-                    }
-                    if (state.tracks.isNotEmpty()) item {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            AuraButton(onClick = { playerViewModel.playQueue(state.tracks, 0) }, tone = ButtonTone.Primary) {
-                                Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(7.dp))
-                                Text("Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            AuraButton(onClick = { playerViewModel.playQueue(state.tracks.shuffled(), 0) }) {
-                                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(7.dp))
-                                Text("Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
-                    if (state.albums.isNotEmpty()) {
-                        item { Section("Albums") }
-                        item {
-                            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                items(state.albums, key = { it.id }) { album ->
-                                    YtmAlbumCard(album) { navController.navigate(AuraDestination.YtmAlbumPattern.route(album.id)) }
-                                }
-                            }
-                        }
-                    }
-                    if (state.tracks.isNotEmpty()) {
-                        item { Section("Titres") }
-                        itemsIndexed(state.tracks, key = { _, t -> t.id }) { index, track ->
-                            StreamedRow(track, track.id in kept, playerViewModel, menu::show, Modifier.padding(horizontal = 20.dp)) {
-                                playerViewModel.playQueue(state.tracks, index)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    when {
+        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
+        state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
+        state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
+        else -> ArtistPageContent(uiState, navController, playerViewModel)
     }
 }
 
@@ -203,42 +118,6 @@ fun YtmAlbumCard(album: YtmAlbumRef, modifier: Modifier = Modifier, onClick: () 
         Text(album.title, style = MaterialTheme.typography.labelLarge, color = AuraColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         Text(album.artist, style = MaterialTheme.typography.bodySmall, color = AuraColors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-}
-
-@Composable
-private fun StreamedRow(
-    track: Track,
-    kept: Boolean,
-    playerViewModel: PlayerViewModel,
-    onLongClick: (Track) -> Unit,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    TrackListItem(
-        track = track,
-        onClick = onClick,
-        onLongClick = { onLongClick(track) },
-        modifier = modifier,
-        trailingContent = {
-            IconButton(onClick = { if (kept) playerViewModel.unkeepStreamed(listOf(track)) else playerViewModel.keepStreamed(listOf(track)) }) {
-                Icon(
-                    if (kept) CupertinoIcons.Check else CupertinoIcons.Add,
-                    contentDescription = if (kept) "Retirer de la bibliothèque" else "Ajouter à la bibliothèque",
-                    tint = AuraColors.TextPrimary,
-                )
-            }
-        },
-    )
-}
-
-@Composable
-private fun Section(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.headlineMedium,
-        color = AuraColors.TextPrimary,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(top = 8.dp),
-    )
 }
 
 @Composable

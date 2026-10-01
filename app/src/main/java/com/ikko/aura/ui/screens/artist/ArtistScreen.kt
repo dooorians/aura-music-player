@@ -38,6 +38,9 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
+import com.ikko.aura.viewmodel.ArtistUiState
+import com.ikko.aura.ui.components.MediaContextHost
+import com.ikko.aura.navigation.route
 import com.ikko.aura.viewmodel.ArtistViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
 import com.ikko.aura.ui.components.AuraButton
@@ -52,8 +55,21 @@ fun ArtistScreen(
     artistViewModel: ArtistViewModel = hiltViewModel(),
 ) {
     val uiState by artistViewModel.uiState.collectAsStateWithLifecycle()
+    ArtistPageContent(uiState, navController, playerViewModel)
+}
 
+/**
+ * The artist page itself, for any artist: a local one from [ArtistScreen], a YouTube Music one from its own screen.
+ * One layout, so the two cannot drift apart.
+ */
+@Composable
+fun ArtistPageContent(
+    uiState: ArtistUiState,
+    navController: NavHostController,
+    playerViewModel: PlayerViewModel,
+) {
     GradientScreenScaffold {
+      MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
@@ -146,10 +162,12 @@ fun ArtistScreen(
                     artSize = 56.dp,
                     // The artist is the page's own title: the album is what tells the rows apart.
                     subtitle = track.album,
+                    onLongClick = { menu.show(track) },
                     modifier = Modifier.padding(horizontal = 20.dp),
                 )
             }
         }
+      }
     }
 }
 
@@ -158,7 +176,7 @@ private fun ArtistAlbumCard(album: Album, navController: NavHostController) {
     Column(modifier = Modifier.width(140.dp)) {
         SquircleCard(
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+            onClick = { navController.navigate(album.route()) },
         ) {
             AlbumArt(uri = album.artworkUri, contentDescription = album.title, modifier = Modifier.fillMaxWidth().aspectRatio(1f), targetSizeDp = 140.dp, cacheKey = album.id.toString())
         }

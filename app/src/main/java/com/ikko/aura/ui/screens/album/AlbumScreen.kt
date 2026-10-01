@@ -61,6 +61,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.Immutable
+import com.ikko.aura.ui.components.AuraMenu
+import com.ikko.aura.viewmodel.AlbumPage
+import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -104,7 +111,42 @@ fun AlbumScreen(
 ) {
     val uiState by albumViewModel.uiState.collectAsStateWithLifecycle()
     val page by albumViewModel.page.collectAsStateWithLifecycle()
+    AlbumPageContent(
+        uiState = uiState,
+        page = page,
+        navController = navController,
+        playerViewModel = playerViewModel,
+        isTransitioning = isTransitioning,
+        onFavorite = albumViewModel::toggleFavorite,
+    )
+}
+
+/** What a streamed album adds to the page: a way to keep it in the library, and to make its songs known first. */
+@Immutable
+class StreamedAlbumControls(
+    val kept: Boolean,
+    val onToggleKeep: () -> Unit,
+    /** Run before the songs are handed to something that only knows their ids (the add-to-playlist dialog). */
+    val prepare: suspend () -> Unit,
+)
+
+/**
+ * The album page itself, for any album: a local one from [AlbumScreen], a YouTube Music one from its own screen. One
+ * layout, so the two cannot drift apart.
+ */
+@Composable
+fun AlbumPageContent(
+    uiState: AlbumUiState,
+    page: AlbumPage?,
+    navController: NavHostController,
+    playerViewModel: PlayerViewModel,
+    isTransitioning: Boolean,
+    onFavorite: () -> Unit,
+    streamed: StreamedAlbumControls? = null,
+) {
     var showAddToPlaylist by remember { mutableStateOf(false) }
+    var moreOpen by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
     // Narrowed to the two things a row cares about. Collecting the whole player state here would
@@ -170,8 +212,33 @@ fun AlbumScreen(
                                     playerViewModel.playQueue(uiState.tracks.shuffled(), 0)
                                 }
                             },
-                            onFavorite = albumViewModel::toggleFavorite,
-                            onMore = { showAddToPlaylist = true },
+                            onFavorite = onFavorite,
+                            onMore = { if (streamed == null) showAddToPlaylist = true else moreOpen = true },
+                            moreMenu = {
+                                if (streamed != null) {
+                                    DropdownMenu(
+                                        expanded = moreOpen,
+                                        onDismissRequest = { moreOpen = false },
+                                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+                                        shape = AuraMenu.Shape,
+                                        border = AuraMenu.rimStroke,
+                                        shadowElevation = 0.dp,
+                                        tonalElevation = 0.dp,
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Ajouter à une playlist") },
+                                            onClick = {
+                                                moreOpen = false
+                                                scope.launch { streamed.prepare(); showAddToPlaylist = true }
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(if (streamed.kept) "Retirer l'album de la bibliothèque" else "Ajouter l'album à la bibliothèque") },
+                                            onClick = { moreOpen = false; streamed.onToggleKeep() },
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
                     itemsIndexed(uiState.tracks, key = { _, track -> track.id }) { index, track ->
@@ -293,6 +360,7 @@ private fun AlbumHeader(
     onShuffle: () -> Unit,
     onFavorite: () -> Unit,
     onMore: () -> Unit,
+    moreMenu: @Composable () -> Unit = {},
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
@@ -373,13 +441,16 @@ private fun AlbumHeader(
                     modifier = Modifier.size(21.dp),
                 )
             }
-            CircleAction(onClick = onMore) {
-                Icon(
-                    CupertinoIcons.MoreVertical,
-                    contentDescription = "Plus d'options",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
-                )
+            Box {
+                CircleAction(onClick = onMore) {
+                    Icon(
+                        CupertinoIcons.MoreVertical,
+                        contentDescription = "Plus d'options",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                moreMenu()
             }
         }
     }
