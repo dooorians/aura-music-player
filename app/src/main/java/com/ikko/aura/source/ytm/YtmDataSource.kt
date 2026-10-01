@@ -107,3 +107,29 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
         private val EXPIRED_CODES = setOf(403, 410)
     }
 }
+
+/**
+ * The kill switch, above the cache: with YouTube Music off, a `ytm://` item does not open at all — not even from songs
+ * already cached, which would otherwise keep playing. Reported as an unreachable source, so the queue moves on.
+ */
+@UnstableApi
+class YtmGate(private val client: YtmClient, private val upstream: DataSource) : DataSource {
+    override fun addTransferListener(transferListener: TransferListener) = upstream.addTransferListener(transferListener)
+
+    override fun open(dataSpec: DataSpec): Long {
+        if (dataSpec.uri.scheme == YTM_SCHEME && !client.isEnabled()) {
+            throw HttpDataSource.HttpDataSourceException(
+                "YouTube Music is off",
+                dataSpec,
+                androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                HttpDataSource.HttpDataSourceException.TYPE_OPEN,
+            )
+        }
+        return upstream.open(dataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = upstream.read(buffer, offset, length)
+    override fun getUri(): Uri? = upstream.uri
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
+    override fun close() = upstream.close()
+}

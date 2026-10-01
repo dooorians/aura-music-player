@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.ikko.aura.source.ytm.StreamCache
 import com.ikko.aura.source.ytm.YtmClient
 import com.ikko.aura.source.ytm.YtmDataSource
+import com.ikko.aura.source.ytm.YtmGate
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.session.CacheBitmapLoader
@@ -227,7 +228,7 @@ class PlaybackService : MediaSessionService() {
         ExoPlayer.Builder(this, filteredRenderers(filter))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
-                    DefaultDataSource.Factory(this, streamCache.factory { YtmDataSource(ytmClient) }),
+                    DefaultDataSource.Factory(this, DataSource.Factory { YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource()) }),
                     DefaultExtractorsFactory(),
                 ),
             )
