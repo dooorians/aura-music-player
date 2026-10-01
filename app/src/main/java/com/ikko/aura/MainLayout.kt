@@ -600,8 +600,9 @@ fun MainLayout() {
         // it refracts is the page, and the background under it is smooth colour.
         AuroraBackground(
             theme = pageTheme.value ?: backdrop.theme,
-            // Not while the player or the lyrics cover it: each has a background of its own that fills the screen.
-            active = currentRoute != AuraDestination.NowPlaying.route && currentRoute != AuraDestination.Lyrics.route,
+            // Not while the player covers it: it has a background of its own that fills the screen. The lyrics have
+            // none: they sit on this one.
+            active = currentRoute != AuraDestination.NowPlaying.route,
             modifier = Modifier.fillMaxSize(),
         )
         // Clipped to the card while it travels: the cover's wash is the player's own background, so above the

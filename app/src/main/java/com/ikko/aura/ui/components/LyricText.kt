@@ -62,6 +62,58 @@ fun rememberLyricClock(
 }
 
 /**
+ * The same clock, read off the player on every frame instead of extrapolated from a published value.
+ *
+ * [livePosition] is the player's own position. Anchored on a value published twice a second, the clock was up to half
+ * a second wrong after a seek, a pause or a track change, and the lines (which change on it) came late by as much. Read
+ * straight, it is as right as the player is, always: nothing to re-anchor, nothing to drift.
+ *
+ * [leadMs] is how far ahead of the audio the clock runs while playing. A frame drawn now reaches the eye one or two
+ * frames and a display's latency later, and the voice is already there: the lead puts the light where the sound is
+ * when it is seen. Not applied while paused, where the page must show exactly the place the music stopped at.
+ *
+ * Idle when [active] is false; paused, it looks only a few times a second (enough to follow a seek).
+ */
+@Composable
+fun rememberLiveLyricClock(
+    livePosition: () -> Long,
+    isPlaying: Boolean,
+    active: Boolean = true,
+    leadMs: Long = LYRIC_LEAD_MS,
+): MutableLongState {
+    val clock = remember { mutableLongStateOf(livePosition()) }
+    val read = androidx.compose.runtime.rememberUpdatedState(livePosition)
+    LaunchedEffect(isPlaying, active) {
+        clock.longValue = read.value() + if (isPlaying) leadMs else 0L
+        if (!active) return@LaunchedEffect
+        if (isPlaying) {
+            while (true) withFrameMillis { clock.longValue = read.value() + leadMs }
+        } else {
+            while (true) {
+                kotlinx.coroutines.delay(PAUSED_POLL_MS)
+                clock.longValue = read.value()
+            }
+        }
+    }
+    return clock
+}
+
+/** The index of the line being sung at [positionMs] (-1 before the first), for lines in time order. */
+fun List<LyricLine>.indexAt(positionMs: Long): Int {
+    var low = 0
+    var high = size - 1
+    var found = -1
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        if (this[mid].timeMs <= positionMs) { found = mid; low = mid + 1 } else high = mid - 1
+    }
+    return found
+}
+
+private const val LYRIC_LEAD_MS = 80L
+private const val PAUSED_POLL_MS = 120L
+
+/**
  * One lyric line with the sung part lit and the rest left dim, the boundary moving
  * through the line as it is sung.
  *

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -102,7 +103,8 @@ import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SweepLyricLine
 import com.ikko.aura.ui.components.WavyProgressBar
-import com.ikko.aura.ui.components.rememberLyricClock
+import com.ikko.aura.ui.components.indexAt
+import com.ikko.aura.ui.components.rememberLiveLyricClock
 import com.ikko.aura.ui.components.LiquidGlassPanel
 import com.ikko.aura.ui.components.horizontalEdgeBlur
 import com.ikko.aura.ui.theme.AuraColors
@@ -420,7 +422,7 @@ fun NowPlayingScreen(
             Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
                 LyricCapsule(
                     lyricsState = lyricsState,
-                    positionMs = { positionMs },
+                    livePosition = viewModel::livePositionMs,
                     isPlaying = uiState.isPlaying,
                     // The line being sung is the way into all of them.
                     onClick = { if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.Lyrics.route) },
@@ -520,18 +522,18 @@ fun NowPlayingScreen(
  * lyrics having failed rather than as the singing having stopped.
  */
 @Composable
-private fun LyricCapsule(lyricsState: LyricsUiState, positionMs: () -> Long, isPlaying: Boolean, onClick: () -> Unit) {
-    // Read here rather than by the player's column: a playback tick recomposes the bubble alone.
-    val position = positionMs()
+private fun LyricCapsule(lyricsState: LyricsUiState, livePosition: () -> Long, isPlaying: Boolean, onClick: () -> Unit) {
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
-    val currentLine = remember(lines, position) { lines?.currentLineAt(position) }
-    // No words on screen, no clock: a gap capsule draws three static dots and a track with no
-    // lyrics at all draws nothing, and neither has a sweep for the per-frame clock to feed.
-    val clock = rememberLyricClock(
-        positionMs = position,
-        isPlaying = isPlaying,
-        active = currentLine != null && !currentLine.isGap,
-    )
+    // The line is chosen from the player's own position on every frame, not from the value published twice a
+    // second: it changes when it is sung. Only a change of line is ever read in composition.
+    val clock = rememberLiveLyricClock(livePosition, isPlaying, active = lines != null)
+    var currentLine by remember(lines) { androidx.compose.runtime.mutableStateOf(lines?.let { it.getOrNull(it.indexAt(clock.longValue)) }) }
+    LaunchedEffect(lines) {
+        if (lines == null) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { lines.getOrNull(lines.indexAt(clock.longValue)) }
+            .distinctUntilChanged { a, b -> a?.timeMs == b?.timeMs }
+            .collect { currentLine = it }
+    }
 
     // The capsule's row is always there, whether or not there is a capsule in it.
     //

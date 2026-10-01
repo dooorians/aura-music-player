@@ -91,6 +91,13 @@ class PlayerViewModel @Inject constructor(
     /** Set once [PlayerController.awaitPlayer] resolves; every read below happens after that. */
     private var boundPlayer: Player? = null
 
+    /**
+     * Where playback is right now, read off the player itself rather than from the twice-a-second value the screens
+     * observe. The lyrics ask it on every frame to choose the line and to sweep a word, so a line changes when it is
+     * sung and not up to half a second after.
+     */
+    fun livePositionMs(): Long = boundPlayer?.currentPosition?.coerceAtLeast(0L) ?: _positionMs.value
+
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
