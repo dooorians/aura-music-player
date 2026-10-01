@@ -140,11 +140,32 @@ fun SettingsScreen(
             }
 
             item {
+                val songs by settingsViewModel.downloadedSongs.collectAsStateWithLifecycle()
+                val bytes by settingsViewModel.downloadedBytes.collectAsStateWithLifecycle()
+                var confirm by remember { mutableStateOf(false) }
+                SettingsActionRow(
+                    title = "Titres téléchargés",
+                    subtitle = if (songs == 0) "Aucun. Télécharge un album ou un titre depuis sa page YouTube Music"
+                    else "$songs titre${if (songs > 1) "s" else ""} · ${bytes / (1024 * 1024)} Mo sur l'appareil. Touche pour tout supprimer",
+                    trailing = null,
+                    onClick = { if (songs > 0) confirm = true },
+                )
+                if (confirm) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { confirm = false },
+                        title = { Text("Supprimer tous les téléchargements ?") },
+                        text = { Text("Les fichiers sont effacés de l'appareil. Les titres restent dans la bibliothèque et se lisent en flux.") },
+                        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirm = false; settingsViewModel.deleteAllDownloads() }) { Text("Supprimer") } },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = false }) { Text("Annuler") } },
+                    )
+                }
+            }
+            item {
                 val cacheBytes by settingsViewModel.streamCacheBytes.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) { settingsViewModel.refreshStreamCacheSize() }
                 SettingsActionRow(
                     title = "Vider le cache des flux",
-                    subtitle = "${cacheBytes / (1024 * 1024)} Mo gardés pour réécouter sans réseau, 512 Mo au plus. Aucun titre n'est téléchargé",
+                    subtitle = "${cacheBytes / (1024 * 1024)} Mo gardés pour réécouter sans réseau, 512 Mo au plus. Ce n'est pas un téléchargement : c'est effacé tout seul",
                     trailing = null,
                     onClick = settingsViewModel::clearStreamCache,
                 )

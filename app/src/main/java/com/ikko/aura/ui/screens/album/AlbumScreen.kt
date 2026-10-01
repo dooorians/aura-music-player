@@ -61,6 +61,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
+import com.ikko.aura.source.ytm.DownloadEntry
+import com.ikko.aura.source.ytm.DownloadState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.rememberCoroutineScope
@@ -126,6 +132,11 @@ fun AlbumScreen(
 class StreamedAlbumControls(
     val kept: Boolean,
     val onToggleKeep: () -> Unit,
+    /** Each song's download, by id. */
+    val downloads: Map<String, DownloadEntry>,
+    val onDownloadAlbum: () -> Unit,
+    val onRemoveAlbumDownloads: () -> Unit,
+    val onDownloadTrack: (Track) -> Unit,
     /** Run before the songs are handed to something that only knows their ids (the add-to-playlist dialog). */
     val prepare: suspend () -> Unit,
 )
@@ -213,6 +224,11 @@ fun AlbumPageContent(
                                 }
                             },
                             onFavorite = onFavorite,
+                            downloadSlot = {
+                                if (streamed != null) {
+                                    AlbumDownloadChip(uiState.tracks, streamed)
+                                }
+                            },
                             onMore = { if (streamed == null) showAddToPlaylist = true else moreOpen = true },
                             moreMenu = {
                                 if (streamed != null) {
@@ -231,6 +247,10 @@ fun AlbumPageContent(
                                                 moreOpen = false
                                                 scope.launch { streamed.prepare(); showAddToPlaylist = true }
                                             },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Télécharger l'album") },
+                                            onClick = { moreOpen = false; streamed.onDownloadAlbum() },
                                         )
                                         DropdownMenuItem(
                                             text = { Text(if (streamed.kept) "Retirer l'album de la bibliothèque" else "Ajouter l'album à la bibliothèque") },
@@ -253,6 +273,9 @@ fun AlbumPageContent(
                                 playerViewModel.playQueue(uiState.tracks, index)
                             },
                             onLongClick = { menu.show(track) },
+                            trailing = streamed?.let { controls ->
+                                { DownloadBadge(controls.downloads[track.id], accent) { controls.onDownloadTrack(track) } }
+                            },
                         )
                     }
                 }
@@ -361,6 +384,7 @@ private fun AlbumHeader(
     onFavorite: () -> Unit,
     onMore: () -> Unit,
     moreMenu: @Composable () -> Unit = {},
+    downloadSlot: @Composable () -> Unit = {},
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
@@ -419,6 +443,7 @@ private fun AlbumHeader(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                downloadSlot()
             }
         }
 
@@ -501,6 +526,7 @@ private fun AlbumTrackRow(
     accent: State<Color>,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     // "Wild And Alone (feat. PinkPantheress)" is the title and its credit run together; the page
     // sets them apart, the credit small beneath the title.
@@ -566,6 +592,85 @@ private fun AlbumTrackRow(
             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS),
             color = if (isCurrent) AuraColors.TextSecondary else AuraColors.TextTertiary,
             maxLines = 1,
+        )
+        if (trailing != null) {
+            Spacer(Modifier.width(6.dp))
+            Box(modifier = Modifier.size(32.dp), contentAlignment = Alignment.Center) { trailing() }
+        }
+    }
+}
+
+/** A song's download as a small mark: an arrow to start it, a ring while it runs, a check once it is a file. */
+@Composable
+private fun DownloadBadge(entry: DownloadEntry?, accent: State<Color>, onDownload: () -> Unit) {
+    when (entry?.state) {
+        DownloadState.DONE -> Icon(CupertinoIcons.Check, contentDescription = "Téléchargé", tint = accent.value, modifier = Modifier.size(18.dp))
+        DownloadState.DOWNLOADING -> CircularProgressIndicator(
+            progress = { entry.progress.coerceIn(0.03f, 1f) },
+            modifier = Modifier.size(18.dp),
+            strokeWidth = 2.dp,
+            color = accent.value,
+            trackColor = Color.White.copy(alpha = 0.15f),
+        )
+        DownloadState.QUEUED -> CircularProgressIndicator(
+            modifier = Modifier.size(18.dp),
+            strokeWidth = 2.dp,
+            color = AuraColors.TextTertiary,
+            trackColor = Color.White.copy(alpha = 0.15f),
+        )
+        else -> IconButton(onClick = onDownload, modifier = Modifier.size(32.dp)) {
+            Icon(CupertinoIcons.ArrowDownCircle, contentDescription = "Télécharger", tint = AuraColors.TextTertiary, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** The album's download, as a small line under the album's details: its arrow, its progress, its check. */
+@Composable
+private fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumControls) {
+    val states = tracks.map { controls.downloads[it.id] }
+    val done = states.count { it?.state == DownloadState.DONE }
+    val busy = states.any { it?.state == DownloadState.QUEUED || it?.state == DownloadState.DOWNLOADING }
+    val whole = tracks.isNotEmpty() && done == tracks.size
+    var confirmRemove by remember { mutableStateOf(false) }
+    val label = when {
+        busy -> "Téléchargement $done / ${tracks.size}"
+        whole -> "Téléchargé"
+        done > 0 -> "Télécharger le reste ($done / ${tracks.size})"
+        else -> "Télécharger l'album"
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(Color.White.copy(alpha = 0.12f))
+            .clickable { if (whole) confirmRemove = true else if (!busy) controls.onDownloadAlbum() }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            busy -> {
+                val progress = states.sumOf { (it?.progress ?: 0f).toDouble() }.toFloat() / tracks.size.coerceAtLeast(1)
+                CircularProgressIndicator(
+                    progress = { progress.coerceIn(0.03f, 1f) },
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Color.White,
+                    trackColor = Color.White.copy(alpha = 0.2f),
+                )
+            }
+            whole -> Icon(CupertinoIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+            else -> Icon(CupertinoIcons.ArrowDownCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.width(7.dp))
+        Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
+    }
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Supprimer les téléchargements ?") },
+            text = { Text("Les fichiers de cet album seront effacés de l'appareil. Les titres restent dans la bibliothèque et se lisent en flux.") },
+            confirmButton = { TextButton(onClick = { confirmRemove = false; controls.onRemoveAlbumDownloads() }) { Text("Supprimer") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Annuler") } },
         )
     }
 }

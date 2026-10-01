@@ -82,6 +82,7 @@ class PlayerViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val playlistRepository: com.ikko.aura.data.playlist.PlaylistRepository,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
+    private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -150,6 +151,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     init {
+        // A download queue the process was killed in the middle of picks up again.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.resume() } }
         viewModelScope.launch {
             val player = playerController.awaitPlayer()
             boundPlayer = player
@@ -321,8 +324,24 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.keep(tracks) } }
     }
 
+    /** Taking a streamed song out of the library takes its downloaded file with it. */
     fun unkeepStreamed(tracks: List<Track>) {
-        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.unkeep(tracks.map { it.id }) } }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { ytmDownloads.remove(tracks.map { it.id }) }
+            runCatching { ytmLibrary.unkeep(tracks.map { it.id }) }
+        }
+    }
+
+    /** Every streamed song's download state, for the pages that show it. */
+    val downloadStates: StateFlow<Map<String, com.ikko.aura.source.ytm.DownloadEntry>> = ytmDownloads.entries
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    fun downloadStreamed(tracks: List<Track>) {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.enqueue(tracks) } }
+    }
+
+    fun removeDownloads(tracks: List<Track>) {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.remove(tracks.map { it.id }) } }
     }
 
     fun playQueue(tracks: List<Track>, startIndex: Int) {

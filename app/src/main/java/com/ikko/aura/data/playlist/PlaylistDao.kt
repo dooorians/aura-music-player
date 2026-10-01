@@ -2,6 +2,8 @@ package com.ikko.aura.data.playlist
 
 import androidx.room.Dao
 import com.ikko.aura.catalog.CatalogDao
+import com.ikko.aura.catalog.DownloadDao
+import com.ikko.aura.catalog.YtmDownloadEntity
 import com.ikko.aura.catalog.CatalogTrackEntity
 import com.ikko.aura.catalog.TrackBindingEntity
 import androidx.room.Database
@@ -68,8 +70,9 @@ interface PlaylistDao {
         AlbumPlayEntity::class,
         CatalogTrackEntity::class,
         TrackBindingEntity::class,
+        YtmDownloadEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -77,6 +80,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun lyricsCacheDao(): LyricsCacheDao
     abstract fun albumPlaysDao(): AlbumPlaysDao
     abstract fun catalogDao(): CatalogDao
+    abstract fun downloadDao(): DownloadDao
 }
 
 /**
@@ -103,6 +107,17 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN artworkUrl TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** Songs downloaded from a streaming source: one row per song, with the state of its file. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS ytm_downloads (" +
+                "`key` TEXT NOT NULL PRIMARY KEY, state TEXT NOT NULL, filePath TEXT NOT NULL, mime TEXT NOT NULL, " +
+                "bytes INTEGER NOT NULL, totalBytes INTEGER NOT NULL, updatedAt INTEGER NOT NULL)",
+        )
     }
 }
 

@@ -32,6 +32,7 @@ class SettingsViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
     private val sleepTimer: SleepTimer,
     private val streamCache: StreamCache,
+    private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
 ) : ViewModel() {
 
     /**
@@ -92,6 +93,16 @@ class SettingsViewModel @Inject constructor(
 
     private val _streamCacheBytes = kotlinx.coroutines.flow.MutableStateFlow(0L)
     val streamCacheBytes: StateFlow<Long> = _streamCacheBytes
+
+    /** What is downloaded: how many songs and how many bytes. */
+    val downloadedSongs: StateFlow<Int> = ytmDownloads.doneCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    val downloadedBytes: StateFlow<Long> = ytmDownloads.doneBytes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
+    fun deleteAllDownloads() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { ytmDownloads.removeAll() } }
+    }
 
     fun refreshStreamCacheSize() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { _streamCacheBytes.value = streamCache.sizeBytes }

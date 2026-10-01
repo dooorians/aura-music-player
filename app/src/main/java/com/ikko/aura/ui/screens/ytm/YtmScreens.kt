@@ -63,6 +63,7 @@ fun YtmAlbumScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val page by viewModel.page.collectAsStateWithLifecycle()
     val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
+    val downloads by playerViewModel.downloadStates.collectAsStateWithLifecycle()
     when {
         state.loading -> GradientScreenScaffold { Centered("Chargement…") }
         state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
@@ -80,6 +81,10 @@ fun YtmAlbumScreen(
                     onToggleKeep = {
                         if (tracks.all { it.id in kept }) playerViewModel.unkeepStreamed(tracks) else playerViewModel.keepStreamed(tracks)
                     },
+                    downloads = downloads,
+                    onDownloadAlbum = { playerViewModel.downloadStreamed(tracks) },
+                    onRemoveAlbumDownloads = { playerViewModel.removeDownloads(tracks) },
+                    onDownloadTrack = { playerViewModel.downloadStreamed(listOf(it)) },
                     prepare = { playerViewModel.rememberForUse(tracks) },
                 ),
             )

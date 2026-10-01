@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.map
 class YtmLibrary @Inject constructor(
     private val dao: CatalogDao,
     private val settings: SettingsStore,
+    private val downloads: com.ikko.aura.catalog.DownloadDao,
 ) {
     private fun entity(track: Track, inLibrary: Boolean) = CatalogTrackEntity(
         key = track.id,
@@ -62,11 +63,18 @@ class YtmLibrary @Inject constructor(
 
     /** What the library lists: the kept songs, while the source is on. */
     fun observeKept(): Flow<List<Track>> =
-        combine(dao.observeSaved(), settings.ytmEnabled) { rows, on -> if (on) rows.map(::trackOf) else emptyList() }
+        combine(dao.observeSaved(), settings.ytmEnabled, downloads.observeDoneKeys()) { rows, on, done ->
+            // Downloaded songs are files: they stay whatever the switch says.
+            val visible = if (on) rows else rows.filter { it.key in done }
+            visible.map(::trackOf)
+        }
 
-    /** Every song the app knows, kept or not, while the source is on. */
+    /** Every song the app knows, kept or not, while the source is on (and the downloaded ones always). */
     fun observeKnown(): Flow<List<Track>> =
-        combine(dao.observeStreamed(), settings.ytmEnabled) { rows, on -> if (on) rows.map(::trackOf) else emptyList() }
+        combine(dao.observeStreamed(), settings.ytmEnabled, downloads.observeDoneKeys()) { rows, on, done ->
+            val visible = if (on) rows else rows.filter { it.key in done }
+            visible.map(::trackOf)
+        }
 
     suspend fun known(): List<Track> = observeKnown().first()
 

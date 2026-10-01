@@ -25,6 +25,7 @@ object CupertinoIcons {
     val AutoAwesome: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_sparkles)
     val ChevronLeft: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_chevron_left)
     val ChevronRight: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_chevron_right)
+    val ArrowDownCircle: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_arrow_down_circle)
     val Search: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_search)
     val ChevronDown: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_chevron_down)
     val MoreVertical: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_ellipsis_vertical)

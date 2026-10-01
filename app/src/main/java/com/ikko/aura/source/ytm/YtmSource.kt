@@ -16,13 +16,25 @@ const val YTM_SCHEME = "ytm"
  * real stream address by [YtmDataSource] at the moment the player opens it. So a queue of fifty songs is not fifty
  * lookups before the first plays, and an address cannot expire while it waits in the queue.
  *
- * Off, it answers nothing — which is the kill switch: saved songs stay listed, and are skipped like any unplayable item.
+ * Off, it answers nothing for a song that is only streamed — which is the kill switch. A downloaded song is a file, and plays.
  */
 @Singleton
-class YtmSource @Inject constructor(private val client: YtmClient) : SourceProvider {
+class YtmSource @Inject constructor(
+    private val client: YtmClient,
+    private val downloads: YtmDownloads,
+) : SourceProvider {
     override val id: SourceId = YTM
 
     override suspend fun playable(itemId: String): PlayableSource? {
+        // A downloaded song plays from its file, whatever the network and the switch.
+        downloads.fileFor(YtmLibrary.keyOf(itemId))?.let { (file, mime) ->
+            return PlayableSource(
+                ref = SourceTrackRef(YTM, itemId),
+                uri = android.net.Uri.fromFile(file).toString(),
+                mimeType = mime,
+                randomAccess = true,
+            )
+        }
         if (!client.isEnabled()) return null
         return PlayableSource(
             ref = SourceTrackRef(YTM, itemId),

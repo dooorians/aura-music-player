@@ -70,6 +70,7 @@ fun MediaContextHost(
 
     val controller = remember { MediaContextController { target = it } }
     val keptStreamed by playerViewModel.keptStreamedIds.collectAsState()
+    val downloads by playerViewModel.downloadStates.collectAsState()
     val scope = rememberCoroutineScope()
 
     content(controller)
@@ -93,6 +94,9 @@ fun MediaContextHost(
                 val track = (shown as? LibraryContextTarget.TrackTarget)?.track ?: return@MediaContextSheet
                 if (track.id in keptStreamed) playerViewModel.unkeepStreamed(listOf(track)) else playerViewModel.keepStreamed(listOf(track))
             },
+            download = (shown as? LibraryContextTarget.TrackTarget)?.track?.id?.let { downloads[it] },
+            onDownload = { (shown as? LibraryContextTarget.TrackTarget)?.track?.let { playerViewModel.downloadStreamed(listOf(it)) } },
+            onRemoveDownload = { (shown as? LibraryContextTarget.TrackTarget)?.track?.let { playerViewModel.removeDownloads(listOf(it)) } },
             streamedHasAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId != null,
             onOpenAlbum = {
                 val streamedAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId

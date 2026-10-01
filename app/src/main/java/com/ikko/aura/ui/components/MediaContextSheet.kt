@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Track
+import com.ikko.aura.source.ytm.DownloadEntry
+import com.ikko.aura.source.ytm.DownloadState
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
@@ -64,6 +66,10 @@ fun MediaContextSheet(
     keptInLibrary: Boolean = false,
     onToggleKeep: () -> Unit = {},
     streamedHasAlbum: Boolean = false,
+    /** The streamed song's download, when it has one. */
+    download: DownloadEntry? = null,
+    onDownload: () -> Unit = {},
+    onRemoveDownload: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -95,6 +101,12 @@ fun MediaContextSheet(
             if (streamed) {
                 if (streamedHasAlbum) ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }
                 ContextAction(CupertinoIcons.Person, "Voir l'artiste") { onOpenArtist(); onDismiss() }
+                when (download?.state) {
+                    DownloadState.DONE ->
+                        ContextAction(CupertinoIcons.Delete, "Supprimer le téléchargement") { onRemoveDownload(); onDismiss() }
+                    DownloadState.QUEUED, DownloadState.DOWNLOADING -> Unit
+                    else -> ContextAction(CupertinoIcons.ArrowDownCircle, "Télécharger") { onDownload(); onDismiss() }
+                }
                 if (keptInLibrary) {
                     ContextAction(CupertinoIcons.Delete, "Retirer de la bibliothèque", tint = AuraColors.AccentPink) { onToggleKeep(); onDismiss() }
                 } else {
