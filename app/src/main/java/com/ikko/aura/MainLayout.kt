@@ -947,6 +947,20 @@ fun MainLayout() {
                     playerViewModel = playerViewModel,
                     backdrop = pillBackdrop,
                     enabled = pillInteractive,
+                    // The finger is still on the pill: start building the player now. It opens exactly as it does for
+                    // a tap (the same navigation, the same hidden warm-up under the pill); it is just earlier.
+                    onPrewarm = {
+                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                        if (!playerOnTop && sheetCard.acceptsOpen) {
+                            navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
+                        }
+                    },
+                    // The press became something else before the player had shown: let it go, unseen. Past that point
+                    // the player is already on its way up and is left to finish.
+                    onPrewarmCancel = {
+                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                        if (playerOnTop && !sheetCard.ready) navController.popBackStack()
+                    },
                     onOpenNowPlaying = {
                         // Once per opening. The mini player stays on screen (and under the finger) until the player's card
                         // replaces it, and every further tap navigated to the player again: launchSingleTop still swaps
@@ -1059,6 +1073,8 @@ private fun PlayerPillHost(
     playerViewModel: PlayerViewModel,
     backdrop: LayerBackdrop,
     onOpenNowPlaying: () -> Unit,
+    onPrewarm: () -> Unit,
+    onPrewarmCancel: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
@@ -1074,6 +1090,8 @@ private fun PlayerPillHost(
             onNext = playerViewModel::skipNext,
             onPrevious = playerViewModel::skipPrevious,
             onOpen = onOpenNowPlaying,
+            onPrewarm = onPrewarm,
+            onPrewarmCancel = onPrewarmCancel,
             modifier = modifier,
             enabled = enabled,
         )

@@ -135,8 +135,20 @@ fun FloatingPlayerPill(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /**
+     * The finger has been down on the part of the pill that opens the player for [PREWARM_AFTER_MS] and is still there:
+     * the player can begin to be built now, while the tap finishes, instead of after it. [onPrewarmCancel] if the
+     * gesture turned out to be something else (a swipe to another track, a press let go off the pill).
+     */
+    onPrewarm: () -> Unit = {},
+    onPrewarmCancel: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    // Whether the player was started on the finger-down, and has not yet been confirmed by a tap or an upward swipe.
+    var prewarmed by remember { mutableStateOf(false) }
+    // How far the finger has travelled since it went down, in pixels. Read at the moment the player would be started:
+    // a finger that is already moving is on its way to a swipe, not to a tap. Not snapshot state: nothing draws from it.
+    val travel = remember { floatArrayOf(0f) }
 
     var haloCenter by remember { mutableStateOf(Offset.Unspecified) }
     val halo = remember { Animatable(1f) }
@@ -204,6 +216,18 @@ fun FloatingPlayerPill(
                     center = centre,
                 )
             }
+            .pointerInput(Unit) {
+                // Watches, and takes nothing: the finger's path, for the prewarm decision above.
+                awaitPointerEventScope {
+                    while (true) {
+                        val change = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: continue
+                        when {
+                            change.pressed && !change.previousPressed -> travel[0] = 0f
+                            change.pressed -> travel[0] += (change.position - change.previousPosition).getDistance()
+                        }
+                    }
+                }
+            }
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
                 val nextZoneStart = size.width - NEXT_ZONE.toPx()
@@ -220,6 +244,17 @@ fun FloatingPlayerPill(
                             )
                         }
                         haloCenter = offset
+                        // Only on the part that opens the player, and only once the finger has stayed: a press that is
+                        // about to become a swipe has usually moved by then.
+                        val prewarm = if (offset.x < playZoneStart) {
+                            scope.launch {
+                                kotlinx.coroutines.delay(PREWARM_AFTER_MS)
+                                if (travel[0] <= PREWARM_MAX_TRAVEL.toPx()) {
+                                    prewarmed = true
+                                    onPrewarm()
+                                }
+                            }
+                        } else null
                         val spread = scope.launch {
                             halo.snapTo(0f)
                             halo.animateTo(1f, tween(HALO_MS, easing = LinearOutSlowInEasing))
@@ -235,6 +270,7 @@ fun FloatingPlayerPill(
                             )
                         }
                         val released = tryAwaitRelease()
+                        prewarm?.cancel()
                         if (released) {
                             val elapsed = System.currentTimeMillis() - pressStart
                             pressAnimJob?.cancel()
@@ -267,6 +303,7 @@ fun FloatingPlayerPill(
                         }
                     },
                     onTap = { offset ->
+                        prewarmed = false // a tap on the opening part confirms what the press began
                         when {
                             offset.x >= nextZoneStart -> onNext()
                             offset.x >= playZoneStart -> onTogglePlay()
@@ -285,12 +322,16 @@ fun FloatingPlayerPill(
                 detectDragGestures(
                     onDragStart = { dx = 0f; dy = 0f },
                     onDragEnd = {
+                        val wasPrewarmed = prewarmed
+                        prewarmed = false
                         when {
-                            abs(dx) > abs(dy) && dx <= -threshold -> onNext()
-                            abs(dx) > abs(dy) && dx >= threshold -> onPrevious()
+                            abs(dx) > abs(dy) && dx <= -threshold -> { if (wasPrewarmed) onPrewarmCancel(); onNext() }
+                            abs(dx) > abs(dy) && dx >= threshold -> { if (wasPrewarmed) onPrewarmCancel(); onPrevious() }
                             dy <= -threshold -> onOpen()
+                            else -> if (wasPrewarmed) onPrewarmCancel()
                         }
                     },
+                    onDragCancel = { if (prewarmed) { prewarmed = false; onPrewarmCancel() } },
                 ) { change, drag ->
                     dx += drag.x
                     dy += drag.y
@@ -382,3 +423,9 @@ fun FloatingPlayerPill(
     }
     }
 }
+
+/** How long a finger stays on the opening part of the pill before the player starts to be built. */
+private const val PREWARM_AFTER_MS = 40L
+
+/** A finger that has moved more than this by then is going somewhere else, and the player is not started. */
+private val PREWARM_MAX_TRAVEL = 3.dp
