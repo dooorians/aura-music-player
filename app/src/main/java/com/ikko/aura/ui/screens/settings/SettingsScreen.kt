@@ -171,6 +171,47 @@ fun SettingsScreen(
                 )
             }
 
+            item {
+                val sourcesViewModel: com.ikko.aura.viewmodel.SourcesViewModel = hiltViewModel()
+                val configs by sourcesViewModel.configs.collectAsStateWithLifecycle()
+                var editing by remember { mutableStateOf<com.ikko.aura.source.remote.SourceConfigEntity?>(null) }
+                var adding by remember { mutableStateOf(false) }
+                androidx.compose.foundation.layout.Column {
+                    configs.forEach { config ->
+                        SettingsActionRow(
+                            title = config.name,
+                            subtitle = "${com.ikko.aura.source.remote.RemoteKind.valueOf(config.kind).label} · ${config.baseUrl.removePrefix("http://").removePrefix("https://")}",
+                            trailing = { com.ikko.aura.ui.components.AuraSwitch(checked = config.enabled, onCheckedChange = { sourcesViewModel.setEnabled(config.id, it) }) },
+                            onClick = { editing = config },
+                        )
+                    }
+                    SettingsActionRow(
+                        title = "Ajouter une source",
+                        subtitle = "Un serveur de musique à toi (Navidrome, Subsonic…), cherché et lu comme le reste",
+                        trailing = null,
+                        onClick = { adding = true },
+                    )
+                }
+                if (adding) {
+                    SourceDialog(
+                        initial = null,
+                        onDismiss = { adding = false },
+                        onTest = sourcesViewModel::test,
+                        onSave = { kind, name, url, user, password -> sourcesViewModel.add(kind, name, url, user, password); adding = false },
+                        onDelete = null,
+                    )
+                }
+                editing?.let { config ->
+                    SourceDialog(
+                        initial = config,
+                        onDismiss = { editing = null },
+                        onTest = sourcesViewModel::test,
+                        onSave = { _, name, url, user, password -> sourcesViewModel.update(config.id, name, url, user, password); editing = null },
+                        onDelete = { sourcesViewModel.remove(config.id); editing = null },
+                    )
+                }
+            }
+
             item { SectionLabel("Veille") }
             item {
                 SettingsActionRow(

@@ -50,11 +50,11 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_tracks")
     fun observeTracks(): Flow<List<CatalogTrackEntity>>
 
-    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%' AND inLibrary = 1")
+    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE '%:%' AND inLibrary = 1")
     fun observeSaved(): Flow<List<CatalogTrackEntity>>
 
     /** Every streamed song the app has met and still keeps, in the library or not. */
-    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%'")
+    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE '%:%'")
     fun observeStreamed(): Flow<List<CatalogTrackEntity>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -74,13 +74,13 @@ interface CatalogDao {
      * them any more.
      */
     @Query(
-        "DELETE FROM catalog_tracks WHERE `key` LIKE 'ytm:%' AND inLibrary = 0 " +
+        "DELETE FROM catalog_tracks WHERE `key` LIKE '%:%' AND inLibrary = 0 " +
             "AND `key` NOT IN (SELECT trackId FROM playlist_tracks) " +
             "AND `key` NOT IN (SELECT trackKey FROM track_bindings WHERE lastSeenAt > :since)",
     )
     suspend fun pruneStreamed(since: Long)
 
-    @Query("DELETE FROM track_bindings WHERE sourceId = 'ytm' AND trackKey NOT IN (SELECT `key` FROM catalog_tracks)")
+    @Query("DELETE FROM track_bindings WHERE sourceId != 'local' AND trackKey NOT IN (SELECT `key` FROM catalog_tracks)")
     suspend fun pruneOrphanBindings()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

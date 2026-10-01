@@ -14,14 +14,21 @@ import com.ikko.aura.source.TrackKey
  */
 class TrackResolver(
     private val bindings: TrackBindings,
-    private val providers: Map<SourceId, SourceProvider>,
+    /** The provider of a source, looked up as it is asked: sources the user adds come and go while the app runs. */
+    private val providerFor: (SourceId) -> SourceProvider?,
     /** How candidates are ranked: nearest first. The identity until there is more than one source to rank. */
     private val order: (List<SourceTrackRef>) -> List<SourceTrackRef> = { it },
 ) {
+    constructor(
+        bindings: TrackBindings,
+        providers: Map<SourceId, SourceProvider>,
+        order: (List<SourceTrackRef>) -> List<SourceTrackRef> = { it },
+    ) : this(bindings, { id: SourceId -> providers[id] }, order)
+
     /** Every way to play [key] now, best first; [exclude] holds the ones that have just failed. */
     suspend fun candidates(key: TrackKey, exclude: Set<SourceTrackRef> = emptySet()): List<PlayableSource> =
         order(bindings.bindingsFor(key).filterNot { it in exclude })
-            .mapNotNull { ref -> providers[ref.source]?.playable(ref.itemId) }
+            .mapNotNull { ref -> providerFor(ref.source)?.playable(ref.itemId) }
             // Audio only, whatever a source offers: an item whose type is known and is not audio/* is never played.
             .filter { it.mimeType == null || it.mimeType.startsWith("audio/") }
 }

@@ -38,6 +38,16 @@ sealed class AuraDestination(val route: String) {
         fun route(name: String) = "ytm_artist/${android.net.Uri.encode(name)}"
     }
 
+    /** An album on an added source: the source's id, then the album's. */
+    data object RemoteAlbumPattern : AuraDestination("remote_album/{source}/{albumId}") {
+        fun route(source: String, albumId: String) = "remote_album/${android.net.Uri.encode(source)}/${android.net.Uri.encode(albumId)}"
+    }
+
+    /** An artist on an added source, by name. */
+    data object RemoteArtistPattern : AuraDestination("remote_artist/{source}/{name}") {
+        fun route(source: String, name: String) = "remote_artist/${android.net.Uri.encode(source)}/${android.net.Uri.encode(name)}"
+    }
+
     data object AlbumListPattern : AuraDestination("album_list/{mode}") {
         fun route(mode: String) = "album_list/$mode"
     }
@@ -54,4 +64,19 @@ sealed class AuraDestination(val route: String) {
 
 /** Where an album's page is: a streamed album's on its source, a local one's in the library. */
 fun com.ikko.aura.data.model.Album.route(): String =
-    remoteId?.let { AuraDestination.YtmAlbumPattern.route(it) } ?: AuraDestination.AlbumPattern.route(id.toString())
+    remoteId?.let { streamedAlbumRoute(it) } ?: AuraDestination.AlbumPattern.route(id.toString())
+
+/** The page of a streamed album: [ref] is a YouTube Music playlist id, or `<source>:<albumId>` for an added source. */
+fun streamedAlbumRoute(ref: String): String {
+    val source = ref.substringBefore(':', "")
+    return if (ref.contains(':')) AuraDestination.RemoteAlbumPattern.route(source, ref.substringAfter(':'))
+    else AuraDestination.YtmAlbumPattern.route(ref)
+}
+
+/** The album page of a streamed song, if its album is known. */
+fun com.ikko.aura.data.model.Track.streamedAlbumRoute(): String? = remoteAlbumId?.let { streamedAlbumRoute(it) }
+
+/** The artist page of a streamed song: YouTube Music's by name, or the song's own source's by name. */
+fun com.ikko.aura.data.model.Track.streamedArtistRoute(): String =
+    if (id.startsWith("ytm:")) AuraDestination.YtmArtistPattern.route(artist)
+    else AuraDestination.RemoteArtistPattern.route(id.substringBefore(':'), artist)

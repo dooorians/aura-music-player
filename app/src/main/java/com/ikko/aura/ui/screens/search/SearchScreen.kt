@@ -54,6 +54,7 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.streamedAlbumRoute
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.screens.ytm.YtmAlbumCard
 import com.ikko.aura.ui.components.LiquidGlassPanel
@@ -78,6 +79,7 @@ fun SearchPanel(
 ) {
     val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
     val ytm by searchViewModel.ytmState.collectAsStateWithLifecycle()
+    val remote by searchViewModel.remoteState.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -149,7 +151,7 @@ fun SearchPanel(
 
             val searchState = when {
                 query.isBlank() -> SearchContent.PROMPT
-                !uiState.hasResults && !ytm.active -> SearchContent.NO_RESULTS
+                !uiState.hasResults && !ytm.active && remote.none { it.hasContent } -> SearchContent.NO_RESULTS
                 else -> SearchContent.RESULTS
             }
             
@@ -231,6 +233,63 @@ fun SearchPanel(
                                             navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString()))
                                         }
                                     }
+                                }
+                            }
+                        }
+                        remote.forEach { section ->
+                            if (section.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
+                                item(key = "rs_artists_${section.sourceId}") { SectionLabel("Artistes · ${section.name}") }
+                                items(section.artists.take(5), key = { "rs_artist_${section.sourceId}_$it" }) { name ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().clickable {
+                                            onNavigate()
+                                            navController.navigate(AuraDestination.RemoteArtistPattern.route(section.sourceId, name))
+                                        }.padding(horizontal = 20.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(name, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                                    }
+                                }
+                            }
+                            if (section.albums.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ALBUMS)) {
+                                item(key = "rs_albums_${section.sourceId}") { SectionLabel("Albums · ${section.name}") }
+                                item(key = "rs_albumrow_${section.sourceId}") {
+                                    LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        items(section.albums, key = { "rs_album_${it.id}" }) { album ->
+                                            YtmAlbumCard(album) {
+                                                onNavigate()
+                                                navController.navigate(streamedAlbumRoute(album.id))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS) {
+                                if (section.hasContent) item(key = "rs_songs_${section.sourceId}") { SectionLabel("Titres · ${section.name}") }
+                                if (section.loading) item(key = "rs_loading_${section.sourceId}") { YtmNote("Recherche…") }
+                                if (section.error) item(key = "rs_error_${section.sourceId}") { YtmNote("${section.name} ne répond pas") }
+                                itemsIndexed(section.songs, key = { _, track -> "rs_song_${track.id}" }) { index, track ->
+                                    TrackListItem(
+                                        track = track,
+                                        onClick = {
+                                            onNavigate()
+                                            playerViewModel.playQueue(section.songs, index)
+                                            navController.navigate(AuraDestination.NowPlaying.route)
+                                        },
+                                        onLongClick = { menu.show(track) },
+                                        modifier = Modifier.padding(horizontal = 20.dp).animateItem(),
+                                        trailingContent = {
+                                            val kept = track.id in ytm.saved
+                                            IconButton(onClick = {
+                                                if (kept) searchViewModel.removeYtm(track) else searchViewModel.saveYtm(track)
+                                            }) {
+                                                Icon(
+                                                    if (kept) CupertinoIcons.Check else CupertinoIcons.Add,
+                                                    contentDescription = if (kept) "Retirer de la bibliothèque" else "Ajouter à la bibliothèque",
+                                                    tint = AuraColors.TextPrimary,
+                                                )
+                                            }
+                                        },
+                                    )
                                 }
                             }
                         }

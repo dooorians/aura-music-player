@@ -94,6 +94,8 @@ import com.ikko.aura.data.model.AudioOutputState
 import com.ikko.aura.data.model.AudioOutputType
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.streamedAlbumRoute
+import com.ikko.aura.navigation.streamedArtistRoute
 import com.ikko.aura.source.ytm.YtmLibrary
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.auraMenuSurface
@@ -434,7 +436,7 @@ fun NowPlayingScreen(
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
                                 // A streamed song's album is the source's, and only known if it came through one.
-                                playing.remoteAlbumId?.let { navController.navigate(AuraDestination.YtmAlbumPattern.route(it)) }
+                                playing.streamedAlbumRoute()?.let { navController.navigate(it) }
                             } else {
                                 navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
                             }
@@ -444,7 +446,7 @@ fun NowPlayingScreen(
                         val playing = uiState.currentTrack
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
-                                navController.navigate(AuraDestination.YtmArtistPattern.route(playing.artist))
+                                navController.navigate(playing.streamedArtistRoute())
                             } else {
                                 navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
                             }

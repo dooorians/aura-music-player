@@ -3,6 +3,8 @@ package com.ikko.aura.data.playlist
 import androidx.room.Dao
 import com.ikko.aura.catalog.CatalogDao
 import com.ikko.aura.catalog.DownloadDao
+import com.ikko.aura.source.remote.SourceConfigDao
+import com.ikko.aura.source.remote.SourceConfigEntity
 import com.ikko.aura.catalog.YtmDownloadEntity
 import com.ikko.aura.catalog.CatalogTrackEntity
 import com.ikko.aura.catalog.TrackBindingEntity
@@ -71,8 +73,9 @@ interface PlaylistDao {
         CatalogTrackEntity::class,
         TrackBindingEntity::class,
         YtmDownloadEntity::class,
+        SourceConfigEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -81,6 +84,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun albumPlaysDao(): AlbumPlaysDao
     abstract fun catalogDao(): CatalogDao
     abstract fun downloadDao(): DownloadDao
+    abstract fun sourceConfigDao(): SourceConfigDao
 }
 
 /**
@@ -107,6 +111,17 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN artworkUrl TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** The sources the user added themselves. */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS source_configs (" +
+                "id TEXT NOT NULL PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, baseUrl TEXT NOT NULL, " +
+                "username TEXT NOT NULL, secret TEXT NOT NULL, salt TEXT NOT NULL, enabled INTEGER NOT NULL, createdAt INTEGER NOT NULL)",
+        )
     }
 }
 

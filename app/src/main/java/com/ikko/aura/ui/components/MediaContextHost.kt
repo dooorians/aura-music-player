@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.streamedAlbumRoute
+import com.ikko.aura.navigation.streamedArtistRoute
 import com.ikko.aura.viewmodel.PlayerViewModel
 
 /** Opens the context menu. Handed to [MediaContextHost]'s content so any row can raise one. */
@@ -99,9 +101,9 @@ fun MediaContextHost(
             onRemoveDownload = { (shown as? LibraryContextTarget.TrackTarget)?.track?.let { playerViewModel.removeDownloads(listOf(it)) } },
             streamedHasAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId != null,
             onOpenAlbum = {
-                val streamedAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId
+                val streamedAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.streamedAlbumRoute()
                 if (streamedAlbum != null) {
-                    navController.navigate(AuraDestination.YtmAlbumPattern.route(streamedAlbum))
+                    navController.navigate(streamedAlbum)
                     return@MediaContextSheet
                 }
                 val albumId = (shown as? LibraryContextTarget.TrackTarget)?.track?.albumId
@@ -111,7 +113,7 @@ fun MediaContextHost(
             onOpenArtist = {
                 val streamedTrack = (shown as? LibraryContextTarget.TrackTarget)?.track?.takeIf(YtmLibrary::isStreamed)
                 if (streamedTrack != null) {
-                    navController.navigate(AuraDestination.YtmArtistPattern.route(streamedTrack.artist))
+                    navController.navigate(streamedTrack.streamedArtistRoute())
                     return@MediaContextSheet
                 }
                 val artistId = when (shown) {

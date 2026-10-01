@@ -49,6 +49,8 @@ import com.ikko.aura.viewmodel.PlayerViewModel
 import com.ikko.aura.ui.screens.album.AlbumPageContent
 import com.ikko.aura.ui.screens.album.StreamedAlbumControls
 import com.ikko.aura.ui.screens.artist.ArtistPageContent
+import com.ikko.aura.viewmodel.RemoteAlbumViewModel
+import com.ikko.aura.viewmodel.RemoteArtistViewModel
 import com.ikko.aura.viewmodel.YtmAlbumViewModel
 import com.ikko.aura.viewmodel.YtmArtistViewModel
 
@@ -98,6 +100,63 @@ fun YtmArtistScreen(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
     viewModel: YtmArtistViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    when {
+        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
+        state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
+        state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
+        else -> ArtistPageContent(uiState, navController, playerViewModel)
+    }
+}
+
+/** An album of an added source, drawn by the very page a local album uses. */
+@Composable
+fun RemoteAlbumScreen(
+    navController: NavHostController,
+    playerViewModel: PlayerViewModel,
+    viewModel: RemoteAlbumViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val page by viewModel.page.collectAsStateWithLifecycle()
+    val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
+    val downloads by playerViewModel.downloadStates.collectAsStateWithLifecycle()
+    when {
+        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
+        state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
+        else -> {
+            val tracks = uiState.tracks
+            AlbumPageContent(
+                uiState = uiState,
+                page = page,
+                navController = navController,
+                playerViewModel = playerViewModel,
+                isTransitioning = false,
+                onFavorite = viewModel::toggleFavorite,
+                streamed = StreamedAlbumControls(
+                    kept = tracks.isNotEmpty() && tracks.all { it.id in kept },
+                    onToggleKeep = {
+                        if (tracks.all { it.id in kept }) playerViewModel.unkeepStreamed(tracks) else playerViewModel.keepStreamed(tracks)
+                    },
+                    downloads = downloads,
+                    onDownloadAlbum = { playerViewModel.downloadStreamed(tracks) },
+                    onRemoveAlbumDownloads = { playerViewModel.removeDownloads(tracks) },
+                    onDownloadTrack = { playerViewModel.downloadStreamed(listOf(it)) },
+                    prepare = { playerViewModel.rememberForUse(tracks) },
+                ),
+            )
+        }
+    }
+}
+
+/** An artist of an added source, drawn by the very page a local artist uses. */
+@Composable
+fun RemoteArtistScreen(
+    navController: NavHostController,
+    playerViewModel: PlayerViewModel,
+    viewModel: RemoteArtistViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

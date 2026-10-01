@@ -67,7 +67,7 @@ class LyricsRepository @Inject constructor(
             title = track.title,
             artist = track.artist,
             // A streamed song's "album" is the source's name, which would only make the match worse.
-            album = track.album.takeIf { it.isNotBlank() && !track.id.startsWith("ytm:") },
+            album = track.album.takeIf { it.isNotBlank() && !track.id.contains(':') },
             durationMs = track.durationMs,
         )
 

@@ -26,6 +26,7 @@ class YtmLibrary @Inject constructor(
     private val dao: CatalogDao,
     private val settings: SettingsStore,
     private val downloads: com.ikko.aura.catalog.DownloadDao,
+    private val remote: com.ikko.aura.source.remote.RemoteSources,
 ) {
     private fun entity(track: Track, inLibrary: Boolean) = CatalogTrackEntity(
         key = track.id,
@@ -39,7 +40,7 @@ class YtmLibrary @Inject constructor(
     )
 
     private fun binding(track: Track) = TrackBindingEntity(
-        YTM.value, track.id.substringAfter(':'), track.id, "", Availability.AVAILABLE.name, System.currentTimeMillis(),
+        track.id.substringBefore(':'), track.id.substringAfter(':'), track.id, "", Availability.AVAILABLE.name, System.currentTimeMillis(),
     )
 
     /** Makes sure these streamed songs are known; already-kept ones stay kept. Anything that is not streamed is ignored. */
@@ -63,17 +64,15 @@ class YtmLibrary @Inject constructor(
 
     /** What the library lists: the kept songs, while the source is on. */
     fun observeKept(): Flow<List<Track>> =
-        combine(dao.observeSaved(), settings.ytmEnabled, downloads.observeDoneKeys()) { rows, on, done ->
+        combine(dao.observeSaved(), settings.ytmEnabled, downloads.observeDoneKeys(), remote.enabledIds) { rows, on, done, others ->
             // Downloaded songs are files: they stay whatever the switch says.
-            val visible = if (on) rows else rows.filter { it.key in done }
-            visible.map(::trackOf)
+            rows.filter { offered(it.key, on, others) || it.key in done }.map(::trackOf)
         }
 
     /** Every song the app knows, kept or not, while the source is on (and the downloaded ones always). */
     fun observeKnown(): Flow<List<Track>> =
-        combine(dao.observeStreamed(), settings.ytmEnabled, downloads.observeDoneKeys()) { rows, on, done ->
-            val visible = if (on) rows else rows.filter { it.key in done }
-            visible.map(::trackOf)
+        combine(dao.observeStreamed(), settings.ytmEnabled, downloads.observeDoneKeys(), remote.enabledIds) { rows, on, done, others ->
+            rows.filter { offered(it.key, on, others) || it.key in done }.map(::trackOf)
         }
 
     suspend fun known(): List<Track> = observeKnown().first()
@@ -85,8 +84,17 @@ class YtmLibrary @Inject constructor(
         dao.pruneOrphanBindings()
     }
 
+    /** Whether a song's source is on: YouTube Music by its own switch, an added source by its own. */
+    private fun offered(key: String, ytmOn: Boolean, others: Set<String>): Boolean =
+        if (key.startsWith("${YTM.value}:")) ytmOn else key.substringBefore(':') in others
+
     private fun trackOf(row: CatalogTrackEntity): Track =
-        trackOf(row.key.substringAfter(':'), row.title, row.artist, row.durationMs, row.artworkUrl, row.albumRef.ifEmpty { null }, row.album.ifEmpty { null })
+        if (!row.key.startsWith("${YTM.value}:")) {
+            com.ikko.aura.source.remote.RemoteTracks.trackOf(
+                row.key, row.title, row.artist, row.durationMs, row.artworkUrl,
+                row.albumRef.ifEmpty { null }, row.album.ifEmpty { null },
+            )
+        } else trackOf(row.key.substringAfter(':'), row.title, row.artist, row.durationMs, row.artworkUrl, row.albumRef.ifEmpty { null }, row.album.ifEmpty { null })
 
     companion object {
         private const val PRUNE_AFTER_MS = 30L * 24 * 60 * 60 * 1000
@@ -111,7 +119,8 @@ class YtmLibrary @Inject constructor(
 
         fun isStreamed(track: Track) = isStreamedId(track.id)
 
-        fun isStreamedId(id: String) = id.startsWith("${YTM.value}:")
+        /** A song of any source but the device: its id names the source (`ytm:…`, `sub1a2b3c:…`); a local one is bare. */
+        fun isStreamedId(id: String) = id.contains(':')
 
         /**
          * Negative, so it can never be a real MediaStore album id, and one per song, because the screens key a cover on

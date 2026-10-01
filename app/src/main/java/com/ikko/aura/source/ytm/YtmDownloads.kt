@@ -40,6 +40,7 @@ class YtmDownloads @Inject constructor(
     private val dao: DownloadDao,
     private val client: YtmClient,
     private val library: YtmLibrary,
+    private val remote: com.ikko.aura.source.remote.RemoteSources,
 ) {
     private val running = MutableStateFlow<Map<String, Float>>(emptyMap())
 
@@ -89,7 +90,7 @@ class YtmDownloads @Inject constructor(
         val rows = dao.all().filter { it.key in keys }
         dao.delete(keys)
         rows.forEach { row -> if (row.filePath.isNotEmpty()) File(row.filePath).delete() }
-        keys.forEach { File(directory, "${it.substringAfter(':')}.part").delete() }
+        keys.forEach { File(directory, "${stem(it)}.part").delete() }
     }
 
     suspend fun removeAll() = remove(dao.all().map { it.key })
@@ -131,40 +132,62 @@ class YtmDownloads @Inject constructor(
 
     private suspend fun titleOf(key: String): String = library.known().firstOrNull { it.id == key }?.title.orEmpty()
 
+    /** Where to fetch [key] from, and its file type if the source already says it. */
+    private fun resolve(key: String): Pair<String, String?> =
+        if (key.startsWith("${YTM.value}:")) client.stream(key.substringAfter(':')).let { it.url to it.mimeType }
+        else remote.streamFor(key) to null
+
+    /** A name for the song's file that no source's id can break. */
+    private fun stem(key: String) = key.replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+    private fun extensionFor(mime: String): String = when (mime.substringBefore(';').trim().lowercase()) {
+        "audio/webm" -> "webm"
+        "audio/flac", "audio/x-flac" -> "flac"
+        "audio/mpeg", "audio/mp3" -> "mp3"
+        "audio/mp4", "audio/x-m4a", "audio/aac" -> "m4a"
+        "audio/ogg", "application/ogg" -> "ogg"
+        "audio/opus" -> "opus"
+        "audio/wav", "audio/x-wav" -> "wav"
+        else -> "audio"
+    }
+
     /** The song's stream, in `Range` chunks, appended to a `.part` file that is renamed once whole. */
     private suspend fun download(row: YtmDownloadEntity): Boolean {
-        val id = row.key.substringAfter(':')
+        val key = row.key
         var attempts = 0
         while (true) {
-            val stream = client.stream(id)
-            val extension = if (stream.mimeType == "audio/webm") "webm" else "m4a"
-            val part = File(directory, "$id.part")
-            val target = File(directory, "$id.$extension")
-            dao.upsert(row.copy(state = DownloadState.DOWNLOADING.name, filePath = target.absolutePath, mime = stream.mimeType, updatedAt = System.currentTimeMillis()))
+            val (url, knownMime) = resolve(key)
+            val part = File(directory, "${stem(key)}.part")
+            dao.upsert(row.copy(state = DownloadState.DOWNLOADING.name, updatedAt = System.currentTimeMillis()))
             try {
-                val total = fetch(stream.url, part, row.key)
-                if (dao.get(row.key) == null) { part.delete(); return true } // removed meanwhile
+                val fetched = fetch(url, part, key)
+                if (dao.get(key) == null) { part.delete(); return true } // removed meanwhile
+                val mime = knownMime ?: fetched.contentType ?: "audio/mpeg"
+                val target = File(directory, "${stem(key)}.${extensionFor(mime)}")
                 if (!part.renameTo(target)) throw IOException("cannot rename")
-                dao.upsert(row.copy(state = DownloadState.DONE.name, filePath = target.absolutePath, mime = stream.mimeType, bytes = target.length(), totalBytes = total, updatedAt = System.currentTimeMillis()))
+                dao.upsert(row.copy(state = DownloadState.DONE.name, filePath = target.absolutePath, mime = mime, bytes = target.length(), totalBytes = fetched.total, updatedAt = System.currentTimeMillis()))
                 return true
             } catch (e: ExpiredAddress) {
                 // The address was refused (403/410): asked again, twice at most.
-                client.invalidate(id)
+                if (key.startsWith("${YTM.value}:")) client.invalidate(key.substringAfter(':'))
                 part.delete()
                 if (++attempts > 2) return false
             }
         }
     }
 
+    private class Fetched(val total: Long, val contentType: String?)
+
     private class ExpiredAddress : IOException()
 
-    private suspend fun fetch(url: String, part: File, key: String): Long {
+    private suspend fun fetch(url: String, part: File, key: String): Fetched {
+        var contentType: String? = null
         var position = if (part.exists()) part.length() else 0L
         var total = -1L
         RandomAccessFile(part, "rw").use { out ->
             out.seek(position)
             while (total < 0 || position < total) {
-                if (dao.get(key) == null) return total // removed: stop
+                if (dao.get(key) == null) return Fetched(total, contentType) // removed: stop
                 val connection = URL(url).openConnection() as HttpURLConnection
                 try {
                     connection.connectTimeout = 15_000
@@ -175,6 +198,7 @@ class YtmDownloads @Inject constructor(
                     if (code == 403 || code == 410) throw ExpiredAddress()
                     if (code == 416) break // past the end: it was whole
                     if (code != 200 && code != 206) throw IOException("HTTP $code")
+                    contentType = contentType ?: connection.contentType
                     connection.getHeaderField("Content-Range")?.substringAfter('/')?.toLongOrNull()?.let { total = it }
                     if (code == 200) { // The server ignored the range: it sends everything; start over with it.
                         out.setLength(0); out.seek(0); position = 0
@@ -196,7 +220,7 @@ class YtmDownloads @Inject constructor(
                 }
             }
         }
-        return if (total > 0) total else position
+        return Fetched(if (total > 0) total else position, contentType)
     }
 
     private companion object {
