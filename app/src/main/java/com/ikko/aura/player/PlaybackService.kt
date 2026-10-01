@@ -65,6 +65,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
     @Inject lateinit var trackResolver: TrackResolver
+    @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -88,6 +89,9 @@ class PlaybackService : MediaSessionService() {
     /** Moves past a track that cannot be played; follows the session's player — see [adoptPlayer]. */
     private val recovery by lazy { PlaybackRecovery(trackResolver, PlaybackRecoveryPolicy(), scope) }
 
+    /** Writes the queue down as it changes, so it can come back after the process is killed. */
+    private val snapshotWriter by lazy { QueueSnapshotWriter(queueSnapshotStore, scope) }
+
     override fun onCreate() {
         super.onCreate()
         setMediaNotificationProvider(
@@ -103,6 +107,7 @@ class PlaybackService : MediaSessionService() {
         player = active
         spare = standby
         recovery.attach(active)
+        snapshotWriter.attach(active)
 
         val controller = CrossfadeController(
             scope = scope,
@@ -193,6 +198,7 @@ class PlaybackService : MediaSessionService() {
         player = incoming
         spare = outgoing
         recovery.attach(incoming)
+        snapshotWriter.attach(incoming)
         val heldFilter = activeFilter
         activeFilter = spareFilter
         spareFilter = heldFilter
@@ -247,6 +253,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         recovery.release()
+        snapshotWriter.release()
         crossfade?.release()
         crossfade = null
         scope.cancel()
