@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import org.schabi.newpipe.extractor.Page
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -49,16 +52,20 @@ data class SearchUiState(
 data class YtmSearchState(
     val enabled: Boolean = false,
     val loading: Boolean = false,
+    val loadingMore: Boolean = false,
     val error: Boolean = false,
+    /** Searched, and nothing came back. */
+    val empty: Boolean = false,
+    val hasMore: Boolean = false,
     val results: List<Track> = emptyList(),
     /** Ids of results already kept in the library. */
     val saved: Set<String> = emptySet(),
 ) {
-    /** Whether the section has anything to say: a search in flight, results, or a failure. */
-    val active: Boolean get() = enabled && (loading || error || results.isNotEmpty())
+    /** Whether the section has anything to say: a search in flight, results, a failure, or an honest "nothing". */
+    val active: Boolean get() = enabled && (loading || error || empty || results.isNotEmpty())
 }
 
-@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: MusicRepository,
@@ -70,41 +77,73 @@ class SearchViewModel @Inject constructor(
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(SearchFilter.ALL)
 
-    private val ytmResults = combine(settings.ytmEnabled, query.debounce { if (it.isBlank()) 0L else YTM_DEBOUNCE_MS }) { on, q -> on to q.trim() }
-        .distinctUntilChanged()
-        .flatMapLatest { (on, q) ->
-            if (!on || q.length < 2) {
-                flowOf(YtmSearchState(enabled = on))
-            } else {
-                flow {
-                    emit(YtmSearchState(enabled = true, loading = true))
-                    val songs = runCatching { withContext(Dispatchers.IO) { ytmClient.search(q) } }
-                    emit(
-                        YtmSearchState(
+    private val ytmSearch = MutableStateFlow(YtmSearchState())
+    private var nextPage: Page? = null
+    private var searchedQuery = ""
+    private var ytmJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            combine(settings.ytmEnabled, query.debounce { if (it.isBlank()) 0L else YTM_DEBOUNCE_MS }) { on, q -> on to q.trim() }
+                .distinctUntilChanged()
+                .collect { (on, q) ->
+                    ytmJob?.cancel()
+                    nextPage = null
+                    if (!on || q.length < 2) {
+                        ytmSearch.value = YtmSearchState(enabled = on)
+                        return@collect
+                    }
+                    searchedQuery = q
+                    ytmSearch.value = YtmSearchState(enabled = true, loading = true)
+                    ytmJob = launch {
+                        val page = runCatching { withContext(Dispatchers.IO) { ytmClient.search(q) } }
+                        nextPage = page.getOrNull()?.next
+                        val songs = page.getOrNull()?.songs.orEmpty()
+                        ytmSearch.value = YtmSearchState(
                             enabled = true,
-                            error = songs.isFailure,
-                            results = songs.getOrDefault(emptyList()).map(YtmLibrary::trackOf),
-                        ),
-                    )
+                            error = page.isFailure,
+                            empty = page.isSuccess && songs.isEmpty(),
+                            hasMore = nextPage != null,
+                            results = songs.map(YtmLibrary::trackOf),
+                        )
+                    }
                 }
-            }
-        }
-
-    val ytmState: StateFlow<YtmSearchState> = combine(ytmResults, repository.tracks) { state, library ->
-        val inLibrary = library.asSequence().map { it.id }.filter { it.startsWith("ytm:") }.toSet()
-        state.copy(saved = inLibrary)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), YtmSearchState())
-
-    fun saveYtm(track: Track) {
-        viewModelScope.launch(Dispatchers.IO) {
-            ytmLibrary.save(
-                YtmSong(track.id.substringAfter(':'), track.title, track.artist, track.durationMs, track.artworkUri?.toString()),
-            )
         }
     }
 
+    val ytmState: StateFlow<YtmSearchState> = combine(ytmSearch, ytmLibrary.observeKeptIds()) { state, kept ->
+        state.copy(saved = kept)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), YtmSearchState())
+
+    /** The next page of the same search, added under the results already there. */
+    fun loadMoreYtm() {
+        val page = nextPage ?: return
+        if (ytmSearch.value.loadingMore || ytmSearch.value.loading) return
+        val q = searchedQuery
+        ytmSearch.update { it.copy(loadingMore = true, error = false) }
+        ytmJob = viewModelScope.launch {
+            val more = runCatching { withContext(Dispatchers.IO) { ytmClient.searchMore(q, page) } }
+            if (q != searchedQuery) return@launch // The query moved on while this was on its way.
+            nextPage = more.getOrNull()?.next ?: if (more.isFailure) page else null
+            ytmSearch.update { state ->
+                val known = state.results.mapTo(HashSet()) { it.id }
+                val added = more.getOrNull()?.songs.orEmpty().map(YtmLibrary::trackOf).filter { it.id !in known }
+                state.copy(
+                    loadingMore = false,
+                    error = more.isFailure,
+                    hasMore = nextPage != null,
+                    results = state.results + added,
+                )
+            }
+        }
+    }
+
+    fun saveYtm(track: Track) {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.keep(listOf(track)) } }
+    }
+
     fun removeYtm(track: Track) {
-        viewModelScope.launch(Dispatchers.IO) { ytmLibrary.remove(track.id) }
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.unkeep(listOf(track.id)) } }
     }
 
     val uiState: StateFlow<SearchUiState> = combine(

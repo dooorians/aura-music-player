@@ -59,6 +59,10 @@ fun MediaContextSheet(
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
     onDelete: () -> Unit,
+    /** A song streamed from YouTube Music: no file to delete, no album or artist page of its own. */
+    streamed: Boolean = false,
+    keptInLibrary: Boolean = false,
+    onToggleKeep: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -86,6 +90,15 @@ fun MediaContextSheet(
             ContextAction(CupertinoIcons.Play, "Lire ensuite") { onPlayNext(); onDismiss() }
             ContextAction(CupertinoIcons.Queue, "Ajouter à la file d'attente") { onAddToQueue(); onDismiss() }
             ContextAction(CupertinoIcons.PlaylistAdd, "Ajouter à une playlist") { onAddToPlaylist() }
+
+            if (streamed) {
+                if (keptInLibrary) {
+                    ContextAction(CupertinoIcons.Delete, "Retirer de la bibliothèque", tint = AuraColors.AccentPink) { onToggleKeep(); onDismiss() }
+                } else {
+                    ContextAction(CupertinoIcons.Add, "Ajouter à la bibliothèque") { onToggleKeep(); onDismiss() }
+                }
+                return@Column
+            }
 
             if (target is LibraryContextTarget.TrackTarget) {
                 ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }

@@ -10,6 +10,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
@@ -29,6 +30,9 @@ data class YtmSong(
     val thumbnailUrl: String?,
 )
 
+/** One page of search results, and the key to the next one if there is one. */
+data class YtmPage(val songs: List<YtmSong>, val next: Page?)
+
 /** An audio-only stream address and when it stops working. */
 data class YtmStream(val url: String, val mimeType: String, val expiresAtMs: Long)
 
@@ -39,7 +43,10 @@ data class YtmStream(val url: String, val mimeType: String, val expiresAtMs: Lon
  * All calls block: they run on the player's loader threads or on the caller's own IO dispatcher.
  */
 @Singleton
-class YtmClient @Inject constructor(private val settings: SettingsStore) {
+class YtmClient @Inject constructor(
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
+    private val settings: SettingsStore,
+) {
 
     private val streams = ConcurrentHashMap<String, YtmStream>()
     private var initialised = false
@@ -54,17 +61,31 @@ class YtmClient @Inject constructor(private val settings: SettingsStore) {
         initialised = true
     }
 
-    /** Songs only, never videos or clips. */
-    fun search(query: String): List<YtmSong> {
+    /** Songs only, never videos or clips. [YtmPage.next] opens the following page of the same search. */
+    fun search(query: String): YtmPage {
         check(isEnabled()) { "YouTube Music is off" }
         ensureInit()
-        val extractor = ServiceList.YouTube.getSearchExtractor(
-            query,
-            listOf(YoutubeSearchQueryHandlerFactory.MUSIC_SONGS),
-            "",
-        )
+        val extractor = searchExtractor(query)
         extractor.fetchPage()
-        return extractor.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { item ->
+        return pageOf(extractor.initialPage)
+    }
+
+    fun searchMore(query: String, page: Page): YtmPage {
+        check(isEnabled()) { "YouTube Music is off" }
+        ensureInit()
+        val extractor = searchExtractor(query)
+        extractor.fetchPage()
+        return pageOf(extractor.getPage(page))
+    }
+
+    private fun searchExtractor(query: String) = ServiceList.YouTube.getSearchExtractor(
+        query,
+        listOf(YoutubeSearchQueryHandlerFactory.MUSIC_SONGS),
+        "",
+    )
+
+    private fun pageOf(page: org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage<org.schabi.newpipe.extractor.InfoItem>): YtmPage {
+        val songs = page.items.filterIsInstance<StreamInfoItem>().mapNotNull { item ->
             val id = videoIdOf(item.url) ?: return@mapNotNull null
             YtmSong(
                 videoId = id,
@@ -74,6 +95,7 @@ class YtmClient @Inject constructor(private val settings: SettingsStore) {
                 thumbnailUrl = item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url,
             )
         }
+        return YtmPage(songs, page.nextPage.takeIf { page.hasNextPage() })
     }
 
     /**
@@ -94,7 +116,12 @@ class YtmClient @Inject constructor(private val settings: SettingsStore) {
             ?: throw IOException("no audio stream for $videoId")
         val url = pick.content
         val expiry = EXPIRE.find(url)?.groupValues?.get(1)?.toLongOrNull()?.times(1000) ?: (now + FALLBACK_TTL_MS)
-        return YtmStream(url, pick.format!!.mimeType, expiry).also { streams[videoId] = it }
+        // Debug builds only: a file dropped in the cache directory makes the next address resolved a refused one, to
+        // check the song still plays (see YtmDataSource).
+        val damaged = com.ikko.aura.BuildConfig.DEBUG && java.io.File(context.cacheDir, "damage_next_address").delete()
+        val served = if (damaged) url.replace(Regex("([?&](?:sig|lsig)=)"), "$1BAD") else url
+        if (damaged) android.util.Log.i("YtmClient", "test: damaged address served for $videoId")
+        return YtmStream(served, pick.format!!.mimeType, expiry).also { streams[videoId] = it }
     }
 
     /** The address stopped working before its time: forget it so the next [stream] asks again. */

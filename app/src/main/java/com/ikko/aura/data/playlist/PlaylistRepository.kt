@@ -48,6 +48,7 @@ class PlaylistRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val musicRepository: MusicRepository,
     private val catalogDao: CatalogDao,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) {
     val playlists: Flow<List<PlaylistSummary>> = playlistDao.observePlaylists()
         .onStart { ensureFavorites() }
@@ -94,9 +95,11 @@ class PlaylistRepository @Inject constructor(
         playlistDao.observeTracksForPlaylist(playlistId),
         musicRepository.tracks,
         catalogDao.observeTracks(),
-    ) { playlist, entries, allTracks, remembered ->
+        ytmLibrary.observeKnown(),
+    ) { playlist, entries, allTracks, remembered, streamed ->
         if (playlist == null) return@combine null
-        val tracksById = allTracks.associateBy { it.id }
+        // A streamed song is a playlist's own whether or not it was kept in the library.
+        val tracksById = (allTracks + streamed).associateBy { it.id }
         val ordered = entries.sortedBy { it.position }
         val tracks = ordered.mapNotNull { tracksById[it.trackId] }
         // Only once the library has loaded: before that every entry would look gone.

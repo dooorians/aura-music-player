@@ -236,6 +236,7 @@ fun SearchPanel(
                         if (ytm.active && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
                             item { SectionLabel("YouTube Music") }
                             if (ytm.loading) item { YtmNote("Recherche…") }
+                            if (ytm.empty) item { YtmNote("Aucun titre trouvé sur YouTube Music") }
                             if (ytm.error) item { YtmNote("YouTube Music ne répond pas pour le moment") }
                             itemsIndexed(ytm.results, key = { _, track -> "ytm_${track.id}" }) { index, track ->
                                 val kept = track.id in ytm.saved
@@ -246,6 +247,7 @@ fun SearchPanel(
                                         playerViewModel.playQueue(ytm.results, index)
                                         navController.navigate(AuraDestination.NowPlaying.route)
                                     },
+                                    onLongClick = { menu.show(track) },
                                     modifier = Modifier.padding(horizontal = 20.dp).animateItem(),
                                     trailingContent = {
                                         IconButton(onClick = {
@@ -258,6 +260,21 @@ fun SearchPanel(
                                             )
                                         }
                                     },
+                                )
+                            }
+                        }
+                        if (ytm.active && ytm.hasMore && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
+                            item {
+                                Text(
+                                    text = if (ytm.loadingMore) "Chargement…" else "Afficher plus de résultats",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = AuraColors.TextPrimary,
+                                    modifier = Modifier
+                                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                                        .clip(RoundedCornerShape(100))
+                                        .background(AuraColors.TextPrimary.copy(alpha = 0.15f))
+                                        .clickable(enabled = !ytm.loadingMore, onClick = searchViewModel::loadMoreYtm)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
                                 )
                             }
                         }

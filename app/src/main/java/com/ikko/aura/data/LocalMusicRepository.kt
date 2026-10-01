@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 class LocalMusicRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val catalog: CatalogDao,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : MusicRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -53,7 +54,8 @@ class LocalMusicRepository @Inject constructor(
 
     init {
         repositoryScope.launch {
-            catalog.observeSaved().collect { rows -> _saved.value = rows.map { it.toSavedTrack() } }
+            runCatching { ytmLibrary.prune() }
+            ytmLibrary.observeKept().collect { _saved.value = it }
         }
     }
 
@@ -354,9 +356,6 @@ class LocalMusicRepository @Inject constructor(
         private const val ENRICHMENT_STEP_DELAY_MS = 4L
     }
 }
-
-private fun CatalogTrackEntity.toSavedTrack(): Track =
-    com.ikko.aura.source.ytm.YtmLibrary.trackOf(key.substringAfter(':'), title, artist, durationMs, artworkUrl)
 
 private fun String?.knownOr(fallback: String): String =
     if (this == null || isBlank() || this == MediaStore.UNKNOWN_STRING) fallback else this

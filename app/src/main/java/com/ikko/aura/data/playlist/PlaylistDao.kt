@@ -69,7 +69,7 @@ interface PlaylistDao {
         CatalogTrackEntity::class,
         TrackBindingEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -103,6 +103,13 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN artworkUrl TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** Streamed songs can be known without being in the library. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN inLibrary INTEGER NOT NULL DEFAULT 1")
     }
 }
 

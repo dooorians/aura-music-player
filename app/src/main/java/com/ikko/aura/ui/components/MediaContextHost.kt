@@ -9,6 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.ikko.aura.source.ytm.YtmLibrary
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +69,8 @@ fun MediaContextHost(
     }
 
     val controller = remember { MediaContextController { target = it } }
+    val keptStreamed by playerViewModel.keptStreamedIds.collectAsState()
+    val scope = rememberCoroutineScope()
 
     content(controller)
 
@@ -74,7 +80,19 @@ fun MediaContextHost(
             onDismiss = { target = null },
             onPlayNext = { playerViewModel.playNext(shown.tracks()) },
             onAddToQueue = { playerViewModel.addToQueue(shown.tracks()) },
-            onAddToPlaylist = { playlistTargetIds = shown.tracks().map { it.id } },
+            // A streamed song is made known first, so the playlist can name it afterwards.
+            onAddToPlaylist = {
+                scope.launch {
+                    playerViewModel.rememberForUse(shown.tracks())
+                    playlistTargetIds = shown.tracks().map { it.id }
+                }
+            },
+            streamed = (shown as? LibraryContextTarget.TrackTarget)?.track?.let(YtmLibrary::isStreamed) == true,
+            keptInLibrary = (shown as? LibraryContextTarget.TrackTarget)?.track?.id in keptStreamed,
+            onToggleKeep = {
+                val track = (shown as? LibraryContextTarget.TrackTarget)?.track ?: return@MediaContextSheet
+                if (track.id in keptStreamed) playerViewModel.unkeepStreamed(listOf(track)) else playerViewModel.keepStreamed(listOf(track))
+            },
             onOpenAlbum = {
                 val albumId = (shown as? LibraryContextTarget.TrackTarget)?.track?.albumId
                     ?: return@MediaContextSheet

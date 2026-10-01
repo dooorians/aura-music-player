@@ -41,7 +41,7 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
     override fun open(dataSpec: DataSpec): Long {
         spec = dataSpec
         videoId = dataSpec.uri.takeIf { it.scheme == YTM_SCHEME }?.schemeSpecificPart?.removePrefix("//")
-        url = videoId?.let { Uri.parse(client.stream(it).url) } ?: dataSpec.uri
+        url = videoId?.let { Uri.parse(streamOrFail(it, dataSpec).url) } ?: dataSpec.uri
         pos = dataSpec.position
         end = if (dataSpec.length != C.LENGTH_UNSET.toLong()) pos + dataSpec.length else C.LENGTH_UNSET.toLong()
         ended = false
@@ -65,6 +65,31 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
         return read
     }
 
+    /**
+     * The stream of [id], or an error the player understands: a song YouTube no longer serves (removed, restricted by
+     * age or region, no audio format) is reported as missing, anything else — the network, a block, a changed page — as
+     * unreachable. Either way playback recovery moves on to the next song instead of stopping on an exception it cannot
+     * classify.
+     */
+    private fun streamOrFail(id: String, spec: DataSpec): YtmStream = try {
+        client.stream(id)
+    } catch (e: org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException) {
+        throw failure(e, spec, androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND)
+    } catch (e: IOException) {
+        throw if (e.message?.startsWith("no audio stream") == true) {
+            failure(e, spec, androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND)
+        } else {
+            failure(e, spec, androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)
+        }
+    } catch (e: Exception) {
+        throw failure(e, spec, androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)
+    }
+
+    private fun failure(cause: Exception, spec: DataSpec, code: Int) =
+        HttpDataSource.HttpDataSourceException(
+            cause.message ?: "YouTube Music", spec, code, HttpDataSource.HttpDataSourceException.TYPE_OPEN,
+        )
+
     private fun openChunk() {
         val base = spec ?: throw IOException("not open")
         val wanted = if (end == C.LENGTH_UNSET.toLong()) chunkBytes.toLong() else minOf(chunkBytes.toLong(), end - pos)
@@ -85,8 +110,9 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
         } catch (e: HttpDataSource.InvalidResponseCodeException) {
             val id = videoId
             if (id == null || e.responseCode !in EXPIRED_CODES) throw e
+            android.util.Log.i("YtmDataSource", "address refused (${e.responseCode}) for $id: asked again")
             client.invalidate(id)
-            url = Uri.parse(client.stream(id).url)
+            url = Uri.parse(streamOrFail(id, base).url)
             attempt()
         }
         chunkLeft = if (opened == C.LENGTH_UNSET.toLong()) wanted else opened

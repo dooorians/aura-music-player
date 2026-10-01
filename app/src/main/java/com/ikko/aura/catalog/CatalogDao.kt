@@ -19,6 +19,8 @@ data class CatalogTrackEntity(
     val durationMs: Long,
     /** A remote cover; empty for a local track, whose cover is its file. */
     val artworkUrl: String = "",
+    /** A streamed song is known (to a playlist, the queue) without being in the library; local files always are. */
+    val inLibrary: Boolean = true,
 )
 
 @Entity(
@@ -46,8 +48,35 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_tracks")
     fun observeTracks(): Flow<List<CatalogTrackEntity>>
 
-    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%'")
+    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%' AND inLibrary = 1")
     fun observeSaved(): Flow<List<CatalogTrackEntity>>
+
+    /** Every streamed song the app has met and still keeps, in the library or not. */
+    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%'")
+    fun observeStreamed(): Flow<List<CatalogTrackEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTracksIfAbsent(tracks: List<CatalogTrackEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertBindingsIfAbsent(bindings: List<TrackBindingEntity>)
+
+    @Query("UPDATE catalog_tracks SET inLibrary = :inLibrary WHERE `key` = :key")
+    suspend fun setInLibrary(key: String, inLibrary: Boolean)
+
+    /**
+     * Streamed songs that are in no library and no playlist and have not been seen for a while: nothing refers to
+     * them any more.
+     */
+    @Query(
+        "DELETE FROM catalog_tracks WHERE `key` LIKE 'ytm:%' AND inLibrary = 0 " +
+            "AND `key` NOT IN (SELECT trackId FROM playlist_tracks) " +
+            "AND `key` NOT IN (SELECT trackKey FROM track_bindings WHERE lastSeenAt > :since)",
+    )
+    suspend fun pruneStreamed(since: Long)
+
+    @Query("DELETE FROM track_bindings WHERE sourceId = 'ytm' AND trackKey NOT IN (SELECT `key` FROM catalog_tracks)")
+    suspend fun pruneOrphanBindings()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTracks(tracks: List<CatalogTrackEntity>)
@@ -70,6 +99,12 @@ interface CatalogDao {
         clearBindings(sourceId)
         insertBindings(bindings)
         upsertTracks(tracks)
+    }
+
+    @Transaction
+    suspend fun rememberItems(tracks: List<CatalogTrackEntity>, bindings: List<TrackBindingEntity>) {
+        insertTracksIfAbsent(tracks)
+        insertBindingsIfAbsent(bindings)
     }
 
     @Transaction

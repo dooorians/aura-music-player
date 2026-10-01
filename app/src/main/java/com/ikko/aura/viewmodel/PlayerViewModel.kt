@@ -20,6 +20,9 @@ import com.ikko.aura.player.PlayerController
 import com.ikko.aura.player.QueueSnapshotStore
 import com.ikko.aura.ui.components.AlbumArtCache
 import com.ikko.aura.ui.theme.AuraColors
+import com.ikko.aura.source.ytm.YtmLibrary
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -78,6 +81,7 @@ class PlayerViewModel @Inject constructor(
     private val queueSnapshotStore: QueueSnapshotStore,
     private val settingsStore: SettingsStore,
     private val playlistRepository: com.ikko.aura.data.playlist.PlaylistRepository,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -241,7 +245,7 @@ class PlayerViewModel @Inject constructor(
     private suspend fun adoptExistingQueue(player: Player) {
         if (player.mediaItemCount == 0) return
         val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-        val byId = musicRepository.tracks.first { it.isNotEmpty() }.associateBy { it.id }
+        val byId = (musicRepository.tracks.first { it.isNotEmpty() } + ytmLibrary.known()).associateBy { it.id }
         // This view model's queue mirrors the player's position for position, so an item the library does not know
         // (a file deleted since the queue was written) is taken out of the player as well, not just left out here:
         // dropped on this side only, every index after it would point at the wrong track.
@@ -273,7 +277,7 @@ class PlayerViewModel @Inject constructor(
     private suspend fun restoreSavedQueue(player: Player) {
         if (player.mediaItemCount > 0) return
         val saved = queueSnapshotStore.read() ?: return
-        val byId = musicRepository.tracks.first { it.isNotEmpty() }.associateBy { it.id }
+        val byId = (musicRepository.tracks.first { it.isNotEmpty() } + ytmLibrary.known()).associateBy { it.id }
         val snapshot = saved.surviving { it in byId } ?: return
         // Something may have started playing while the library was loading (a media button, say): that is the queue
         // then, and not this one — adopted here, since the first look found the player empty.
@@ -300,7 +304,29 @@ class PlayerViewModel @Inject constructor(
         extractPalette(track)
     }
 
+    /** Streamed songs of a queue are remembered as they enter it, so a playlist, a heart or a restored queue can name them. */
+    private fun rememberStreamed(tracks: List<Track>) {
+        if (tracks.none(YtmLibrary::isStreamed)) return
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.remember(tracks) } }
+    }
+
+    /** The streamed songs kept in the library. */
+    val keptStreamedIds: StateFlow<Set<String>> = ytmLibrary.observeKeptIds()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** Remembered first when a streamed song is about to be named by something else (the add-to-playlist dialog). */
+    suspend fun rememberForUse(tracks: List<Track>) = withContext(Dispatchers.IO) { runCatching { ytmLibrary.remember(tracks) } }
+
+    fun keepStreamed(tracks: List<Track>) {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.keep(tracks) } }
+    }
+
+    fun unkeepStreamed(tracks: List<Track>) {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmLibrary.unkeep(tracks.map { it.id }) } }
+    }
+
     fun playQueue(tracks: List<Track>, startIndex: Int) {
+        rememberStreamed(tracks)
         _uiState.update { it.copy(queue = tracks, queueIndex = startIndex) }
         playerController.playQueue(tracks, startIndex)
     }
@@ -327,6 +353,7 @@ class PlayerViewModel @Inject constructor(
 
     fun playNext(tracks: List<Track>) {
         if (tracks.isEmpty()) return
+        rememberStreamed(tracks)
         playerController.playNext(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
@@ -340,6 +367,7 @@ class PlayerViewModel @Inject constructor(
 
     fun addToQueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
+        rememberStreamed(tracks)
         playerController.addToQueue(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
