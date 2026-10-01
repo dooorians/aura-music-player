@@ -51,3 +51,7 @@ sealed class AuraDestination(val route: String) {
         val topLevelRoutes = listOf(Home, Library, Settings)
     }
 }
+
+/** Where an album's page is: a streamed album's on its source, a local one's in the library. */
+fun com.ikko.aura.data.model.Album.route(): String =
+    remoteId?.let { AuraDestination.YtmAlbumPattern.route(it) } ?: AuraDestination.AlbumPattern.route(id.toString())

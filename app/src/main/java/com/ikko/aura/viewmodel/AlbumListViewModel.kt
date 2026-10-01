@@ -30,17 +30,26 @@ class AlbumListViewModel @Inject constructor(
     repository: MusicRepository,
     recentlyPlayedTracker: RecentlyPlayedTracker,
     favoritesStore: FavoritesStore,
+    ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : ViewModel() {
 
     private val mode = savedStateHandle.get<String>("mode").orEmpty()
 
-    val uiState: StateFlow<AlbumListUiState> = combine(
+    val uiState: StateFlow<AlbumListUiState> = combine<Any?, AlbumListUiState>(
         repository.albums,
         recentlyPlayedTracker.recentAlbumIds,
         favoritesStore.favoriteAlbumIds,
         recentlyPlayedTracker.playCounts,
-    ) { albums, recentIds, favoriteIds, plays ->
-        val albumsById = albums.associateBy { it.id }
+        ytmLibrary.observeKnown(),
+        ytmLibrary.observeKept(),
+    ) { values ->
+        @Suppress("UNCHECKED_CAST") val albums = values[0] as List<Album>
+        @Suppress("UNCHECKED_CAST") val recentIds = values[1] as List<Long>
+        @Suppress("UNCHECKED_CAST") val favoriteIds = values[2] as Set<Long>
+        @Suppress("UNCHECKED_CAST") val plays = values[3] as List<com.ikko.aura.data.AlbumPlayEntity>
+        @Suppress("UNCHECKED_CAST") val known = values[4] as List<com.ikko.aura.data.model.Track>
+        @Suppress("UNCHECKED_CAST") val kept = values[5] as List<com.ikko.aura.data.model.Track>
+        val albumsById = (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf(known)).associateBy { it.id }
         when (mode) {
             "favorites" -> AlbumListUiState("Albums favoris", albums.filter { it.id in favoriteIds })
             "recent" -> AlbumListUiState("Écoutés récemment", recentIds.mapNotNull { albumsById[it] })
@@ -48,7 +57,7 @@ class AlbumListViewModel @Inject constructor(
             // about what you have forgotten should not reorder it into the plain album list.
             else -> {
                 val countById = plays.associate { it.albumId to it.playCount }
-                AlbumListUiState("Redécouvrir", albums.sortedBy { countById[it.id] ?: 0 })
+                AlbumListUiState("Redécouvrir", (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf(kept)).sortedBy { countById[it.id] ?: 0 })
             }
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumListUiState())

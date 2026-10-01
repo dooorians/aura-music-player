@@ -23,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SquircleCard
@@ -64,7 +65,7 @@ fun AlbumListScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f),
-                            onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+                            onClick = { navController.navigate(album.route()) },
                         ) {
                             AlbumArt(
                                 uri = album.artworkUri,

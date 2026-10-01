@@ -80,7 +80,8 @@ class RecentlyPlayedTracker @Inject constructor(
                 }
             }
         }
-        if (albumId <= 0) return
+        // 0 is "no album"; streamed albums have negative ids of their own.
+        if (albumId == 0L) return
         _recentAlbumIds.update { current ->
             (listOf(albumId) + current.filterNot { it == albumId }).take(MAX_ENTRIES)
         }

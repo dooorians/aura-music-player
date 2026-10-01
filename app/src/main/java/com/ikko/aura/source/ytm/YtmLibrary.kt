@@ -83,6 +83,24 @@ class YtmLibrary @Inject constructor(
     companion object {
         private const val PRUNE_AFTER_MS = 30L * 24 * 60 * 60 * 1000
 
+        /** The albums streamed songs belong to, as the lists draw them: one per album, from the songs known through it. */
+        fun albumsOf(tracks: List<Track>): List<com.ikko.aura.data.model.Album> =
+            tracks.filter { it.remoteAlbumId != null }
+                .groupBy { it.remoteAlbumId }
+                .map { (remote, songs) ->
+                    val first = songs.first()
+                    com.ikko.aura.data.model.Album(
+                        id = pseudoAlbumId(remote.orEmpty()),
+                        title = first.album,
+                        artist = first.artist,
+                        artistId = 0L,
+                        artworkUri = first.artworkUri,
+                        trackCount = songs.size,
+                        year = 0,
+                        remoteId = remote,
+                    )
+                }
+
         fun isStreamed(track: Track) = isStreamedId(track.id)
 
         fun isStreamedId(id: String) = id.startsWith("${YTM.value}:")

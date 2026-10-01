@@ -94,6 +94,7 @@ import com.ikko.aura.data.model.AudioOutputState
 import com.ikko.aura.data.model.AudioOutputType
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.source.ytm.YtmLibrary
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.GradientScreenScaffold
@@ -429,10 +430,25 @@ fun NowPlayingScreen(
                     currentTrack = uiState.currentTrack,
                     queueIndex = uiState.queueIndex,
                     onOpenAlbum = { albumId ->
-                        if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
+                        val playing = uiState.currentTrack
+                        if (sheetCard.cardTop <= 10f) {
+                            if (playing != null && YtmLibrary.isStreamed(playing)) {
+                                // A streamed song's album is the source's, and only known if it came through one.
+                                playing.remoteAlbumId?.let { navController.navigate(AuraDestination.YtmAlbumPattern.route(it)) }
+                            } else {
+                                navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
+                            }
+                        }
                     },
                     onOpenArtist = { artistId ->
-                        if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
+                        val playing = uiState.currentTrack
+                        if (sheetCard.cardTop <= 10f) {
+                            if (playing != null && YtmLibrary.isStreamed(playing)) {
+                                navController.navigate(AuraDestination.YtmArtistPattern.route(playing.artist))
+                            } else {
+                                navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
+                            }
+                        }
                     },
                 )
             }

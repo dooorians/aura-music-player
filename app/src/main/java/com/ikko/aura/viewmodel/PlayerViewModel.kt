@@ -137,7 +137,7 @@ class PlayerViewModel @Inject constructor(
             _positionMs.value = 0L
             _durationMs.value = player.duration.coerceAtLeast(0L)
             track?.let(::extractPalette)
-            track?.let { recentlyPlayedTracker.recordPlayed(it.albumId, it.id) }
+            track?.let { recentlyPlayedTracker.recordPlayed(it.albumForPlays(), it.id) }
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -226,7 +226,7 @@ class PlayerViewModel @Inject constructor(
         _positionMs.value = player.currentPosition.coerceAtLeast(0L)
         _durationMs.value = player.duration.coerceAtLeast(0L)
         extractPalette(track)
-        recentlyPlayedTracker.recordPlayed(track.albumId, track.id)
+        recentlyPlayedTracker.recordPlayed(track.albumForPlays(), track.id)
     }
 
     /**
@@ -559,3 +559,6 @@ private fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
     RepeatMode.ALL -> Player.REPEAT_MODE_ALL
     RepeatMode.ONE -> Player.REPEAT_MODE_ONE
 }
+
+/** The album a play counts for: a streamed song that is not known through an album has none. */
+private fun Track.albumForPlays(): Long = if (YtmLibrary.isStreamed(this) && remoteAlbumId == null) 0L else albumId

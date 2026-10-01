@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.AuraIconButton
 import com.ikko.aura.ui.components.GradientScreenScaffold
@@ -200,7 +201,7 @@ private fun AlbumCell(album: Album, navController: NavHostController, modifier: 
     // The cover alone: its title and artist are still read out (contentDescription), just not written under it.
     SquircleCard(
         modifier = modifier.fillMaxWidth(FAVOURITE_COVER_FRACTION).aspectRatio(1f),
-        onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+        onClick = { navController.navigate(album.route()) },
     ) {
         AlbumArt(
             uri = album.artworkUri,
@@ -231,7 +232,7 @@ private fun AlbumCarousel(albums: List<Album>, navController: NavHostController)
                     .size(CAROUSEL_ITEM_WIDTH)
                     .clipOnce(AuraShapes.SquircleMedium)
                     .clickable {
-                        navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString()))
+                        navController.navigate(album.route())
                     },
             ) {
                 AlbumArt(
