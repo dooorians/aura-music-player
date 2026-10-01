@@ -75,6 +75,18 @@ class PlayerController @Inject constructor(
         player.play()
     }
 
+    /**
+     * Puts a saved queue back without playing it: loaded, and paused where it was left. [playQueue] always plays.
+     */
+    fun restoreQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long, shuffle: Boolean, repeatMode: Int) {
+        if (tracks.isEmpty()) return
+        val player = player ?: return
+        player.shuffleModeEnabled = shuffle
+        player.repeatMode = repeatMode
+        player.setMediaItems(tracks.map(::toMediaItem), startIndex, startPositionMs)
+        player.prepare()
+    }
+
     fun togglePlayPause() {
         val player = player ?: return
         if (player.playbackState == Player.STATE_ENDED) {

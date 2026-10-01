@@ -17,6 +17,7 @@ import com.ikko.aura.data.model.AudioOutputState
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.player.AudioOutputMonitor
 import com.ikko.aura.player.PlayerController
+import com.ikko.aura.player.QueueSnapshotStore
 import com.ikko.aura.ui.components.AlbumArtCache
 import com.ikko.aura.ui.theme.AuraColors
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,6 +75,7 @@ class PlayerViewModel @Inject constructor(
     private val audioOutputMonitor: AudioOutputMonitor,
     private val recentlyPlayedTracker: RecentlyPlayedTracker,
     private val musicRepository: MusicRepository,
+    private val queueSnapshotStore: QueueSnapshotStore,
     private val settingsStore: SettingsStore,
     private val playlistRepository: com.ikko.aura.data.playlist.PlaylistRepository,
     @param:ApplicationContext private val appContext: Context,
@@ -148,6 +150,7 @@ class PlayerViewModel @Inject constructor(
             val player = playerController.awaitPlayer()
             boundPlayer = player
             adoptExistingQueue(player)
+            restoreSavedQueue(player)
             player.addListener(playerListener)
             // One continuous ticker for the ViewModel's lifetime rather than one restarted from
             // onIsPlayingChanged: isPlaying only flips on genuine play/pause, not on every track
@@ -239,6 +242,10 @@ class PlayerViewModel @Inject constructor(
         if (player.mediaItemCount == 0) return
         val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
         val byId = musicRepository.tracks.first { it.isNotEmpty() }.associateBy { it.id }
+        // This view model's queue mirrors the player's position for position, so an item the library does not know
+        // (a file deleted since the queue was written) is taken out of the player as well, not just left out here:
+        // dropped on this side only, every index after it would point at the wrong track.
+        ids.indices.reversed().filter { ids[it] !in byId }.forEach { player.removeMediaItem(it) }
         val queue = ids.mapNotNull { byId[it] }
         if (queue.isEmpty()) return
         val index = player.currentMediaItemIndex.coerceIn(0, queue.lastIndex)
@@ -253,6 +260,44 @@ class PlayerViewModel @Inject constructor(
         _positionMs.value = player.currentPosition.coerceAtLeast(0L)
         _durationMs.value = player.duration.coerceAtLeast(0L)
         queue[index].let(::extractPalette)
+    }
+
+    /**
+     * Brings back the queue that was playing when the process was killed — loaded and paused where it was left, as the
+     * pill and the lock-screen notification show it — when the player has nothing of its own to adopt.
+     *
+     * Resolved against the library first, then handed to the player and kept here as the very same list: what the
+     * library no longer has is left out of both, so the two stay in step. Waits for the first scan like
+     * [adoptExistingQueue].
+     */
+    private suspend fun restoreSavedQueue(player: Player) {
+        if (player.mediaItemCount > 0) return
+        val saved = queueSnapshotStore.read() ?: return
+        val byId = musicRepository.tracks.first { it.isNotEmpty() }.associateBy { it.id }
+        val snapshot = saved.surviving { it in byId } ?: return
+        // Something may have started playing while the library was loading (a media button, say): that is the queue
+        // then, and not this one — adopted here, since the first look found the player empty.
+        if (player.mediaItemCount > 0) {
+            adoptExistingQueue(player)
+            return
+        }
+        val queue = snapshot.items.mapNotNull { byId[it.id] }
+        if (queue.size != snapshot.items.size) return
+        val track = queue[snapshot.index]
+        _uiState.update {
+            it.copy(
+                queue = queue,
+                queueIndex = snapshot.index,
+                currentTrack = track,
+                isPlaying = false,
+                shuffleEnabled = snapshot.shuffle,
+                repeatMode = snapshot.repeat.toRepeatMode(),
+            )
+        }
+        _positionMs.value = snapshot.positionMs
+        _durationMs.value = track.durationMs
+        playerController.restoreQueue(queue, snapshot.index, snapshot.positionMs, snapshot.shuffle, snapshot.repeat)
+        extractPalette(track)
     }
 
     fun playQueue(tracks: List<Track>, startIndex: Int) {

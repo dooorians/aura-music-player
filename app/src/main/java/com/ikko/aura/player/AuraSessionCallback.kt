@@ -1,6 +1,7 @@
 package com.ikko.aura.player
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
  */
 class AuraSessionCallback(
     private val resolver: TrackResolver,
+    private val snapshots: QueueSnapshotStore,
     private val scope: CoroutineScope,
 ) : MediaSession.Callback {
 
@@ -34,6 +36,49 @@ class AuraSessionCallback(
             result.set(mediaItems.mapTo(ArrayList(mediaItems.size)) { resolveOrKeep(it) })
         }
         return result
+    }
+
+    /**
+     * The play button of a headset or the lock screen, pressed after the process was killed: the system asks the session
+     * to resume what was playing. It is answered from the queue written down by [QueueSnapshotWriter], with each item
+     * resolved afresh. Nothing to resume — or nothing that resolves — is a refusal, which is what the default always was.
+     */
+    override fun onPlaybackResumption(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        isForPlayback: Boolean,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val result = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+        scope.launch {
+            val resumed = runCatching { resumable() }.getOrNull()
+            if (resumed != null) result.set(resumed) else result.setException(UnsupportedOperationException("nothing to resume"))
+        }
+        return result
+    }
+
+    private suspend fun resumable(): MediaSession.MediaItemsWithStartPosition? {
+        val saved = snapshots.read() ?: return null
+        val addressOf = HashMap<String, String>()
+        saved.items.forEach { entry ->
+            if (entry.id !in addressOf) {
+                resolver.candidates(TrackKey(entry.id)).firstOrNull()?.let { addressOf[entry.id] = it.uri }
+            }
+        }
+        val snapshot = saved.surviving { it in addressOf } ?: return null
+        val items = snapshot.items.map { entry ->
+            MediaItem.Builder()
+                .setMediaId(entry.id)
+                .setUri(addressOf.getValue(entry.id))
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(entry.title.ifEmpty { null })
+                        .setArtist(entry.artist.ifEmpty { null })
+                        .setAlbumTitle(entry.album.ifEmpty { null })
+                        .build(),
+                )
+                .build()
+        }
+        return MediaSession.MediaItemsWithStartPosition(items, snapshot.index, snapshot.positionMs)
     }
 
     private suspend fun resolveOrKeep(item: MediaItem): MediaItem {

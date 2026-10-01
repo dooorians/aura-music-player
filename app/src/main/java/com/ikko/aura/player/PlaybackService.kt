@@ -141,7 +141,7 @@ class PlaybackService : MediaSessionService() {
         )
         mediaSession = MediaSession.Builder(this, SkipAwarePlayer(active, controller))
             .setSessionActivity(sessionActivity)
-            .setCallback(AuraSessionCallback(trackResolver, scope))
+            .setCallback(AuraSessionCallback(trackResolver, queueSnapshotStore, scope))
             // Media3's default loader decodes the embedded cover at its full resolution for a
             // notification icon Android then draws at about 128dp. On a 3000x3000 front cover
             // that is a 36MB allocation and a decode long enough to be felt: an atrace of three
