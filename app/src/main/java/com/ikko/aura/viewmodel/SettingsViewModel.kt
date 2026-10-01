@@ -20,6 +20,7 @@ data class SettingsUiState(
     val isScanning: Boolean = false,
     val onlineLyricsEnabled: Boolean = true,
     val automixEnabled: Boolean = false,
+    val ytmEnabled: Boolean = false,
     /** Minutes left on the sleep timer, or null when none is running. */
     val sleepMinutesLeft: Int? = null,
 )
@@ -51,6 +52,7 @@ class SettingsViewModel @Inject constructor(
         settingsStore.onlineLyricsEnabled,
         settingsStore.automixEnabled,
         sleepMinutes,
+        settingsStore.ytmEnabled,
     ) { values ->
         SettingsUiState(
             batterySaverEnabled = values[0] as Boolean,
@@ -58,6 +60,7 @@ class SettingsViewModel @Inject constructor(
             onlineLyricsEnabled = values[2] as Boolean,
             automixEnabled = values[3] as Boolean,
             sleepMinutesLeft = values[4] as Int?,
+            ytmEnabled = values[5] as Boolean,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -71,6 +74,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setOnlineLyricsEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsStore.setOnlineLyricsEnabled(enabled) }
+    }
+
+    fun setYtmEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setYtmEnabled(enabled) }
     }
 
     fun setAutomixEnabled(enabled: Boolean) {

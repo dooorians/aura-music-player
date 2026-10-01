@@ -181,6 +181,23 @@ object AlbumArtCache {
         return runCatching { source.scale(width, height) }.getOrNull()
     }
 
+    /** A cover on the web (a streaming source's), fetched once and sampled down to the size it will be drawn at. */
+    private fun fetchRemote(uri: Uri, targetSizePx: Int): Bitmap? {
+        val connection = java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection
+        return try {
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 15_000
+            val bytes = connection.inputStream.use { it.readBytes() }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= targetSizePx && bounds.outHeight / (sample * 2) >= targetSizePx) sample *= 2
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     /**
      * [loadThumbnail] is a blocking system-provider call with no coroutine awareness of its own —
      * during a fast scroll, a [Composable] can leave composition (and its [LaunchedEffect]
@@ -191,6 +208,7 @@ object AlbumArtCache {
      * `invokeOnCancellation` hook — rather than just letting it finish and discarding the result.
      */
     private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Bitmap? {
+        if (uri.scheme == "https" || uri.scheme == "http") return fetchRemote(uri, targetSizePx)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val signal = CancellationSignal()
             suspendCancellableCoroutine { continuation ->

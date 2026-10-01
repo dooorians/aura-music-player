@@ -128,6 +128,16 @@ fun SettingsScreen(
                 )
             }
 
+            item { SectionLabel("Sources") }
+            item {
+                SettingsSwitchRow(
+                    title = "YouTube Music (non officiel)",
+                    subtitle = "Recherche et écoute des titres en flux, audio uniquement, sans compte. Non autorisé par YouTube et susceptible de cesser de fonctionner. Désactivé, plus rien n'est lu ni cherché",
+                    checked = uiState.ytmEnabled,
+                    onCheckedChange = settingsViewModel::setYtmEnabled,
+                )
+            }
+
             item { SectionLabel("Veille") }
             item {
                 SettingsActionRow(

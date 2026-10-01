@@ -8,6 +8,7 @@ import com.ikko.aura.data.AlbumPlaysDao
 import com.ikko.aura.data.playlist.MIGRATION_1_2
 import com.ikko.aura.data.playlist.MIGRATION_2_3
 import com.ikko.aura.data.playlist.MIGRATION_3_4
+import com.ikko.aura.data.playlist.MIGRATION_4_5
 import com.ikko.aura.catalog.CatalogDao
 import com.ikko.aura.data.playlist.PlaylistDao
 import dagger.Module
@@ -25,7 +26,7 @@ object DatabaseModule {
     @Singleton
     fun provideAuraDatabase(@ApplicationContext context: Context): AuraDatabase =
         Room.databaseBuilder(context, AuraDatabase::class.java, "aura.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides

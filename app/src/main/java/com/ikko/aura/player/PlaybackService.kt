@@ -14,7 +14,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.ikko.aura.source.ytm.YtmClient
+import com.ikko.aura.source.ytm.YtmDataSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.session.CacheBitmapLoader
@@ -64,6 +68,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioSessionIdProvider: AudioSessionIdProvider
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
+    @Inject lateinit var ytmClient: YtmClient
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
 
@@ -116,7 +121,7 @@ class PlaybackService : MediaSessionService() {
             onHandoff = ::adoptPlayer,
             analysisFor = { item -> trackAnalyzer.analysisFor(item.mediaId) },
             requestAnalysis = { item, durationMs ->
-                item.localConfiguration?.uri?.let { uri ->
+                item.localConfiguration?.uri?.takeIf { it.scheme != "ytm" }?.let { uri ->
                     trackAnalyzer.request(item.mediaId, uri, durationMs / 1000.0)
                 }
             },
@@ -218,7 +223,12 @@ class PlaybackService : MediaSessionService() {
 
     private fun buildPlayer(filter: TransitionFilterProcessor, ownsSession: Boolean): ExoPlayer =
         ExoPlayer.Builder(this, filteredRenderers(filter))
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this, DefaultExtractorsFactory()))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    DefaultDataSource.Factory(this, DataSource.Factory { YtmDataSource(ytmClient) }),
+                    DefaultExtractorsFactory(),
+                ),
+            )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
             .build()

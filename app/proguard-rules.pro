@@ -17,3 +17,12 @@
 -keepclasseswithmembers class com.ikko.aura.player.smart.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# YouTube Music source (NewPipeExtractor and its JavaScript engine, which it loads by reflection).
+-keep class org.schabi.newpipe.extractor.** { *; }
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.** { *; }
+-dontwarn java.beans.**
+-dontwarn javax.script.**
+-dontwarn javax.lang.model.**
+-dontwarn jdk.**

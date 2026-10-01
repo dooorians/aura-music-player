@@ -17,6 +17,8 @@ data class CatalogTrackEntity(
     val artist: String,
     val album: String,
     val durationMs: Long,
+    /** A remote cover; empty for a local track, whose cover is its file. */
+    val artworkUrl: String = "",
 )
 
 @Entity(
@@ -44,6 +46,9 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_tracks")
     fun observeTracks(): Flow<List<CatalogTrackEntity>>
 
+    @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE 'ytm:%'")
+    fun observeSaved(): Flow<List<CatalogTrackEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTracks(tracks: List<CatalogTrackEntity>)
 
@@ -65,6 +70,12 @@ interface CatalogDao {
         clearBindings(sourceId)
         insertBindings(bindings)
         upsertTracks(tracks)
+    }
+
+    @Transaction
+    suspend fun saveItem(track: CatalogTrackEntity, binding: TrackBindingEntity) {
+        upsertTracks(listOf(track))
+        insertBindings(listOf(binding))
     }
 
     @Transaction

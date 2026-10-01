@@ -29,6 +29,7 @@ class SettingsStore @Inject constructor(
     private val batterySaverKey = booleanPreferencesKey("battery_saver")
     private val onlineLyricsKey = booleanPreferencesKey("online_lyrics")
     private val automixKey = booleanPreferencesKey("automix")
+    private val ytmKey = booleanPreferencesKey("ytm_enabled")
 
     val batterySaverEnabled = context.settingsDataStore.data.map { prefs ->
         prefs[batterySaverKey] ?: false
@@ -45,6 +46,16 @@ class SettingsStore @Inject constructor(
 
     val automixEnabled = context.settingsDataStore.data.map { prefs ->
         prefs[automixKey] ?: false
+    }
+
+    /**
+     * The YouTube Music source. Off by default and unofficial: it is a switch the user turns on knowing what it is,
+     * and the way to stop it at once.
+     */
+    val ytmEnabled = context.settingsDataStore.data.map { prefs -> prefs[ytmKey] ?: false }
+
+    suspend fun setYtmEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[ytmKey] = enabled }
     }
 
     suspend fun setOnlineLyricsEnabled(enabled: Boolean) {

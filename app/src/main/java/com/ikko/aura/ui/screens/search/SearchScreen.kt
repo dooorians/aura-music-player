@@ -76,6 +76,7 @@ fun SearchPanel(
     searchViewModel: SearchViewModel = hiltViewModel(),
 ) {
     val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
+    val ytm by searchViewModel.ytmState.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -147,7 +148,7 @@ fun SearchPanel(
 
             val searchState = when {
                 query.isBlank() -> SearchContent.PROMPT
-                !uiState.hasResults -> SearchContent.NO_RESULTS
+                !uiState.hasResults && !ytm.active -> SearchContent.NO_RESULTS
                 else -> SearchContent.RESULTS
             }
             
@@ -230,6 +231,34 @@ fun SearchPanel(
                                         }
                                     }
                                 }
+                            }
+                        }
+                        if (ytm.active && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
+                            item { SectionLabel("YouTube Music") }
+                            if (ytm.loading) item { YtmNote("Recherche…") }
+                            if (ytm.error) item { YtmNote("YouTube Music ne répond pas pour le moment") }
+                            itemsIndexed(ytm.results, key = { _, track -> "ytm_${track.id}" }) { index, track ->
+                                val kept = track.id in ytm.saved
+                                TrackListItem(
+                                    track = track,
+                                    onClick = {
+                                        onNavigate()
+                                        playerViewModel.playQueue(ytm.results, index)
+                                        navController.navigate(AuraDestination.NowPlaying.route)
+                                    },
+                                    modifier = Modifier.padding(horizontal = 20.dp).animateItem(),
+                                    trailingContent = {
+                                        IconButton(onClick = {
+                                            if (kept) searchViewModel.removeYtm(track) else searchViewModel.saveYtm(track)
+                                        }) {
+                                            Icon(
+                                                if (kept) CupertinoIcons.Check else CupertinoIcons.Add,
+                                                contentDescription = if (kept) "Retirer de la bibliothèque" else "Ajouter à la bibliothèque",
+                                                tint = AuraColors.TextPrimary,
+                                            )
+                                        }
+                                    },
+                                )
                             }
                         }
                         if (uiState.tracks.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
@@ -322,4 +351,14 @@ private fun AlbumResultCard(album: Album, modifier: Modifier = Modifier, onClick
             modifier = Modifier.padding(top = 6.dp),
         )
     }
+}
+
+@Composable
+private fun YtmNote(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = AuraColors.TextSecondary,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+    )
 }

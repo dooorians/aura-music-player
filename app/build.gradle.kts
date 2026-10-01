@@ -126,6 +126,7 @@ dependencies {
     implementation(libs.media3.common)
     implementation(libs.media3.datasource)
     implementation(libs.media3.extractor)
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 
     implementation(libs.kotlinx.coroutines.android)
 

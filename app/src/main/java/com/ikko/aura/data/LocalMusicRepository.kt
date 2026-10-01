@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
@@ -40,7 +41,21 @@ class LocalMusicRepository @Inject constructor(
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _tracks = MutableStateFlow<List<Track>>(emptyList())
-    override val tracks: StateFlow<List<Track>> = _tracks.asStateFlow()
+    /** Songs saved from streaming sources: in the library like any other title, but not part of any album or artist. */
+    private val _saved = MutableStateFlow<List<Track>>(emptyList())
+
+    /** Held back until the first scan has landed, so that "the library has loaded" still means the device's files. */
+    private val _scanned = MutableStateFlow(false)
+
+    override val tracks: StateFlow<List<Track>> = combine(_tracks, _saved, _scanned) { local, saved, scanned ->
+        if (scanned) local + saved else emptyList()
+    }.stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        repositoryScope.launch {
+            catalog.observeSaved().collect { rows -> _saved.value = rows.map { it.toSavedTrack() } }
+        }
+    }
 
     override val albums: StateFlow<List<Album>> = _tracks
         .map(::groupAlbums)
@@ -77,6 +92,7 @@ class LocalMusicRepository @Inject constructor(
                     ?: track
             }
             _tracks.value = initial
+            _scanned.value = true
             enrichAudioProperties(initial, scan.stamps, cached)
         } finally {
             _isScanning.value = false
@@ -338,6 +354,9 @@ class LocalMusicRepository @Inject constructor(
         private const val ENRICHMENT_STEP_DELAY_MS = 4L
     }
 }
+
+private fun CatalogTrackEntity.toSavedTrack(): Track =
+    com.ikko.aura.source.ytm.YtmLibrary.trackOf(key.substringAfter(':'), title, artist, durationMs, artworkUrl)
 
 private fun String?.knownOr(fallback: String): String =
     if (this == null || isBlank() || this == MediaStore.UNKNOWN_STRING) fallback else this

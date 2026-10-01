@@ -69,7 +69,7 @@ interface PlaylistDao {
         CatalogTrackEntity::class,
         TrackBindingEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -96,6 +96,13 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
                 "availability TEXT NOT NULL, lastSeenAt INTEGER NOT NULL, PRIMARY KEY(sourceId, itemId))",
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS index_track_bindings_trackKey ON track_bindings(trackKey)")
+    }
+}
+
+/** Remote covers for songs saved from a streaming source. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN artworkUrl TEXT NOT NULL DEFAULT ''")
     }
 }
 

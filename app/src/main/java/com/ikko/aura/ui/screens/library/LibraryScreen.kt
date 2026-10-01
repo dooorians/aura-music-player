@@ -391,11 +391,19 @@ private fun LibraryHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Shuffle and sort share one capsule: presses tilt and expand more on the touched side
+            val openSearch = LocalSearchOpener.current
             AuraIconGroup(light = 80f) {
+                AuraGroupIcon(
+                    onClick = openSearch,
+                    size = HEADER_BUTTON,
+                    side = -1f,
+                ) {
+                    Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(22.dp))
+                }
                 AuraGroupIcon(
                     onClick = onSmartShuffle,
                     size = HEADER_BUTTON,
-                    side = -1f,
+                    side = 0f,
                 ) {
                     Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(22.dp))
                 }
