@@ -449,6 +449,9 @@ private const val THROUGH_OUT_MS = 90
 
 /** The player's cover wash fading into the lyrics' aurora and back. */
 private const val LYRICS_WASH_FADE_MS = 300
+
+/** How long the background takes to go from black to the aurora, and back, between two pages. */
+private const val GROUND_FADE_MS = 260
 private const val THROUGH_DELAY_MS = 50
 
 private data class CapsuleTrigger(
@@ -595,15 +598,69 @@ fun MainLayout() {
                 }
             },
         ) {
+        // The background. Three looks, by where you are:
+        //  - the player and everything inside it (lyrics, queue, equaliser): the aurora, moving, in the playing
+        //    cover's colours;
+        //  - an album or an artist: the aurora at the top of the page, still, which the page's own ground fades
+        //    into its colour lower down;
+        //  - everywhere else: AMOLED black.
+        // The aurora is a surface of its own behind the window and costs the interface nothing; black is a plain
+        // rectangle drawn over it, faded in and out between the looks. The battery saver is not part of this: it is
+        // for the glass alone.
+        val onPlayerPage = currentRoute != null && currentRoute in AuraDestination.fullScreenRoutes
+        val onAlbumPage = currentRoute?.let { it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/") } == true
+        val onArtistPage = currentRoute?.let { it.startsWith("artist/") || it.startsWith("ytm_artist/") || it.startsWith("remote_artist/") } == true
+        // What the player's card rose from. While the card is on its way the page under it keeps its own ground;
+        // only the card shows the aurora.
+        var underCardRoute by remember { mutableStateOf<String?>(null) }
+        if (currentRoute != null && currentRoute != AuraDestination.NowPlaying.route && currentRoute !in AuraDestination.fullScreenRoutes) {
+            underCardRoute = currentRoute
+        }
+        val groundRoute = if (currentRoute == AuraDestination.NowPlaying.route) underCardRoute else currentRoute
+        val groundIsAurora = groundRoute != null && (
+            groundRoute in AuraDestination.fullScreenRoutes ||
+                groundRoute.startsWith("album/") || groundRoute.startsWith("ytm_album/") || groundRoute.startsWith("remote_album/") ||
+                groundRoute.startsWith("artist/") || groundRoute.startsWith("ytm_artist/") || groundRoute.startsWith("remote_artist/")
+            )
+        val cardUp = sheetCard.owner != null
         // Outside the page's recorded layer: the background is its own surface, not something the
-        // mini player has to re-process when it changes. The pill loses nothing it could show — what
-        // it refracts is the page, and the background under it is smooth colour.
+        // mini player has to re-process when it changes.
         AuroraBackground(
-            theme = pageTheme.value ?: backdrop.theme,
-            // Not while the player covers it: it has a background of its own that fills the screen. The lyrics have
-            // none: they sit on this one.
-            active = currentRoute != AuraDestination.NowPlaying.route,
+            theme = if (onPlayerPage || cardUp) backdrop.theme else (pageTheme.value ?: backdrop.theme),
+            active = onPlayerPage || cardUp || onAlbumPage || onArtistPage,
+            animate = onPlayerPage || cardUp,
             modifier = Modifier.fillMaxSize(),
+        )
+        val blackness by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (groundIsAurora) 0f else 1f,
+            animationSpec = tween(GROUND_FADE_MS, easing = LinearEasing),
+            label = "amoled-ground",
+        )
+        val groundHole = remember { androidx.compose.ui.graphics.Path() }
+        Box(
+            Modifier.fillMaxSize().drawWithContent {
+                val black = blackness
+                val edge = sheetCard.cardTop
+                // The card shows the aurora through a hole in the black, in its own shape, for as long as it exists
+                // and has something to show; as it clears on its way down the hole fills back in with it.
+                val holeOpen = sheetCard.owner != null && sheetCard.ready && edge > 0f
+                if (sheetCard.owner != null && sheetCard.ready && edge <= 0f) {
+                    // Up and covering everything: nothing to cover.
+                    return@drawWithContent
+                }
+                if (!holeOpen) {
+                    if (black > 0f) drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = black))
+                    return@drawWithContent
+                }
+                setToCard(groundHole, edge, size, AuraMotion.cornerAt(edge).toPx())
+                if (black > 0f) clipPath(groundHole, androidx.compose.ui.graphics.ClipOp.Difference) {
+                    drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = black))
+                }
+                val filling = black * (1f - sheetCard.cardAlpha)
+                if (filling > 0f) clipPath(groundHole) {
+                    drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = filling))
+                }
+            },
         )
         // Clipped to the card while it travels: the cover's wash is the player's own background, so above the
         // card's top edge the page keeps the plain one it always has. Drawn full-screen through the whole
@@ -619,7 +676,9 @@ fun MainLayout() {
             animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
             label = "lyrics-wash-fade",
         )
-        AlbumArtBackground(
+        // The cover's wash is what the live glass refracts, and nothing else: with the glass flat (battery saver) it is
+        // not drawn at all, and the aurora is the player's background.
+        if (!batterySaver) AlbumArtBackground(
             artworkUri = backdrop.artworkUri,
             artworkKey = backdrop.artworkKey,
             fallbackColors = backdrop.meshColors,

@@ -12,7 +12,6 @@ import android.view.SurfaceView
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 
 /**
  * The app's background: the playing cover's colours as an Apple-Music-style aurora (see
@@ -28,12 +27,11 @@ import com.ikko.aura.ui.theme.LocalAuraBatterySaver
  *
  * Twenty steps a second at rest, a hundred while it is being used (see [STEP_MS]). The surface is a fraction of the screen's
  * size, and scaled up by the compositor, because the picture is all soft colour. It stops while
- * [active] is false (the player and the lyrics, which cover it), and holds one still frame under
- * the battery saver.
+ * [active] is false (nothing shows it), and holds one still frame while [animate] is false (the album and artist
+ * pages, where it is only the top of the page). The battery saver has no say in it: it is for the glass alone.
  */
 @Composable
-fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Modifier) {
-    val animate = !LocalAuraBatterySaver.current
+fun AuroraBackground(theme: AlbumTheme, active: Boolean, animate: Boolean, modifier: Modifier = Modifier) {
     AndroidView(
         factory = { AuroraSurfaceView(it) },
         update = { it.update(theme, active, animate) },
