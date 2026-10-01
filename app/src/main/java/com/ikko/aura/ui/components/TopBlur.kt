@@ -5,6 +5,8 @@ import android.graphics.RuntimeShader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -45,13 +47,19 @@ import kotlin.math.ceil
  * content melts into the bar rather than stopping at a line below it; the band and its fade cover the bar and
  * then their usual length below it.
  */
-fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifier =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        graphicsLayer { compositingStrategy = if (strength() > STRENGTH_EPSILON) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
-            .then(TopBlurElement(topInset, strength))
-    } else {
-        topFadeFallback(topInset, strength)
+fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifier = composed {
+    when {
+        // Under the battery saver there is nothing at the top: once a page is scrolled, the effect puts the whole
+        // viewport through an offscreen layer every frame, which on this device took the GPU from ~4 ms to ~10 ms
+        // per frame — measured, a plain list scrolling at 60 fps instead of 96.
+        LocalAuraBatterySaver.current -> Modifier
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+            Modifier
+                .graphicsLayer { compositingStrategy = if (strength() > STRENGTH_EPSILON) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
+                .then(TopBlurElement(topInset, strength))
+        else -> Modifier.topFadeFallback(topInset, strength)
     }
+}
 
 /**
  * [topBlur] driven by how far the page has been scrolled, [scrolledPx]: none at the top, growing with the scroll
