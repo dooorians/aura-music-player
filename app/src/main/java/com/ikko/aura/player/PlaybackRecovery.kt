@@ -57,7 +57,7 @@ class PlaybackRecovery(
 
         scope.launch {
             val failedUri = item.localConfiguration?.uri?.toString()
-            val alternatives = runCatching { resolver.candidates(TrackKey(item.mediaId)) }
+            val alternatives = runCatching { resolver.candidates(TrackKey(item.mediaId), item.mediaMetadata.title?.toString(), item.mediaMetadata.artist?.toString()) }
                 .getOrDefault(emptyList())
                 .filterNot { it.uri == failedUri }
             // Repeat-one reports the same item as "next": skipping would only fail on it again.

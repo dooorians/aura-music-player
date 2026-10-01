@@ -71,6 +71,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
     @Inject lateinit var ytmClient: YtmClient
+    @Inject lateinit var jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient
     @Inject lateinit var streamCache: StreamCache
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
@@ -228,7 +229,7 @@ class PlaybackService : MediaSessionService() {
         ExoPlayer.Builder(this, filteredRenderers(filter))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
-                    DefaultDataSource.Factory(this, DataSource.Factory { YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource()) }),
+                    DefaultDataSource.Factory(this, DataSource.Factory { com.ikko.aura.source.jiosaavn.JioSaavnDataSource(jioSaavnClient, YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource())) }),
                     DefaultExtractorsFactory(),
                 ),
             )

@@ -82,6 +82,9 @@ fun SearchPanel(
     val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
     val ytm by searchViewModel.ytmState.collectAsStateWithLifecycle()
     val remote by searchViewModel.remoteState.collectAsStateWithLifecycle()
+    val unifiedRemote by searchViewModel.unifiedRemoteState.collectAsStateWithLifecycle()
+    val unifiedHasMore by searchViewModel.unifiedHasMore.collectAsStateWithLifecycle()
+    val unifiedLoadingMore by searchViewModel.unifiedLoadingMore.collectAsStateWithLifecycle()
     val sourceOrder by searchViewModel.sourceOrder.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
@@ -388,11 +391,21 @@ fun SearchPanel(
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                         ) {
-                            sourceOrder.forEach { id ->
-                                when {
-                                    id == "local" -> localBlock()
-                                    id == "ytm" -> ytmBlock()
-                                    else -> remote.firstOrNull { it.sourceId == id }?.let { remoteBlock(it) }
+                            localBlock()
+                            remoteBlock(unifiedRemote)
+                            if (unifiedHasMore && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
+                                item {
+                                    Text(
+                                        text = if (unifiedLoadingMore) "Chargement…" else "Afficher plus de résultats",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = AuraColors.TextPrimary,
+                                        modifier = Modifier
+                                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                                            .clip(RoundedCornerShape(100))
+                                            .background(AuraColors.TextPrimary.copy(alpha = 0.15f))
+                                            .clickable(enabled = !unifiedLoadingMore, onClick = searchViewModel::loadMoreYtm)
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    )
                                 }
                             }
                         }

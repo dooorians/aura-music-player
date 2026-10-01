@@ -28,15 +28,24 @@ object SourceModule {
         bindings: CatalogBindings,
         remote: RemoteSources,
         downloads: YtmDownloads,
+        jioSaavnSource: com.ikko.aura.source.jiosaavn.JioSaavnSource,
+        jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient,
     ): TrackResolver {
         val remoteProviders = java.util.concurrent.ConcurrentHashMap<SourceId, SourceProvider>()
         return TrackResolver(bindings, { id: SourceId ->
             when {
                 id == SourceId.LOCAL -> local
                 id == YTM -> ytm
+                id == jioSaavnSource.id -> jioSaavnSource
                 // An added source, by the id it was given: looked up as asked, since they come and go.
                 remote.isRemoteId(id.value) -> remoteProviders.getOrPut(id) { RemoteProvider(id, remote, downloads) }
                 else -> null
+            }
+        }, { it }, { title, artist ->
+            // Fallback dynamically: query JioSaavn!
+            val results = runCatching { jioSaavnClient.searchSongs("$title $artist") }.getOrNull() ?: emptyList()
+            results.mapNotNull { res -> 
+                jioSaavnSource.playable(res.id)
             }
         })
     }

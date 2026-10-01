@@ -29,7 +29,7 @@ class SourceOrder @Inject constructor(
     val order: Flow<List<String>> = combine(
         context.settingsDataStore.data.map { it[key].orEmpty().split(SEPARATOR).filter(String::isNotEmpty) },
         remote.configs,
-    ) { stored, configs -> merge(stored, listOf(LOCAL_ENTRY, YTM_ENTRY) + configs.map { it.id }) }
+    ) { stored, configs -> merge(stored, listOf(LOCAL_ENTRY, JIOSAAVN_ENTRY, YTM_ENTRY) + configs.map { it.id }) }
 
     /** Moves the entry at [from] to [to]. */
     suspend fun move(from: Int, to: Int) {
@@ -42,6 +42,7 @@ class SourceOrder @Inject constructor(
     companion object {
         const val LOCAL_ENTRY = "local"
         const val YTM_ENTRY = "ytm"
+        const val JIOSAAVN_ENTRY = "jiosaavn"
         private const val SEPARATOR = ","
 
         /** [stored] kept in its order, minus what no longer exists, then what [available] has that it did not know. */

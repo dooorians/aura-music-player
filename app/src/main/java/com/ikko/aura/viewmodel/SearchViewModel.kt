@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -92,6 +93,7 @@ class SearchViewModel @Inject constructor(
     private val ytmClient: YtmClient,
     private val ytmLibrary: YtmLibrary,
     private val remoteSources: com.ikko.aura.source.remote.RemoteSources,
+    private val jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient,
     order: com.ikko.aura.source.SourceOrder,
 ) : ViewModel() {
 
@@ -100,12 +102,19 @@ class SearchViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, listOf("local", "ytm"))
 
     private val remoteSearch = MutableStateFlow<List<RemoteSection>>(emptyList())
+    private val jioSaavnSearch = MutableStateFlow<RemoteSection?>(null)
 
     /** The sources the user added, each with what it found: first on the page, as they are the ones chosen. */
-    val remoteState: StateFlow<List<RemoteSection>> = remoteSearch.asStateFlow()
+
+    val remoteState: StateFlow<List<RemoteSection>> = combine(remoteSearch, jioSaavnSearch) { remote, jiosaavn ->
+        if (jiosaavn != null) listOf(jiosaavn) + remote else remote
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+
+
 
     private var remoteJob: Job? = null
-
+    private var jioSaavnJob: Job? = null
 
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(SearchFilter.ALL)
@@ -116,6 +125,50 @@ class SearchViewModel @Inject constructor(
     private var ytmJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            query.debounce { if (it.isBlank()) 0L else YTM_DEBOUNCE_MS }
+                .distinctUntilChanged()
+                .collect { rawQuery ->
+                    jioSaavnJob?.cancel()
+                    val q = rawQuery.trim()
+                    if (q.length < 2) {
+                        jioSaavnSearch.value = null
+                        return@collect
+                    }
+                    jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = true)
+                    jioSaavnJob = launch {
+                        try {
+                            val results = withContext(Dispatchers.IO) { jioSaavnClient.searchSongs(q) }
+                            val tracks = results.map { res ->
+                                val artistName = res.moreInfo.artistMap.primaryArtists.joinToString(", ") { it.name }.ifBlank { "Unknown Artist" }
+                                val durationMillis = res.moreInfo.duration.toLongOrNull()?.times(1000) ?: 0L
+                                val thumbnail = res.image.replace(Regex("150x150|50x50"), "500x500").replace(Regex("^http://"), "https://")
+                                Track(
+                                    id = "jiosaavn:${res.id}",
+                                    title = res.title,
+                                    artist = artistName,
+                                    album = res.moreInfo.album.ifBlank { "" },
+                                    artistId = 0L,
+                                    albumId = 0L, // Handled properly in RemoteTracks? No, we just need a unique album ID if any. We can put 0L since JioSaavn is flat search
+                                    artworkUri = android.net.Uri.parse(thumbnail),
+                                    contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(res.id).build(),
+                                    durationMs = durationMillis,
+                                    trackNumber = 0,
+                                    year = 0,
+                                    format = com.ikko.aura.data.model.AudioFormat.UNKNOWN,
+                                    bitrateKbps = 320,
+                                    sampleRateHz = 44100,
+                                    bitDepth = 16
+                                )
+                            }
+                            jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, songs = tracks)
+                        } catch (e: Exception) {
+                            jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, error = true)
+                        }
+                    }
+                }
+        }
+
         viewModelScope.launch {
             combine(remoteSources.configs, query.debounce { if (it.isBlank()) 0L else YTM_DEBOUNCE_MS }) { configs, q -> configs.filter { it.enabled }.map { it.id } to q.trim() }
                 .distinctUntilChanged()
@@ -258,6 +311,33 @@ class SearchViewModel @Inject constructor(
             )
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchUiState())
+
+    val unifiedRemoteState: StateFlow<RemoteSection> = combine(ytmSearch, jioSaavnSearch, remoteSearch) { ytm, jiosaavn, remote ->
+        val allSongs = ytm.results + (jiosaavn?.songs ?: emptyList()) + remote.flatMap { it.songs }
+        val bestSongs = allSongs
+            .groupBy { it.title.lowercase().trim() + "|" + it.artist.lowercase().trim() }
+            .values.map { group -> group.maxByOrNull { it.bitrateKbps }!! }
+            .sortedByDescending { it.bitrateKbps }
+
+        val allAlbums = ytm.albums + (jiosaavn?.albums ?: emptyList()) + remote.flatMap { it.albums }
+        val bestAlbums = allAlbums.distinctBy { it.title.lowercase().trim() + "|" + it.artist.lowercase().trim() }
+
+        val allArtists = ytm.artists.map { it.name } + (jiosaavn?.artists ?: emptyList()) + remote.flatMap { it.artists }
+        val bestArtists = allArtists.distinctBy { it.lowercase().trim() }
+
+        RemoteSection(
+            sourceId = "unified",
+            name = "Meilleurs Résultats",
+            loading = ytm.loading || (jiosaavn?.loading == true) || remote.any { it.loading },
+            error = ytm.error && (jiosaavn?.error == true) && remote.all { it.error },
+            songs = bestSongs,
+            albums = bestAlbums,
+            artists = bestArtists
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteSection("unified", "Meilleurs Résultats"))
+
+    val unifiedHasMore = ytmSearch.map { it.hasMore }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val unifiedLoadingMore = ytmSearch.map { it.loadingMore }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun setQuery(value: String) {
         query.value = value

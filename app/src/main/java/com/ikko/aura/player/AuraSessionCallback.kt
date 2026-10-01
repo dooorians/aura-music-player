@@ -82,7 +82,7 @@ class AuraSessionCallback(
     }
 
     private suspend fun resolveOrKeep(item: MediaItem): MediaItem {
-        val best = runCatching { resolver.candidates(TrackKey(item.mediaId)).firstOrNull() }.getOrNull()
+        val best = runCatching { resolver.candidates(TrackKey(item.mediaId), item.mediaMetadata.title?.toString(), item.mediaMetadata.artist?.toString()).firstOrNull() }.getOrNull()
             ?: return item
         // The cover update (PlayerController.updateItemArtwork) replaces an item and comes through here as well: one
         // already on the right address is returned as it is, with the metadata it has just been given.

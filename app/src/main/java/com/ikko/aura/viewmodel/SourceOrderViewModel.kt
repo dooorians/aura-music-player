@@ -31,6 +31,7 @@ class SourceOrderViewModel @Inject constructor(
             when (id) {
                 SourceOrder.LOCAL_ENTRY -> OrderEntry(id, "Fichiers de l'appareil", "Ta bibliothèque", true)
                 SourceOrder.YTM_ENTRY -> OrderEntry(id, "YouTube Music", "Non officiel", ytmOn)
+                SourceOrder.JIOSAAVN_ENTRY -> OrderEntry(id, "JioSaavn", "Natif (Haute Qualité)", true)
                 else -> configs.firstOrNull { it.id == id }
                     ?.let { OrderEntry(id, it.name, it.baseUrl.removePrefix("http://").removePrefix("https://"), it.enabled) }
             }

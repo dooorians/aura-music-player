@@ -7,28 +7,30 @@ import com.ikko.aura.source.SourceTrackRef
 import com.ikko.aura.source.TrackBindings
 import com.ikko.aura.source.TrackKey
 
-/**
- * Turns a track key into the ways it can be played, best first. It lives with the player service and not with the
- * screens: a screen hands over a key and never holds an address, so the answer can be chosen — and chosen again,
- * when one fails — at the moment of playing.
- */
 class TrackResolver(
     private val bindings: TrackBindings,
-    /** The provider of a source, looked up as it is asked: sources the user adds come and go while the app runs. */
     private val providerFor: (SourceId) -> SourceProvider?,
-    /** How candidates are ranked: nearest first. The identity until there is more than one source to rank. */
     private val order: (List<SourceTrackRef>) -> List<SourceTrackRef> = { it },
+    private val dynamicFallback: (suspend (String, String) -> List<PlayableSource>)? = null
 ) {
     constructor(
         bindings: TrackBindings,
         providers: Map<SourceId, SourceProvider>,
         order: (List<SourceTrackRef>) -> List<SourceTrackRef> = { it },
-    ) : this(bindings, { id: SourceId -> providers[id] }, order)
+        dynamicFallback: (suspend (String, String) -> List<PlayableSource>)? = null
+    ) : this(bindings, { id: SourceId -> providers[id] }, order, dynamicFallback)
 
-    /** Every way to play [key] now, best first; [exclude] holds the ones that have just failed. */
-    suspend fun candidates(key: TrackKey, exclude: Set<SourceTrackRef> = emptySet()): List<PlayableSource> =
-        order(bindings.bindingsFor(key).filterNot { it in exclude })
+    suspend fun candidates(key: TrackKey, title: String? = null, artist: String? = null, exclude: Set<SourceTrackRef> = emptySet()): List<PlayableSource> {
+        val direct = order(bindings.bindingsFor(key).filterNot { it in exclude })
             .mapNotNull { ref -> providerFor(ref.source)?.playable(ref.itemId) }
-            // Audio only, whatever a source offers: an item whose type is known and is not audio/* is never played.
             .filter { it.mimeType == null || it.mimeType.startsWith("audio/") }
+        if (direct.isNotEmpty()) return direct
+        
+        if (title != null && artist != null && dynamicFallback != null) {
+            val fallbackCandidates = dynamicFallback.invoke(title, artist).filterNot { it.ref in exclude }
+            if (fallbackCandidates.isNotEmpty()) return fallbackCandidates
+        }
+        
+        return emptyList()
+    }
 }
