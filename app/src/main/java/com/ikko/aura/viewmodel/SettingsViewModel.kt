@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.SettingsStore
 import com.ikko.aura.player.SleepTimer
+import com.ikko.aura.source.ytm.StreamCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,6 +31,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val musicRepository: MusicRepository,
     private val sleepTimer: SleepTimer,
+    private val streamCache: StreamCache,
 ) : ViewModel() {
 
     /**
@@ -87,6 +89,20 @@ class SettingsViewModel @Inject constructor(
     fun startSleepTimer(minutes: Int) = sleepTimer.start(minutes * 60_000L)
 
     fun cancelSleepTimer() = sleepTimer.cancel()
+
+    private val _streamCacheBytes = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val streamCacheBytes: StateFlow<Long> = _streamCacheBytes
+
+    fun refreshStreamCacheSize() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { _streamCacheBytes.value = streamCache.sizeBytes }
+    }
+
+    fun clearStreamCache() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            streamCache.clear()
+            _streamCacheBytes.value = streamCache.sizeBytes
+        }
+    }
 
     fun rescanLibrary() {
         viewModelScope.launch { musicRepository.refresh(forceRescan = true) }

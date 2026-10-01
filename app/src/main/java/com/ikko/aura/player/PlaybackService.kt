@@ -17,6 +17,7 @@ import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.ikko.aura.source.ytm.StreamCache
 import com.ikko.aura.source.ytm.YtmClient
 import com.ikko.aura.source.ytm.YtmDataSource
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -69,6 +70,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
     @Inject lateinit var ytmClient: YtmClient
+    @Inject lateinit var streamCache: StreamCache
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
 
@@ -225,7 +227,7 @@ class PlaybackService : MediaSessionService() {
         ExoPlayer.Builder(this, filteredRenderers(filter))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
-                    DefaultDataSource.Factory(this, DataSource.Factory { YtmDataSource(ytmClient) }),
+                    DefaultDataSource.Factory(this, streamCache.factory { YtmDataSource(ytmClient) }),
                     DefaultExtractorsFactory(),
                 ),
             )

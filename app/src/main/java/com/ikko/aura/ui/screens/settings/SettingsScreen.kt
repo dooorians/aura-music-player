@@ -24,6 +24,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -135,6 +136,17 @@ fun SettingsScreen(
                     subtitle = "Recherche et écoute des titres en flux, audio uniquement, sans compte. Non autorisé par YouTube et susceptible de cesser de fonctionner. Désactivé, plus rien n'est lu ni cherché",
                     checked = uiState.ytmEnabled,
                     onCheckedChange = settingsViewModel::setYtmEnabled,
+                )
+            }
+
+            item {
+                val cacheBytes by settingsViewModel.streamCacheBytes.collectAsStateWithLifecycle()
+                LaunchedEffect(Unit) { settingsViewModel.refreshStreamCacheSize() }
+                SettingsActionRow(
+                    title = "Vider le cache des flux",
+                    subtitle = "${cacheBytes / (1024 * 1024)} Mo gardés pour réécouter sans réseau, 512 Mo au plus. Aucun titre n'est téléchargé",
+                    trailing = null,
+                    onClick = settingsViewModel::clearStreamCache,
                 )
             }
 
