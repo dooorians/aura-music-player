@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
@@ -679,10 +680,10 @@ fun MainLayout() {
                 .graphicsLayer {
                     val p = searchPull.value
                     if (p == 0f) return@graphicsLayer
+                    // Depth, not travel: the page steps back (smaller, softer) and stays where it is — nothing slides.
                     val shrink = 1f - PAGE_RECEDE * p
                     scaleX = shrink
                     scaleY = shrink
-                    translationY = size.height * PAGE_SLIDE * p
                     // Blurred as it recedes, in step with the pull: nothing at the start of the gesture, the full
                     // radius once the search is open. The page goes soft behind the panel instead of staying sharp
                     // under it, which is what makes the panel and its results legible.
@@ -1146,8 +1147,8 @@ private fun SearchOverlay(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = progressProvider() }
-            // No backdrop colour of its own: the aurora is what should show through the blur, dimmed,
-            // not a dark plate laid over it.
+            // Hardly a scrim: the blur and the depth do the work, and a dark plate over the page was what made the
+            // search read as a spotlight.
             .background(SEARCH_SCRIM)
             // Tapping what is left of the page puts it back — the same way the gesture came.
             .pointerInput(Unit) { detectTapGestures { onDismiss() } },
@@ -1157,11 +1158,16 @@ private fun SearchOverlay(
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.statusBars)
+            // Above the keyboard: the panel is the height that is left, so the prompt is centred in what can be seen
+            // and not under the keys.
+            .imePadding()
             .graphicsLayer {
                 val p = progressProvider()
                 alpha = p
-                // Comes down from above the top edge, arriving as the pull completes.
-                translationY = -size.height * PANEL_ENTRY_TRAVEL * (1f - p)
+                // Comes forward rather than down: a touch smaller to start, full size once open. No vertical travel.
+                val scale = PANEL_ENTRY_SCALE + (1f - PANEL_ENTRY_SCALE) * p
+                scaleX = scale
+                scaleY = scale
             },
     ) {
         // Built only once the gesture has committed: the field takes focus and raises the
@@ -1178,8 +1184,7 @@ private fun SearchOverlay(
 }
 
 /** How much the page shrinks and slides as it recedes. */
-private const val PAGE_RECEDE = 0.06f
-private const val PAGE_SLIDE = 0.04f
+private const val PAGE_RECEDE = 0.05f
 
 /** The blur of the page behind the search, at full pull. */
 private const val SEARCH_BLUR_DP = 18f
@@ -1190,10 +1195,10 @@ private const val SEARCH_BLUR_DP = 18f
  * a dark plate across the aurora. A light scrim keeps the aurora and dims the page enough to read
  * the field over it.
  */
-private val SEARCH_SCRIM = Color.Black.copy(alpha = 0.58f)
+private val SEARCH_SCRIM = Color.Black.copy(alpha = 0.16f)
 
-/** Share of the screen the panel travels down through on its way in. */
-private const val PANEL_ENTRY_TRAVEL = 0.12f
+/** How big the panel is when it starts to arrive, against full size. */
+private const val PANEL_ENTRY_SCALE = 0.96f
 
 /** Rounded at the top only, in appearance — built as a rectangle with equal corners that hangs below the layer. */
 private class TopRoundedClip(private val radius: Float) : androidx.compose.ui.graphics.Shape {
