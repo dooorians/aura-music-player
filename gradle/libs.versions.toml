@@ -18,6 +18,7 @@ datastore = "1.1.1"
 errorprone = "2.+"
 onnxruntime = "1.28.0"
 kotlinxSerialization = "1.7.3"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -52,6 +53,8 @@ media3-datasource = { module = "androidx.media3:media3-datasource", version.ref 
 media3-extractor = { module = "androidx.media3:media3-extractor", version.ref = "media3" }
 
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
 errorprone-annotations = { module = "com.google.errorprone:error_prone_annotations", version.ref = "errorprone" }
 
 [plugins]

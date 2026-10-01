@@ -135,4 +135,9 @@ dependencies {
     // One file's worth: the Automix analysis store, whose on-disk records are
     // @Serializable DTOs in BitChord and stay that way here.
     implementation(libs.kotlinx.serialization.json)
+
+    // JVM unit tests only: nothing here ships in the app. The first tests of the project, for the
+    // pure logic that decides what gets played (see source/ and playback/).
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
