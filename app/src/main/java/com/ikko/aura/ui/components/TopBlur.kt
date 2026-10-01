@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -52,7 +53,24 @@ fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifi
         // Under the battery saver there is nothing at the top: once a page is scrolled, the effect puts the whole
         // viewport through an offscreen layer every frame, which on this device took the GPU from ~4 ms to ~10 ms
         // per frame — measured, a plain list scrolling at 60 fps instead of 96.
-        LocalAuraBatterySaver.current -> Modifier
+        // What scrolls up under the status bar is cut at its lower edge: a plain clip, no layer, so nothing of the header
+        // shows through the bar.
+        LocalAuraBatterySaver.current -> Modifier.drawWithContent {
+            val edge = topInset.toPx()
+            clipRect(top = edge) { this@drawWithContent.drawContent() }
+            // A dark scrim that thins out below the bar stands in for the blur-and-fade: the page melts into the bar
+            // instead of ending on a line. A gradient rectangle, a fraction of the cost of the layer it replaces.
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.72f),
+                    1f to Color.Transparent,
+                    startY = 0f,
+                    endY = edge + SAVER_SCRIM_DP.dp.toPx(),
+                ),
+                topLeft = Offset.Zero,
+                size = Size(size.width, edge + SAVER_SCRIM_DP.dp.toPx()),
+            )
+        }
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
             Modifier
                 .graphicsLayer { compositingStrategy = if (strength() > STRENGTH_EPSILON) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
@@ -70,6 +88,7 @@ fun Modifier.scrollTopBlur(topInset: Dp = 0.dp, scrolledPx: () -> Float): Modifi
     topBlur(topInset) { (scrolledPx() / PageMotionSpec.FADE_TOP_RAMP_DP.dp.toPx()).coerceIn(0f, 1f) }
 
 private const val STRENGTH_EPSILON = 0.001f
+private const val SAVER_SCRIM_DP = 56f
 
 /** The blur at the very top edge at full strength. It falls to nothing across the band. */
 private const val TOP_BLUR_RADIUS_DP = 7f
