@@ -25,6 +25,7 @@ import androidx.media3.common.ForwardingPlayer
 import com.ikko.aura.MainActivity
 import com.ikko.aura.R
 import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.playback.TrackResolver
 import com.ikko.aura.player.smart.AutomixSettings
 import com.ikko.aura.player.smart.TrackAnalyzer
 import com.ikko.aura.player.smart.TransitionFilterProcessor
@@ -62,6 +63,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioSessionIdProvider: AudioSessionIdProvider
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
+    @Inject lateinit var trackResolver: TrackResolver
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -129,6 +131,7 @@ class PlaybackService : MediaSessionService() {
         )
         mediaSession = MediaSession.Builder(this, SkipAwarePlayer(active, controller))
             .setSessionActivity(sessionActivity)
+            .setCallback(AuraSessionCallback(trackResolver, scope))
             // Media3's default loader decodes the embedded cover at its full resolution for a
             // notification icon Android then draws at about 128dp. On a 3000x3000 front cover
             // that is a 36MB allocation and a decode long enough to be felt: an atrace of three
