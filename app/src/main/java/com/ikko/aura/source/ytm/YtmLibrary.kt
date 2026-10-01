@@ -133,7 +133,8 @@ class YtmLibrary @Inject constructor(
             artistId = 0L,
             // One id for the whole album when the song is known through it, so its songs share a cover and a page.
             albumId = pseudoAlbumId(albumId ?: videoId),
-            artworkUri = thumbnailUrl?.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
+            // Songs kept before covers were requested at full size are upgraded here, as they are read.
+            artworkUri = YtmImages.sized(thumbnailUrl)?.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
             contentUri = android.net.Uri.parse("$YTM_SCHEME://$videoId"),
             durationMs = durationMs,
             remoteAlbumId = albumId,

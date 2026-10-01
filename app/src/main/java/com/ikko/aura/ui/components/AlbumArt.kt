@@ -181,22 +181,47 @@ object AlbumArtCache {
         return runCatching { source.scale(width, height) }.getOrNull()
     }
 
-    /** A cover on the web (a streaming source's), fetched once and sampled down to the size it will be drawn at. */
-    private fun fetchRemote(uri: Uri, targetSizePx: Int): Bitmap? {
-        val connection = java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection
-        return try {
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 15_000
-            val bytes = connection.inputStream.use { it.readBytes() }
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >= targetSizePx && bounds.outHeight / (sample * 2) >= targetSizePx) sample *= 2
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-        } finally {
-            connection.disconnect()
+    /**
+     * A cover on the web (a streaming source's), sampled down to the size it will be drawn at. Kept on disk, so a list
+     * scrolled again does not fetch every picture again; the folder is trimmed to [WEB_COVER_BUDGET_BYTES].
+     */
+    private fun fetchRemote(context: Context, uri: Uri, targetSizePx: Int): Bitmap? {
+        val dir = java.io.File(context.cacheDir, "web_covers").apply { mkdirs() }
+        val file = java.io.File(dir, java.security.MessageDigest.getInstance("SHA-1").digest(uri.toString().toByteArray()).joinToString("") { "%02x".format(it) })
+        val bytes = if (file.exists() && file.length() > 0) {
+            file.setLastModified(System.currentTimeMillis())
+            file.readBytes()
+        } else {
+            val connection = java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 15_000
+                connection.inputStream.use { it.readBytes() }.also { fetched ->
+                    runCatching { file.writeBytes(fetched); trimWebCovers(dir) }
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= targetSizePx && bounds.outHeight / (sample * 2) >= targetSizePx) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
+    private fun trimWebCovers(dir: java.io.File) {
+        val files = dir.listFiles() ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= WEB_COVER_BUDGET_BYTES) return
+        for (old in files.sortedBy { it.lastModified() }) {
+            total -= old.length()
+            old.delete()
+            if (total <= WEB_COVER_BUDGET_BYTES * 3 / 4) break
         }
     }
+
+    private const val WEB_COVER_BUDGET_BYTES = 120L * 1024 * 1024
 
     /**
      * [loadThumbnail] is a blocking system-provider call with no coroutine awareness of its own —
@@ -208,7 +233,7 @@ object AlbumArtCache {
      * `invokeOnCancellation` hook — rather than just letting it finish and discarding the result.
      */
     private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Bitmap? {
-        if (uri.scheme == "https" || uri.scheme == "http") return fetchRemote(uri, targetSizePx)
+        if (uri.scheme == "https" || uri.scheme == "http") return fetchRemote(context, uri, targetSizePx)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val signal = CancellationSignal()
             suspendCancellableCoroutine { continuation ->

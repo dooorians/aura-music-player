@@ -81,7 +81,7 @@ class YtmClient @Inject constructor(
         extractor.fetchPage()
         return extractor.initialPage.items.filterIsInstance<PlaylistInfoItem>().mapNotNull { item ->
             val id = PLAYLIST_ID.find(item.url)?.groupValues?.get(1) ?: return@mapNotNull null
-            YtmAlbumRef(id, item.name.removePrefix("Album – ").removePrefix("Album - "), item.uploaderName.orEmpty(), item.thumbnails.firstOrNull()?.url)
+            YtmAlbumRef(id, item.name.removePrefix("Album – ").removePrefix("Album - "), item.uploaderName.orEmpty(), YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url))
         }
     }
 
@@ -91,7 +91,7 @@ class YtmClient @Inject constructor(
         val extractor = ServiceList.YouTube.getSearchExtractor(query, listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ARTISTS), "")
         extractor.fetchPage()
         return extractor.initialPage.items.filterIsInstance<ChannelInfoItem>().map { item ->
-            YtmArtistRef(item.name.removeSuffix(" - Topic"), item.thumbnails.firstOrNull()?.url)
+            YtmArtistRef(item.name.removeSuffix(" - Topic"), YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url))
         }
     }
 
@@ -102,7 +102,7 @@ class YtmClient @Inject constructor(
         val extractor = ServiceList.YouTube.getPlaylistExtractor("https://music.youtube.com/playlist?list=$albumId")
         extractor.fetchPage()
         val title = extractor.name.removePrefix("Album – ").removePrefix("Album - ")
-        val cover = runCatching { extractor.thumbnails.maxByOrNull { it.width }?.url ?: extractor.thumbnails.firstOrNull()?.url }.getOrNull()
+        val pageCover = runCatching { extractor.thumbnails.maxByOrNull { it.width }?.url }.getOrNull()
         var page: org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage<StreamInfoItem> = extractor.initialPage
         val items = ArrayList<StreamInfoItem>(page.items)
         var pages = 1
@@ -112,6 +112,10 @@ class YtmClient @Inject constructor(
             pages++
         }
         val artist = items.firstOrNull()?.uploaderName.orEmpty().removeSuffix(" - Topic")
+        // The album's own page only carries a small widescreen picture; the search lists the square cover, which can
+        // be asked for at any size. Found by the album's id, so a namesake cannot stand in for it.
+        val cover = runCatching { searchAlbums("$title $artist").firstOrNull { it.id == albumId }?.thumbnailUrl }.getOrNull()
+            ?: YtmImages.sized(pageCover)
         val songs = items.mapNotNull { item ->
             val id = videoIdOf(item.url) ?: return@mapNotNull null
             YtmSong(id, item.name, item.uploaderName.orEmpty().removeSuffix(" - Topic"), item.duration.coerceAtLeast(0) * 1000, cover, albumId, title)
@@ -163,7 +167,7 @@ class YtmClient @Inject constructor(
                 title = item.name,
                 artist = item.uploaderName.orEmpty().removeSuffix(" - Topic"),
                 durationMs = item.duration.coerceAtLeast(0) * 1000,
-                thumbnailUrl = item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url,
+                thumbnailUrl = YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url),
             )
         }
         return YtmPage(songs, page.nextPage.takeIf { page.hasNextPage() })
