@@ -166,7 +166,9 @@ fun LibraryScreen(
     // Same rule as the top nav row: collapse while scrolling down, and only come back once the
     // list has run out of upward scroll (leftover in onPostScroll), so the header stays out of the
     // way until you are actually back at the top rather than reappearing on the first reversal.
-    val headerScrollConnection = remember {
+    // Keyed on the height: first composed before the status bar's inset is known, it kept the shorter height and folded
+    // the header short of the bar, so the list stopped there instead of going on beneath it.
+    val headerScrollConnection = remember(headerHeightPx) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (available.y >= 0f) return Offset.Zero

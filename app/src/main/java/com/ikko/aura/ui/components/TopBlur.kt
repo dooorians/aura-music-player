@@ -53,11 +53,10 @@ fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifi
         // Under the battery saver there is nothing at the top: once a page is scrolled, the effect puts the whole
         // viewport through an offscreen layer every frame, which on this device took the GPU from ~4 ms to ~10 ms
         // per frame — measured, a plain list scrolling at 60 fps instead of 96.
-        // What scrolls up under the status bar is cut at its lower edge: a plain clip, no layer, so nothing of the header
-        // shows through the bar.
+        // What scrolls up goes on under the status bar, as it always did, dimmed there so the clock stays legible.
         LocalAuraBatterySaver.current -> Modifier.drawWithContent {
             val edge = topInset.toPx()
-            clipRect(top = edge) { this@drawWithContent.drawContent() }
+            drawContent()
             // A dark scrim that thins out below the bar stands in for the blur-and-fade: the page melts into the bar
             // instead of ending on a line. A gradient rectangle, a fraction of the cost of the layer it replaces.
             drawRect(
