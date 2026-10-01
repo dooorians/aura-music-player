@@ -3,6 +3,14 @@ package com.ikko.aura.data
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
+import com.ikko.aura.catalog.Availability
+import com.ikko.aura.catalog.CatalogDao
+import com.ikko.aura.catalog.CatalogTrackEntity
+import com.ikko.aura.catalog.LocalBinding
+import com.ikko.aura.catalog.LocalReconciler
+import com.ikko.aura.catalog.ScannedFile
+import com.ikko.aura.catalog.TrackBindingEntity
+import com.ikko.aura.source.SourceId
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.data.model.AudioFormat
@@ -14,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +34,7 @@ import kotlinx.coroutines.withContext
 @Singleton
 class LocalMusicRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val catalog: CatalogDao,
 ) : MusicRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -48,6 +58,8 @@ class LocalMusicRepository @Inject constructor(
     override fun forget(trackIds: Set<String>) {
         if (trackIds.isEmpty()) return
         _tracks.value = _tracks.value.filterNot { it.id in trackIds }
+        // Deleted on purpose, so not "unavailable": nothing is left to list or re-link.
+        repositoryScope.launch { catalog.forgetKeys(trackIds) }
     }
 
     override suspend fun refresh(forceRescan: Boolean) {
@@ -55,7 +67,7 @@ class LocalMusicRepository @Inject constructor(
         hasScanned = true
         _isScanning.value = true
         try {
-            val scan = queryMediaStore()
+            val scan = withContext(Dispatchers.IO) { keyed(queryMediaStore()) }
             val cached = withContext(Dispatchers.IO) { propertiesCache.read() }
             // Everything already measured goes in straight away, so the library is complete from its
             // first emission and only new or changed files are left for the extractor.
@@ -74,7 +86,40 @@ class LocalMusicRepository @Inject constructor(
     private val propertiesCache by lazy { AudioPropertiesCache(java.io.File(context.filesDir, "audio_properties.tsv")) }
 
     /** What MediaStore listed, and each file's modification stamp for [AudioPropertiesCache]. */
-    private class Scan(val tracks: List<Track>, val stamps: Map<String, String>)
+    private class Scan(
+        val tracks: List<Track>,
+        val stamps: Map<String, String>,
+        val files: List<ScannedFile> = emptyList(),
+    )
+
+    /**
+     * Gives every scanned file the key the catalogue knows it by, and records the scan. A file MediaStore has
+     * re-indexed under a new id comes back under its old key, so what is keyed on that key follows it. A failure
+     * of the catalogue must not cost the library: the scan then goes through under its MediaStore ids, as before.
+     */
+    private suspend fun keyed(scan: Scan): Scan = try {
+        val previous = catalog.bindingsOf(SOURCE).map {
+            LocalBinding(it.itemId, it.trackKey, it.fingerprint, Availability.valueOf(it.availability), it.lastSeenAt)
+        }
+        val result = LocalReconciler.reconcile(previous, scan.files, System.currentTimeMillis())
+        if (scan.files.isNotEmpty()) {
+            catalog.replaceBindings(
+                SOURCE,
+                result.bindings.map {
+                    TrackBindingEntity(SOURCE, it.itemId, it.trackKey, it.fingerprint, it.availability.name, it.lastSeenAt)
+                },
+                result.tracks.map { CatalogTrackEntity(it.key, it.title, it.artist, it.album, it.durationMs) },
+            )
+        }
+        val key = result.keyByItem
+        Scan(
+            tracks = scan.tracks.map { t -> key[t.id]?.takeIf { it != t.id }?.let { t.copy(id = it) } ?: t },
+            stamps = scan.stamps.mapKeys { (id, _) -> key[id] ?: id },
+            files = scan.files,
+        )
+    } catch (e: Exception) {
+        scan
+    }
 
     private suspend fun queryMediaStore(): Scan = withContext(Dispatchers.IO) {
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -91,12 +136,14 @@ class LocalMusicRepository @Inject constructor(
             MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.DATE_MODIFIED,
             MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.DISPLAY_NAME,
         )
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         val results = mutableListOf<Track>()
         val stamps = HashMap<String, String>()
+        val files = ArrayList<ScannedFile>()
         context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -110,6 +157,7 @@ class LocalMusicRepository @Inject constructor(
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
@@ -117,7 +165,7 @@ class LocalMusicRepository @Inject constructor(
                 val contentUri = ContentUris.withAppendedId(collection, id)
                 val rawTrackNumber = cursor.getInt(trackNumberCol)
 
-                results += Track(
+                val track = Track(
                     id = id.toString(),
                     title = cursor.getString(titleCol) ?: "Titre inconnu",
                     // MediaStore does not return null for a missing tag: it returns the literal "<unknown>".
@@ -132,9 +180,13 @@ class LocalMusicRepository @Inject constructor(
                     year = cursor.getInt(yearCol),
                     format = mimeToFormat(cursor.getString(mimeCol)),
                 )
+                results += track
+                // What survives a re-index that gives the file a new id: its name, size and length.
+                val fingerprint = "${cursor.getString(nameCol)}|${cursor.getLong(sizeCol)}|${track.durationMs / 1000}"
+                files += ScannedFile(track.id, fingerprint, track.title, track.artist, track.album, track.durationMs)
             }
         }
-        Scan(results, stamps)
+        Scan(results, stamps, files)
     }
 
     /**
@@ -281,6 +333,7 @@ class LocalMusicRepository @Inject constructor(
                 .replace(NON_ALPHANUMERIC, " ")
                 .trim()
 
+        private val SOURCE = SourceId.LOCAL.value
         private const val ENRICHMENT_EMIT_INTERVAL_MS = 500L
         private const val ENRICHMENT_STEP_DELAY_MS = 4L
     }

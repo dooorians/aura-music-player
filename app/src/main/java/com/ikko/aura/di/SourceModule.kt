@@ -1,8 +1,8 @@
 package com.ikko.aura.di
 
+import com.ikko.aura.catalog.CatalogBindings
 import com.ikko.aura.playback.TrackResolver
 import com.ikko.aura.source.SourceId
-import com.ikko.aura.source.local.LegacyLocalBindings
 import com.ikko.aura.source.local.MediaStoreSource
 import dagger.Module
 import dagger.Provides
@@ -16,6 +16,6 @@ object SourceModule {
 
     @Provides
     @Singleton
-    fun provideTrackResolver(local: MediaStoreSource): TrackResolver =
-        TrackResolver(LegacyLocalBindings, mapOf(SourceId.LOCAL to local))
+    fun provideTrackResolver(local: MediaStoreSource, bindings: CatalogBindings): TrackResolver =
+        TrackResolver(bindings, mapOf(SourceId.LOCAL to local))
 }

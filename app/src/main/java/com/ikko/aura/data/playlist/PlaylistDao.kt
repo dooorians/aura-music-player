@@ -1,6 +1,9 @@
 package com.ikko.aura.data.playlist
 
 import androidx.room.Dao
+import com.ikko.aura.catalog.CatalogDao
+import com.ikko.aura.catalog.CatalogTrackEntity
+import com.ikko.aura.catalog.TrackBindingEntity
 import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -63,14 +66,37 @@ interface PlaylistDao {
         PlaylistTrackEntity::class,
         LyricsCacheEntity::class,
         AlbumPlayEntity::class,
+        CatalogTrackEntity::class,
+        TrackBindingEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun lyricsCacheDao(): LyricsCacheDao
     abstract fun albumPlaysDao(): AlbumPlaysDao
+    abstract fun catalogDao(): CatalogDao
+}
+
+/**
+ * Adds the catalogue: what each track is, and which file holds it. Additive only — no key anywhere else is rewritten,
+ * a local track's key being the MediaStore id it has always had.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS catalog_tracks (" +
+                "`key` TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, " +
+                "album TEXT NOT NULL, durationMs INTEGER NOT NULL)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS track_bindings (" +
+                "sourceId TEXT NOT NULL, itemId TEXT NOT NULL, trackKey TEXT NOT NULL, fingerprint TEXT NOT NULL, " +
+                "availability TEXT NOT NULL, lastSeenAt INTEGER NOT NULL, PRIMARY KEY(sourceId, itemId))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_track_bindings_trackKey ON track_bindings(trackKey)")
+    }
 }
 
 /** Adds the play counts Home's "Redécouvrir" row is built from. */

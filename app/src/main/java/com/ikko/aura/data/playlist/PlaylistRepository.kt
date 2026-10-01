@@ -1,6 +1,7 @@
 package com.ikko.aura.data.playlist
 
 import androidx.compose.runtime.Immutable
+import com.ikko.aura.catalog.CatalogDao
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.model.Track
 import javax.inject.Inject
@@ -30,13 +31,23 @@ const val FAVORITES_PLAYLIST_NAME = "Favoris"
 
 /** See [com.ikko.aura.viewmodel.LibraryUiState]'s doc comment — same issue applies here. */
 @Immutable
-data class PlaylistDetail(val id: Long, val name: String, val tracks: List<Track>)
+data class PlaylistDetail(
+    val id: Long,
+    val name: String,
+    val tracks: List<Track>,
+    /** Entries whose file is gone for now (not deleted through Aura): listed, not playable, still the playlist's. */
+    val unavailable: List<UnavailableEntry> = emptyList(),
+)
+
+@Immutable
+data class UnavailableEntry(val id: String, val title: String, val artist: String)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class PlaylistRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val musicRepository: MusicRepository,
+    private val catalogDao: CatalogDao,
 ) {
     val playlists: Flow<List<PlaylistSummary>> = playlistDao.observePlaylists()
         .onStart { ensureFavorites() }
@@ -82,11 +93,19 @@ class PlaylistRepository @Inject constructor(
         playlistDao.observePlaylist(playlistId),
         playlistDao.observeTracksForPlaylist(playlistId),
         musicRepository.tracks,
-    ) { playlist, entries, allTracks ->
+        catalogDao.observeTracks(),
+    ) { playlist, entries, allTracks, remembered ->
         if (playlist == null) return@combine null
         val tracksById = allTracks.associateBy { it.id }
-        val tracks = entries.sortedBy { it.position }.mapNotNull { tracksById[it.trackId] }
-        PlaylistDetail(playlist.id, playlist.name, tracks)
+        val ordered = entries.sortedBy { it.position }
+        val tracks = ordered.mapNotNull { tracksById[it.trackId] }
+        // Only once the library has loaded: before that every entry would look gone.
+        val unavailable = if (allTracks.isEmpty()) emptyList() else {
+            val memory = remembered.associateBy { it.key }
+            ordered.filter { it.trackId !in tracksById }
+                .mapNotNull { e -> memory[e.trackId]?.let { UnavailableEntry(e.trackId, it.title, it.artist) } }
+        }
+        PlaylistDetail(playlist.id, playlist.name, tracks, unavailable)
     }
 
     suspend fun createPlaylist(name: String): Long =

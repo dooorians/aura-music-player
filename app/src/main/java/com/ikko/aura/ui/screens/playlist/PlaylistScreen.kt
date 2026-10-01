@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,6 +50,7 @@ import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.data.playlist.UnavailableEntry
 import com.ikko.aura.viewmodel.PlaylistDetailViewModel
 import com.ikko.aura.ui.components.AuraButton
 import com.ikko.aura.ui.components.ButtonTone
@@ -141,7 +143,7 @@ fun PlaylistScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            if (current.tracks.isEmpty()) {
+            if (current.tracks.isEmpty() && current.unavailable.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = if (current.id == FAVORITES_PLAYLIST_ID) {
@@ -154,7 +156,7 @@ fun PlaylistScreen(
                     )
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (current.tracks.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AuraButton(
                         onClick = {
                             playerViewModel.playQueue(current.tracks, 0)
@@ -190,6 +192,9 @@ fun PlaylistScreen(
                             },
                             onRemove = { playlistDetailViewModel.removeTrack(track.id) },
                         )
+                    }
+                    items(current.unavailable, key = { "gone-${it.id}" }) { entry ->
+                        UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
                     }
                 }
             }
@@ -256,6 +261,36 @@ private fun PlaylistTrackRow(track: Track, onClick: () -> Unit, onRemove: () -> 
                 text = track.artist,
                 style = MaterialTheme.typography.bodyLarge,
                 color = AuraColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary)
+        }
+    }
+}
+
+/** A title whose file is not there right now: kept in the playlist, greyed, and it comes back with the file. */
+@Composable
+private fun UnavailableTrackRow(entry: UnavailableEntry, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.width(58.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = AuraColors.TextTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Indisponible · ${entry.artist}",
+                style = MaterialTheme.typography.bodyLarge,
+                color = AuraColors.TextTertiary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
