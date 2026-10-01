@@ -539,6 +539,7 @@ fun MainLayout() {
             }
     }
     val density = LocalDensity.current
+    val batterySaver = com.ikko.aura.ui.theme.LocalAuraBatterySaver.current
 
 
     // Search: how far the page has receded to make room for it, 0 shut, 1 open.
@@ -628,7 +629,8 @@ fun MainLayout() {
             // Recorded around the settled backdrop only, not around the whole thing: the cover on
             // its way out is drawn above this and deliberately outside the record. See the
             // parameter's own note for what that buys.
-            settledModifier = Modifier.layerBackdrop(glassBackdrop),
+            // Under the battery saver the glass is flat and samples nothing, so there is nothing to record for it.
+            settledModifier = if (batterySaver) Modifier else Modifier.layerBackdrop(glassBackdrop),
             modifier = Modifier
                 .fillMaxSize()
                 // Inside the card's own shape — its width and its rounded corners — rather than everything
@@ -661,7 +663,9 @@ fun MainLayout() {
         // every time the page draws, and while the player's card is over the mini player and the tab capsule
         // — the only two things that sample it — that was a full-screen recording per frame of the card's
         // travel, for a picture nobody was looking through.
-        val pageBackdropNeeded = (showPill || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
+        // And never under the battery saver: its glass is a flat fill that samples no backdrop, so recording the whole
+        // page into a layer every frame of every transition was work for a picture nobody could look through.
+        val pageBackdropNeeded = !batterySaver && (showPill || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
         // A layer of its own, before the recording. Without one, the page shares its picture with everything
         // drawn beside it — the mini player, the tab capsule — so each frame of their own arrival had the
         // whole page recorded again for a backdrop whose content had not changed.
