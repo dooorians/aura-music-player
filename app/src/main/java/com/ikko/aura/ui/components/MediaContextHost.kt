@@ -116,15 +116,29 @@ fun MediaContextHost(
                     navController.navigate(streamedTrack.streamedArtistRoute())
                     return@MediaContextSheet
                 }
+                val streamedAlbumArtist = (shown as? LibraryContextTarget.AlbumTarget)
+                    ?.takeIf { it.album.remoteId != null }?.tracks?.firstOrNull()
+                if (streamedAlbumArtist != null) {
+                    navController.navigate(streamedAlbumArtist.streamedArtistRoute())
+                    return@MediaContextSheet
+                }
                 val artistId = when (shown) {
                     is LibraryContextTarget.TrackTarget -> shown.track.artistId
                     is LibraryContextTarget.AlbumTarget -> shown.album.artistId
                 }
                 navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
             },
+            streamedAlbum = (shown as? LibraryContextTarget.AlbumTarget)?.album?.remoteId != null,
             onDelete = {
                 val doomed = shown.tracks()
                 if (doomed.isEmpty()) return@MediaContextSheet
+                // Streamed songs have no file of the system's to delete: what goes is their download, and their place in
+                // the library.
+                if (doomed.all(YtmLibrary::isStreamed)) {
+                    playerViewModel.unkeepStreamed(doomed)
+                    target = null
+                    return@MediaContextSheet
+                }
                 pendingDeletion = doomed
                 val request = MediaStore.createDeleteRequest(
                     context.contentResolver,

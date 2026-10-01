@@ -53,6 +53,7 @@ class LibraryViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val analysisReader: AnalysisReader,
     private val selection: LibrarySelection,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : ViewModel() {
 
     /**
@@ -80,7 +81,10 @@ class LibraryViewModel @Inject constructor(
 
     private val repositorySnapshot = combine(
         repository.tracks,
-        repository.albums,
+        // The device's albums, then the ones downloaded from the other sources (YouTube Music, a Subsonic server…).
+        combine(repository.albums, ytmLibrary.observeDownloadedAlbums()) { local, downloaded ->
+            if (downloaded.isEmpty()) local else local + downloaded.filter { d -> local.none { it.id == d.id } }
+        },
         repository.artists,
         repository.isScanning,
     ) { tracks, albums, artists, isScanning ->

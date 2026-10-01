@@ -82,6 +82,7 @@ import com.ikko.aura.data.model.Artist
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.data.playlist.PlaylistSummary
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.collapsingHeight
 import com.ikko.aura.ui.components.rememberCollapseOffset
@@ -507,7 +508,7 @@ private fun AlbumGrid(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f),
-                    onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+                    onClick = { navController.navigate(album.route()) },
                     onLongClick = { onAlbumLongPress(album) },
                 ) {
                     AlbumArt(

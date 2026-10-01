@@ -77,6 +77,16 @@ class YtmLibrary @Inject constructor(
 
     suspend fun known(): List<Track> = observeKnown().first()
 
+    /**
+     * The albums of the songs that are downloaded, each with only its downloaded songs: what the library's Albums tab
+     * lists beside the device's own. A song that is only streamed does not make an album there.
+     */
+    fun observeDownloadedAlbums(): Flow<List<com.ikko.aura.data.model.Album>> =
+        combine(observeKnown(), downloads.observeDoneKeys()) { known, done ->
+            val doneKeys = done.toHashSet()
+            albumsOf(known.filter { it.id in doneKeys })
+        }
+
     fun observeKeptIds(): Flow<Set<String>> = observeKept().map { list -> list.mapTo(HashSet()) { it.id } }
 
     suspend fun prune(now: Long = System.currentTimeMillis()) {

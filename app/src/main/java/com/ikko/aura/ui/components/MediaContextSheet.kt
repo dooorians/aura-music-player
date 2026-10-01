@@ -66,6 +66,8 @@ fun MediaContextSheet(
     keptInLibrary: Boolean = false,
     onToggleKeep: () -> Unit = {},
     streamedHasAlbum: Boolean = false,
+    /** An album downloaded from another source: its menu deletes the downloads, not files of the system's. */
+    streamedAlbum: Boolean = false,
     /** The streamed song's download, when it has one. */
     download: DownloadEntry? = null,
     onDownload: () -> Unit = {},
@@ -124,7 +126,7 @@ fun MediaContextSheet(
                 icon = CupertinoIcons.Delete,
                 label = when (target) {
                     is LibraryContextTarget.TrackTarget -> "Supprimer le fichier"
-                    is LibraryContextTarget.AlbumTarget -> "Supprimer l'album"
+                    is LibraryContextTarget.AlbumTarget -> if (streamedAlbum) "Supprimer les téléchargements" else "Supprimer l'album"
                 },
                 tint = AuraColors.AccentPink,
             ) { onDelete() }
