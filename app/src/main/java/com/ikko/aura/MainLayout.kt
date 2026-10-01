@@ -112,6 +112,7 @@ import com.ikko.aura.ui.screens.nowplaying.NowPlayingScreen
 import com.ikko.aura.ui.screens.playlist.PlaylistScreen
 import com.ikko.aura.ui.screens.queue.QueueScreen
 import com.ikko.aura.ui.screens.search.SearchPanel
+import com.ikko.aura.ui.screens.settings.SourceOrderScreen
 import com.ikko.aura.ui.screens.ytm.RemoteAlbumScreen
 import com.ikko.aura.ui.screens.ytm.RemoteArtistScreen
 import com.ikko.aura.ui.screens.ytm.YtmAlbumScreen
@@ -810,6 +811,11 @@ fun MainLayout() {
                 composable(AuraDestination.RemoteArtistPattern.route) {
                     UnderSheet {
                         RemoteArtistScreen(navController = navController, playerViewModel = playerViewModel)
+                    }
+                }
+                composable(AuraDestination.SourceOrder.route) {
+                    UnderSheet {
+                        SourceOrderScreen()
                     }
                 }
                 composable(AuraDestination.AlbumListPattern.route) { backStack ->

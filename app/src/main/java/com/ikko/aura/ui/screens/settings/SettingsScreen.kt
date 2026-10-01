@@ -186,6 +186,12 @@ fun SettingsScreen(
                         )
                     }
                     SettingsActionRow(
+                        title = "Priorité des sources",
+                        subtitle = "Glisse-les pour choisir celle qui passe en premier",
+                        trailing = null,
+                        onClick = { navController.navigate(AuraDestination.SourceOrder.route) },
+                    )
+                    SettingsActionRow(
                         title = "Ajouter une source",
                         subtitle = "Un serveur de musique à toi (Navidrome, Subsonic…), cherché et lu comme le reste",
                         trailing = null,

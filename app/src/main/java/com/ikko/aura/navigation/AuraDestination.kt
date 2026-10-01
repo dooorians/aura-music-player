@@ -48,6 +48,9 @@ sealed class AuraDestination(val route: String) {
         fun route(source: String, name: String) = "remote_artist/${android.net.Uri.encode(source)}/${android.net.Uri.encode(name)}"
     }
 
+    /** The sources in priority order, dragged about. */
+    data object SourceOrder : AuraDestination("source_order")
+
     data object AlbumListPattern : AuraDestination("album_list/{mode}") {
         fun route(mode: String) = "album_list/$mode"
     }

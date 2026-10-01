@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -67,6 +68,7 @@ import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.PlayerViewModel
 import com.ikko.aura.viewmodel.SearchFilter
+import com.ikko.aura.viewmodel.RemoteSection
 import com.ikko.aura.viewmodel.SearchViewModel
 
 @Composable
@@ -80,6 +82,7 @@ fun SearchPanel(
     val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
     val ytm by searchViewModel.ytmState.collectAsStateWithLifecycle()
     val remote by searchViewModel.remoteState.collectAsStateWithLifecycle()
+    val sourceOrder by searchViewModel.sourceOrder.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -207,10 +210,9 @@ fun SearchPanel(
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
-                    SearchContent.RESULTS -> LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
-                    ) {
+                    SearchContent.RESULTS -> {
+                        // One block per source, drawn in the order of the priority the user set (Réglages).
+                        val localBlock: LazyListScope.() -> Unit = {
                         if (uiState.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
                             item { SectionLabel("Artistes") }
                             items(uiState.artists, key = { "artist_${it.id}" }) { artist ->
@@ -236,7 +238,23 @@ fun SearchPanel(
                                 }
                             }
                         }
-                        remote.forEach { section ->
+                        if (uiState.tracks.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
+                            item { SectionLabel("Titres") }
+                            itemsIndexed(uiState.tracks, key = { _, track -> "track_${track.id}" }) { index, track ->
+                                TrackListItem(
+                                    track = track,
+                                    onClick = {
+                                        onNavigate()
+                                        playerViewModel.playQueue(uiState.tracks, index)
+                                        navController.navigate(AuraDestination.NowPlaying.route)
+                                    },
+                                    onLongClick = { menu.show(track) },
+                                    modifier = Modifier.padding(horizontal = 20.dp).animateItem(),
+                                )
+                            }
+                        }
+                        }
+                        val remoteBlock: LazyListScope.(RemoteSection) -> Unit = { section ->
                             if (section.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
                                 item(key = "rs_artists_${section.sourceId}") { SectionLabel("Artistes · ${section.name}") }
                                 items(section.artists.take(5), key = { "rs_artist_${section.sourceId}_$it" }) { name ->
@@ -293,6 +311,7 @@ fun SearchPanel(
                                 }
                             }
                         }
+                        val ytmBlock: LazyListScope.() -> Unit = {
                         if (ytm.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
                             item { SectionLabel("Artistes · YouTube Music") }
                             items(ytm.artists.take(5), key = { "ytmartist_${it.name}" }) { artist ->
@@ -364,19 +383,17 @@ fun SearchPanel(
                                 )
                             }
                         }
-                        if (uiState.tracks.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
-                            item { SectionLabel("Titres") }
-                            itemsIndexed(uiState.tracks, key = { _, track -> "track_${track.id}" }) { index, track ->
-                                TrackListItem(
-                                    track = track,
-                                    onClick = {
-                                        onNavigate()
-                                        playerViewModel.playQueue(uiState.tracks, index)
-                                        navController.navigate(AuraDestination.NowPlaying.route)
-                                    },
-                                    onLongClick = { menu.show(track) },
-                                    modifier = Modifier.padding(horizontal = 20.dp).animateItem(),
-                                )
+                        }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
+                        ) {
+                            sourceOrder.forEach { id ->
+                                when {
+                                    id == "local" -> localBlock()
+                                    id == "ytm" -> ytmBlock()
+                                    else -> remote.firstOrNull { it.sourceId == id }?.let { remoteBlock(it) }
+                                }
                             }
                         }
                     }

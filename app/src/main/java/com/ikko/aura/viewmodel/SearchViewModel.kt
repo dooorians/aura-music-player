@@ -92,7 +92,12 @@ class SearchViewModel @Inject constructor(
     private val ytmClient: YtmClient,
     private val ytmLibrary: YtmLibrary,
     private val remoteSources: com.ikko.aura.source.remote.RemoteSources,
+    order: com.ikko.aura.source.SourceOrder,
 ) : ViewModel() {
+
+    /** The sources in the priority the user gave them. */
+    val sourceOrder: StateFlow<List<String>> = order.order
+        .stateIn(viewModelScope, SharingStarted.Eagerly, listOf("local", "ytm"))
 
     private val remoteSearch = MutableStateFlow<List<RemoteSection>>(emptyList())
 

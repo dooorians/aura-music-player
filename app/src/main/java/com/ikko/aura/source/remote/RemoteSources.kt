@@ -123,10 +123,24 @@ class RemoteSources @Inject constructor(
         clients.remove(id)
     }
 
-    private fun normalise(url: String): String {
-        val trimmed = url.trim().trimEnd('/')
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+    private fun normalise(url: String): String = normaliseBaseUrl(url)
+}
+
+/**
+ * The server's address, from whatever was pasted: with or without `http://`, with a trailing slash, or copied from
+ * the browser's bar on the server's own page (`…/app/#/albums`, `…/rest`, `…/rest/ping.view?u=…`). The address of the
+ * server is what is kept; a path of its own (a reverse proxy at `/navidrome`) stays.
+ */
+fun normaliseBaseUrl(raw: String): String {
+    var url = raw.trim()
+    if (url.isEmpty()) return url
+    if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) url = "http://$url"
+    url = url.substringBefore('#').substringBefore('?').trimEnd('/')
+    val lower = url.lowercase()
+    for (tail in listOf("/rest/ping.view", "/rest/ping", "/rest", "/app", "/index.html", "/manifest.json")) {
+        if (lower.endsWith(tail)) { url = url.dropLast(tail.length); break }
     }
+    return url.trimEnd('/')
 }
 
 /** What a remote song is to the lists and the player. */
