@@ -66,7 +66,8 @@ class LyricsRepository @Inject constructor(
         val found = OnlineLyrics.lyrics(
             title = track.title,
             artist = track.artist,
-            album = track.album.takeIf { it.isNotBlank() },
+            // A streamed song's "album" is the source's name, which would only make the match worse.
+            album = track.album.takeIf { it.isNotBlank() && !track.id.startsWith("ytm:") },
             durationMs = track.durationMs,
         )
 
