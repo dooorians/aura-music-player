@@ -915,6 +915,12 @@ fun MainLayout() {
                         val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
                         alpha = when {
                             !isTabs && !isNowPlaying -> 0f
+                            // The route is the player's but its card has not been claimed yet: the first frames of an
+                            // opening from the mini player, before the player has composed. The capsule is not part of
+                            // the opening, so it stays exactly as it was until the card covers it — as the mini player
+                            // does in the same frames (see `waiting` below). Only for an opening from the pill: a
+                            // player coming back from the lyrics or the queue has nothing to hold the capsule for.
+                            sheetCard.owner == null && isNowPlaying && sheetFlags.fromPill -> 1f
                             sheetCard.owner == null -> if (isTabs) 1f else 0f
                             sheetCard.waitingToShow || (isNowPlaying && !sheetCard.ready) -> 1f
                             // A narrow ramp on opening: a handful of frames of blend right at the cut, not
