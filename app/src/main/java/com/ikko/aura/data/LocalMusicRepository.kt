@@ -120,8 +120,9 @@ class LocalMusicRepository @Inject constructor(
                 results += Track(
                     id = id.toString(),
                     title = cursor.getString(titleCol) ?: "Titre inconnu",
-                    artist = cursor.getString(artistCol) ?: "Artiste inconnu",
-                    album = cursor.getString(albumCol) ?: "Album inconnu",
+                    // MediaStore does not return null for a missing tag: it returns the literal "<unknown>".
+                    artist = cursor.getString(artistCol).knownOr("Artiste inconnu"),
+                    album = cursor.getString(albumCol).knownOr("Album inconnu"),
                     artistId = cursor.getLong(artistIdCol),
                     albumId = cursor.getLong(albumIdCol),
                     artworkUri = contentUri,
@@ -284,3 +285,6 @@ class LocalMusicRepository @Inject constructor(
         private const val ENRICHMENT_STEP_DELAY_MS = 4L
     }
 }
+
+private fun String?.knownOr(fallback: String): String =
+    if (this == null || isBlank() || this == MediaStore.UNKNOWN_STRING) fallback else this

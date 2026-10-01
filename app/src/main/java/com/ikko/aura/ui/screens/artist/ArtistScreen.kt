@@ -144,6 +144,8 @@ fun ArtistScreen(
                         playerViewModel.playQueue(uiState.tracks, index)
                     },
                     artSize = 56.dp,
+                    // The artist is the page's own title: the album is what tells the rows apart.
+                    subtitle = track.album,
                     modifier = Modifier.padding(horizontal = 20.dp),
                 )
             }

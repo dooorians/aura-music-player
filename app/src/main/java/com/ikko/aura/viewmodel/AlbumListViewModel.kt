@@ -42,7 +42,7 @@ class AlbumListViewModel @Inject constructor(
     ) { albums, recentIds, favoriteIds, plays ->
         val albumsById = albums.associateBy { it.id }
         when (mode) {
-            "favorites" -> AlbumListUiState("Favoris", albums.filter { it.id in favoriteIds })
+            "favorites" -> AlbumListUiState("Albums favoris", albums.filter { it.id in favoriteIds })
             "recent" -> AlbumListUiState("Écoutés récemment", recentIds.mapNotNull { albumsById[it] })
             // Same ordering Home's row uses, uncapped: least-played first. "Tout voir" on a row
             // about what you have forgotten should not reorder it into the plain album list.

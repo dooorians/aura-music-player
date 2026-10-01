@@ -6,9 +6,11 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -61,14 +63,22 @@ object PageMotionSpec {
     const val PAGE_STIFFNESS = 140f
 
     /** The target page is the nearest to where the page would be this long after release. */
-    const val FLING_LOOKAHEAD_S = 0.15f
+    const val FLING_LOOKAHEAD_S = 0.35f
 
     /** How close to its page, in pages, the settle runs before it is finished: well under a pixel. */
     const val PAGE_REST_THRESHOLD = 0.0002f
 
-    /** How far past either end the pages may be pulled, in pages, and how much of the finger counts there. */
-    const val EDGE_OVERSHOOT_PAGES = 0.06f
-    const val EDGE_RESISTANCE = 0.35f
+    /**
+     * Past either end the pages are pulled like a rubber band: they follow the finger at first (a little over a third of it, the
+     * slope at the edge) and follow it less and less, tending towards [EDGE_OVERSHOOT_PAGES] — about a fifteenth of a page —
+     * without ever reaching it. It was a straight 35 % of the finger up to a fixed stop: the pages went on giving,
+     * then hit a wall, and let go they bounced back across the edge. See [PageMotionState.dragBy].
+     */
+    const val EDGE_OVERSHOOT_PAGES = 0.065f
+    const val EDGE_RESISTANCE = 0.38f
+
+    /** The return from past an end: critically damped, and slow enough to be read as the pages settling, not snapping. */
+    const val EDGE_RETURN_STIFFNESS = 48f
 
     // --- Tab capsule ---
     const val CAPSULE_HEIGHT_DP = 52f
@@ -135,21 +145,39 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
         settleJob = null
     }
 
+    /** Where the finger has taken the pages, without the resistance past the ends: what the drag adds up to. */
+    private var fingerPosition = 0f
+
+    private fun rubber(x: Float): Float {
+        val d = PageMotionSpec.EDGE_OVERSHOOT_PAGES
+        return d * (1f - 1f / (PageMotionSpec.EDGE_RESISTANCE * x / d + 1f))
+    }
+
+    /** What [rubber] was given to come to [y] (a distance past an end, in pages). */
+    private fun unrubber(y: Float): Float {
+        val d = PageMotionSpec.EDGE_OVERSHOOT_PAGES
+        val c = y.coerceIn(0f, d * 0.999f)
+        return d / PageMotionSpec.EDGE_RESISTANCE * (c / (d - c))
+    }
+
     fun dragBy(pages: Float) {
+        val last = (pageCount - 1).toFloat()
+        if (!dragging) {
+            // A new drag starts from where the pages are — which may be past an end, settling back.
+            fingerPosition = when {
+                p < 0f -> -unrubber(-p)
+                p > last -> last + unrubber(p - last)
+                else -> p
+            }
+        }
         stop()
         dragging = true
-        val last = (pageCount - 1).toFloat()
-        var next = p + pages
-        val beyondStart = min(next, 0f)
-        val beyondEnd = max(next - last, 0f)
-        if (beyondStart < 0f || beyondEnd > 0f) {
-            // Resistance past the ends: the pages give a little, then hold.
-            val over = if (beyondStart < 0f) beyondStart else beyondEnd
-            val resisted = (over * PageMotionSpec.EDGE_RESISTANCE)
-                .coerceIn(-PageMotionSpec.EDGE_OVERSHOOT_PAGES, PageMotionSpec.EDGE_OVERSHOOT_PAGES)
-            next = if (beyondStart < 0f) resisted else last + resisted
+        fingerPosition += pages
+        position.floatValue = when {
+            fingerPosition < 0f -> -rubber(-fingerPosition)
+            fingerPosition > last -> last + rubber(fingerPosition - last)
+            else -> fingerPosition
         }
-        position.floatValue = next
     }
 
     /** Lets go: settles on the nearest page, decided by where the pages are headed. [pagesPerSecond] is the drag's velocity in p. */
@@ -167,13 +195,16 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
                 position.floatValue = page.toFloat()
                 speed.floatValue = 0f
             } else {
+                // Let go past an end, the pages come back without a bounce and without the drag's speed (which points
+                // outwards and would throw them further): a slow, even return.
+                val beyond = p < 0f || p > (pageCount - 1).toFloat()
                 animate(
                     initialValue = p,
                     targetValue = page.toFloat(),
-                    initialVelocity = initialVelocity,
+                    initialVelocity = if (beyond) 0f else initialVelocity,
                     animationSpec = spring(
-                        PageMotionSpec.PAGE_DAMPING,
-                        PageMotionSpec.PAGE_STIFFNESS,
+                        if (beyond) 1f else PageMotionSpec.PAGE_DAMPING,
+                        if (beyond) PageMotionSpec.EDGE_RETURN_STIFFNESS else PageMotionSpec.PAGE_STIFFNESS,
                         // The default threshold is 1% of a page, about 4 dp: the spring was declared done
                         // that far from its target and the page snapped the rest — the abrupt stop at the
                         // end of every bounce. This lets it run down to a fraction of a pixel.
@@ -224,6 +255,14 @@ fun rememberPageMotion(pageCount: Int): PageMotionState {
  *
  * Horizontal drags reach it two ways: directly, where nothing scrolls, and as the scroll a row of
  * covers could not use once it reached its own edge — the hand-over a pager does, done by hand.
+ *
+ * The direct path is `scrollable`, not `draggable`: `draggable` is a plain gesture detector with no
+ * say in orientation arbitration, so a vertical list wrapped inside it simply keeps every drag that
+ * is not purely horizontal — including the ones meant for this pager — and `draggable` never gets a
+ * look. `scrollable` carries the same orientation-locked touch-slop recognition the vertical lists
+ * use, which is what lets the two coexist: whichever axis's slop a drag crosses first is the one
+ * that wins, ancestor or descendant. A `draggable` here read as "the page is unresponsive" from
+ * anywhere over a plain list — only a horizontal row like Home's carousels ever reached it.
  */
 @Composable
 fun PagedContainer(
@@ -267,7 +306,28 @@ fun PagedContainer(
             }
         }
     }
-    val draggable = rememberDraggableState { delta -> state.dragBy(-delta / state.widthPx) }
+    val scrollableState = rememberScrollableState { delta -> state.dragBy(-delta / state.widthPx); delta }
+    // A no-op: `connection.onPreFling` below already turns a release's velocity into a settle, and it
+    // sees this scrollable's own fling too, since `.nestedScroll(connection)` wraps it on this same
+    // Box. A real `performFling` here raced `onPreFling` for the same velocity and lost — `onPreFling`
+    // runs first and hands this one nothing, which is what made every swipe need to cross most of the
+    // screen: no flick ever got to push `release()` past where the finger let go.
+    val flingBehavior = remember {
+        object : FlingBehavior {
+            override suspend fun ScrollScope.performFling(initialVelocity: Float): Float = 0f
+        }
+    }
+    // `scrollable`'s own in-progress flag covers the drag and, since [flingBehavior] above hands the
+    // fling to our spring and returns at once, stays true for almost exactly the finger-down span —
+    // the same span `dragging` tracked under the old `draggable`.
+    LaunchedEffect(scrollableState) {
+        snapshotFlow { scrollableState.isScrollInProgress }.collectLatest { inProgress ->
+            if (inProgress) {
+                state.stop()
+                state.dragging = true
+            }
+        }
+    }
 
     androidx.compose.runtime.CompositionLocalProvider(LocalPageMotion provides state) {
         Box(
@@ -275,11 +335,10 @@ fun PagedContainer(
                 .fillMaxSize()
                 .onSizeChanged { state.widthPx = it.width.toFloat().coerceAtLeast(1f) }
                 .nestedScroll(connection)
-                .draggable(
-                    state = draggable,
+                .scrollable(
+                    state = scrollableState,
                     orientation = Orientation.Horizontal,
-                    onDragStarted = { state.stop(); state.dragging = true },
-                    onDragStopped = { velocity -> state.release(scope, -velocity / state.widthPx) },
+                    flingBehavior = flingBehavior,
                 ),
         ) {
             pages.forEachIndexed { index, content ->

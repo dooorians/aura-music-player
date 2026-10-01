@@ -26,10 +26,10 @@ import com.ikko.aura.ui.theme.LocalAuraBatterySaver
  * compositor, so the interface does not redraw for it at all: an idle screen renders nothing, and
  * the screens over it are exactly as smooth as they were over a still one.
  *
- * Fifteen steps a second, which is Apple's own cap. The surface is a fraction of the screen's
+ * Twenty steps a second at rest, a hundred while it is being used (see [STEP_MS]). The surface is a fraction of the screen's
  * size, and scaled up by the compositor, because the picture is all soft colour. It stops while
- * [active] is false (the player, which covers it), and holds one still frame under the battery
- * saver.
+ * [active] is false (the player and the lyrics, which cover it), and holds one still frame under
+ * the battery saver.
  */
 @Composable
 fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Modifier) {
@@ -41,8 +41,29 @@ fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Mo
     )
 }
 
-/** How often the aurora itself moves. */
-private const val STEP_MS = 10L
+/**
+ * How often the aurora itself moves. The picture drifts by a couple of pixels a second, so twenty steps are as smooth to
+ * the eye as a hundred; each step costs about 8 ms of CPU, so at 10 ms the thread held half a core for good, on every
+ * screen, even with the music paused. The shimmer that once showed on covers with fine lines came from the cover being
+ * sampled at full size into a tiny scene (fixed in AuroraRenderer by reducing it first), not from the pace.
+ *
+ * At rest it steps every [STEP_MS]. While a finger is on the screen, and for [BUSY_HOLD_MS] after it, it keeps the fast
+ * pace of [STEP_BUSY_MS]: measured on this device, scrolling a list or swiping between the pages dropped three to ten
+ * times as many frames with the aurora at 33 or 50 ms as at 10, because that thread was also what kept the processor
+ * and the GPU at a high clock. Slowed down only when nobody is touching anything, it costs nothing there.
+ */
+private const val STEP_MS = 50L
+private const val STEP_BUSY_MS = 10L
+private const val BUSY_HOLD_MS = 1500L
+
+/** When the screen was last touched (uptime, ms), written from the layout's root; see [STEP_BUSY_MS]. */
+object AuroraPace {
+    @Volatile var lastTouchAt = 0L
+
+    fun touched() {
+        lastTouchAt = android.os.SystemClock.uptimeMillis()
+    }
+}
 
 /**
  * How long one background takes to give way to the next, and the pace the change is redrawn at. The
@@ -85,6 +106,15 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
     private var outgoing: Array<IntArray>? = null
     private var fadeStart = 0L
     private var lastRenderAt = 0L
+
+    /**
+     * The aurora's own clock, in ms. It moves only while the aurora is drawn, and by at most two steps at a
+     * time. Read straight off the system's clock, a stall of the thread (the device busy compiling, a spike
+     * of load) or a stretch spent covered by the player put the drift where it would have got to meanwhile:
+     * the whole picture jumped by that much in one frame.
+     */
+    private var clockMs = 0L
+    private var lastClockAt = 0L
     private var haveShown = false
     private var needsDraw = true
     private val tickRunnable = Runnable { tick() }
@@ -150,6 +180,7 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         val now = SystemClock.uptimeMillis()
         val next = wanted
         var changed = false
+        val step = if (now - AuroraPace.lastTouchAt < BUSY_HOLD_MS) STEP_BUSY_MS else STEP_MS
         if (next != null && next !== theme) {
             // Whatever is on screen right now — a settled picture, or a change caught half way — becomes
             // the picture to fade out of, so a change that arrives during another starts from what the
@@ -159,13 +190,16 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
             theme = next
             changed = true
         }
-        // Allow one render pass if the theme just changed, so the surface is
-        // never empty when we transition back to active.
-        if (!active && !changed) return
+        // Covered (active is false), it does nothing — except take in a new cover and finish fading to it, so
+        // that what is uncovered is already the settled picture rather than a jump to it.
+        if (!active && !changed && outgoing == null) return
         val r = renderer ?: return
         var rendered = false
-        if (changed || now - lastRenderAt >= STEP_MS) {
-            r.render((now % 1_000_000L) / 1000f)
+        if (changed || now - lastRenderAt >= step) {
+            if (lastClockAt == 0L) clockMs = now % 1_000_000L
+            else clockMs += (now - lastClockAt).coerceIn(0L, 2 * step)
+            lastClockAt = now
+            r.render(clockMs / 1000f)
             lastRenderAt = now
             rendered = true
         }
@@ -185,7 +219,7 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         }
         when {
             fading -> handler?.postDelayed(tickRunnable, FADE_FRAME_MS)
-            animate && active -> handler?.postDelayed(tickRunnable, (STEP_MS - (SystemClock.uptimeMillis() - lastRenderAt)).coerceIn(8L, STEP_MS))
+            animate && active -> handler?.postDelayed(tickRunnable, (step - (SystemClock.uptimeMillis() - lastRenderAt)).coerceIn(8L, step))
         }
     }
 

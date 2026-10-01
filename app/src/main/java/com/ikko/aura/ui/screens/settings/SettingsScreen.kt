@@ -39,6 +39,8 @@ import androidx.navigation.NavHostController
 import com.ikko.aura.BuildConfig
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.AuraSwitch
+import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.scrollTopBlur
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraColors
@@ -228,17 +230,7 @@ private fun SettingsSwitchRow(
             RowTitle(title)
             RowSubtitle(subtitle)
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AuraColors.Black,
-                checkedTrackColor = AuraColors.TextPrimary,
-                uncheckedThumbColor = AuraColors.TextSecondary,
-                uncheckedTrackColor = AuraColors.GlassFill,
-                uncheckedBorderColor = AuraColors.GlassBorder,
-            ),
-        )
+        AuraSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -288,8 +280,7 @@ private fun SleepTimerPicker(onPick: (Int) -> Unit, onDismiss: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(AuraShapes.SquircleMedium)
-                .background(AuraColors.SurfaceVariantDark)
+                .auraMenuSurface()
                 .padding(vertical = 10.dp),
         ) {
             Text(

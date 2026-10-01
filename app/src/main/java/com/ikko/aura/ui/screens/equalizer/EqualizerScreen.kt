@@ -31,6 +31,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.AuraSwitch
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.components.PageHeader
@@ -146,17 +147,7 @@ private fun EqSwitchRow(title: String, subtitle: String, checked: Boolean, onChe
             Text(text = title, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
             Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = AuraColors.TextSecondary)
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AuraColors.Black,
-                checkedTrackColor = AuraColors.TextPrimary,
-                uncheckedThumbColor = AuraColors.TextSecondary,
-                uncheckedTrackColor = AuraColors.GlassFill,
-                uncheckedBorderColor = AuraColors.GlassBorder,
-            ),
-        )
+        AuraSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

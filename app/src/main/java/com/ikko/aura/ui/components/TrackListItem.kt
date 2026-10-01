@@ -37,6 +37,8 @@ fun TrackListItem(
     artSize: Dp = 52.dp,
     onLongClick: (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
+    // Under the title. The artist, except where the page is already about the artist (see ArtistScreen).
+    subtitle: String = track.artist,
 ) {
     Row(
         modifier = modifier
@@ -76,7 +78,7 @@ fun TrackListItem(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = track.artist,
+                    text = subtitle,
                     style = LibraryTypography.AlbumArtist,
                     color = LocalCoverColors.current.tint.copy(alpha = 0.72f),
                     maxLines = 1,

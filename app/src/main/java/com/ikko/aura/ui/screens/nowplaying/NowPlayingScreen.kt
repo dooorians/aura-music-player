@@ -95,6 +95,7 @@ import com.ikko.aura.data.model.AudioOutputType
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AlbumArt
+import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SweepLyricLine
 import com.ikko.aura.ui.components.WavyProgressBar
@@ -1048,9 +1049,7 @@ private fun AudioOutputPicker(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(PanelShape)
-                .background(AuraColors.SurfaceVariantDark)
-                .border(0.5.dp, AuraColors.GlassBorder, PanelShape)
+                .auraMenuSurface(PanelShape)
                 .padding(vertical = 10.dp),
         ) {
             Text(
@@ -1100,11 +1099,11 @@ private fun OutputRow(label: String, detail: String?, selected: Boolean, onClick
             }
         }
         if (selected) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(ChipShape)
-                    .background(AuraColors.TextPrimary),
+            Icon(
+                CupertinoIcons.Check,
+                contentDescription = "Sélectionné",
+                tint = AuraColors.TextPrimary,
+                modifier = Modifier.size(18.dp),
             )
         }
     }

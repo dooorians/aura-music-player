@@ -18,7 +18,8 @@ fun Modifier.pullToSearch(
     searchOpen: Boolean,
     openSearch: () -> Unit,
     closeSearch: () -> Unit,
-    pullThreshold: Float = 800f
+    pullThreshold: Float = 320f,
+    commitAt: Float = 0.55f,
 ): Modifier {
     val scope = rememberCoroutineScope()
     val connection = remember(searchPull, searchOpen, openSearch, closeSearch) {
@@ -27,11 +28,11 @@ fun Modifier.pullToSearch(
                 val p = searchPull.value
                 // If we are currently in the middle of a pull down, consume upward scrolls
                 // to undo the pull before scrolling the actual list.
-                if (p > 0f && !searchOpen && source == NestedScrollSource.UserInput) {
-                    val delta = available.y / pullThreshold
-                    val newP = (p + delta).coerceIn(0f, 1f)
-                    scope.launch { searchPull.snapTo(newP) }
-                    return Offset(0f, available.y)
+                // Only as much as it takes to put the page back: the rest of the stroke scrolls the list.
+                if (p > 0f && !searchOpen && source == NestedScrollSource.UserInput && available.y < 0f) {
+                    val used = maxOf(available.y, -p * pullThreshold)
+                    scope.launch { searchPull.snapTo((p + used / pullThreshold).coerceAtLeast(0f)) }
+                    return Offset(0f, used)
                 }
                 return Offset.Zero
             }
@@ -54,7 +55,7 @@ fun Modifier.pullToSearch(
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (!searchOpen && searchPull.value > 0f) {
                     // Significant pull check
-                    if (searchPull.value > 0.4f || available.y > 1000f) {
+                    if (searchPull.value >= commitAt || available.y > 1000f) {
                         openSearch()
                     } else {
                         closeSearch()

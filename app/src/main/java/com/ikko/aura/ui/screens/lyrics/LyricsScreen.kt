@@ -1,5 +1,7 @@
 package com.ikko.aura.ui.screens.lyrics
 
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
@@ -87,6 +89,17 @@ private val LINE_FALLOFF_BLUR = arrayOf(0.dp, 0.5.dp, 1.2.dp, 2.0.dp, 2.8.dp)
 private val LYRIC_EASING = CubicBezierEasing(0.41f, 0f, 0.12f, 0.99f)
 private const val LYRIC_SETTLE_MS = 420
 
+/** The lines, counted from the sung one, that are drawn blurred. */
+private const val BLUR_FROM_LINE = 2
+private const val BLUR_TO_LINE = 3
+
+/** Pace of the background's drift: ~24 steps a second. */
+private const val MESH_STEP_MS = 42L
+
+/** How saturated the lyrics' background may be (see [tuned]). */
+private const val LYRICS_MIN_SATURATION = 0.40f
+private const val LYRICS_MAX_SATURATION = 0.72f
+
 private const val INACTIVE_SCALE = 0.90f
 
 private val GAP_DOT_SIZE = 11.dp
@@ -148,6 +161,15 @@ fun LyricsScreen(
         )
 
         // ── Lyrics Content ─────────────────────────────────────────────
+        // Composed and drawn only once the page has settled, and faded in. Built while it was still sliding, the
+        // list — every visible line with its own animations and effect layers — was most of what the GPU had to
+        // do in a transition already made of two full screens, and the slide dropped a third of its frames.
+        val contentAlpha by animateFloatAsState(
+            targetValue = if (isTransitioning) 0f else 1f,
+            animationSpec = tween(durationMillis = if (isTransitioning) 120 else 260),
+            label = "lyricsContent",
+        )
+        if (!isTransitioning || contentAlpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha }) {
         when (val state = lyricsState) {
             is LyricsUiState.Loading -> Box(
                 modifier = Modifier.fillMaxSize(),
@@ -177,6 +199,7 @@ fun LyricsScreen(
                 palette = lyricsPalette,
                 onSeek = playerViewModel::seekTo,
             )
+        }
         }
 
         // ── Top Bar ────────────────────────────────────────────────────
@@ -208,7 +231,6 @@ private fun MeshGradientBackground(
     palette: List<Color>,
     modifier: Modifier = Modifier,
     driftMillis: Int = 8_000,
-    blurRadius: Dp = 80.dp,
 ) {
     val tuned = (palette.ifEmpty { FallbackColors } + FallbackColors)
         .take(4)
@@ -220,13 +242,20 @@ private fun MeshGradientBackground(
     }
     val baseColor by animateColorAsState(tuned.first().dimmed(), colorSpec, label = "meshBase")
 
-    val phase = remember { Animatable(0f) }
+    // The drift takes driftMillis × 4 for a full turn — a few pixels a second. Stepped at ~24 a second rather
+    // than on every frame of a 96 Hz display: the screen-sized gradients are redrawn once per step, not four
+    // times as often for movement nobody can tell apart. Not a frame clock either: that would wake the
+    // interface every frame just to decide to do nothing on three of four.
+    var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
+        var last = android.os.SystemClock.uptimeMillis()
         while (isActive) {
-            phase.animateTo(
-                targetValue = phase.value + (2 * Math.PI).toFloat(),
-                animationSpec = tween(driftMillis * 4, easing = LinearEasing),
-            )
+            delay(MESH_STEP_MS)
+            val now = android.os.SystemClock.uptimeMillis()
+            // Capped, so a stalled frame (or the screen having been covered) cannot make the colours leap.
+            val dt = (now - last).coerceAtMost(4 * MESH_STEP_MS)
+            last = now
+            phase += (2.0 * Math.PI * dt / (driftMillis * 4.0)).toFloat()
         }
     }
 
@@ -238,8 +267,10 @@ private fun MeshGradientBackground(
                 scaleX = 1.35f
                 scaleY = 1.35f
             }
-            .background(baseColor)
-            .blur(blurRadius),
+            // No blur on top of it: four radial gradients that fade to nothing are already as soft as a blurred
+            // copy of them, and an 80 dp blur over a screen-sized, 135 %-scaled layer was the heaviest thing
+            // the lyrics asked of the GPU (redrawn with every step of the drift).
+            .background(baseColor),
     ) {
         val anchors = listOf(
             Offset(0.20f, 0.25f),
@@ -248,7 +279,7 @@ private fun MeshGradientBackground(
             Offset(0.25f, 0.75f),
         )
         val speeds = listOf(1f, -0.7f, 0.85f, -1.15f)
-        val drift = phase.value
+        val drift = phase
 
         animatedColors.forEachIndexed { index, color ->
             val anchor = anchors[index]
@@ -349,8 +380,9 @@ private fun BitChordLyricsPanel(
     LazyColumn(
         state = listState,
         modifier = Modifier
-            .fillMaxSize()
-            .fadingEdges(topFade = 52.dp, bottomFade = 56.dp),
+            .fillMaxSize(),
+            // No fading mask (an offscreen layer the size of the screen, redone whenever a line moves): the lines
+            // at the edges are already at 8–16 % opacity, which is what the mask was meant to give them.
         contentPadding = PaddingValues(
             top = topPaddingDp,
             bottom = bottomPaddingDp,
@@ -370,11 +402,15 @@ private fun BitChordLyricsPanel(
                 animationSpec = tween(durationMillis = LYRIC_SETTLE_MS, easing = LYRIC_EASING),
                 label = "lyricAlpha-$index",
             )
-            val blur by animateDpAsState(
+            val blurAnimated by animateDpAsState(
                 targetValue = if (isActive) 0.dp else LINE_FALLOFF_BLUR[step],
                 animationSpec = tween(durationMillis = LYRIC_SETTLE_MS, easing = LYRIC_EASING),
                 label = "lyricBlur-$index",
             )
+            // Blurred only where it can be seen: one line either side is at 0.5 dp, and from the fourth on the
+            // line is at 8 % opacity. Each blurred line is a layer with its own GPU effect, redrawn whenever
+            // anything in the list moves: a dozen of them for a difference nobody could see.
+            val blur = if (distance in BLUR_FROM_LINE..BLUR_TO_LINE) blurAnimated else 0.dp
             val scale by animateFloatAsState(
                 targetValue = if (isActive) 1f else INACTIVE_SCALE,
                 animationSpec = spring(
@@ -404,7 +440,7 @@ private fun BitChordLyricsPanel(
                 ) {
                     Box(
                         modifier = Modifier
-                            .blur(blur, BlurredEdgeTreatment.Unbounded)
+                            .then(if (blur > 0.dp) Modifier.blur(blur, BlurredEdgeTreatment.Unbounded) else Modifier)
                             .clickable { onSeek(line.timeMs) }
                             .size(width = GAP_DOT_SIZE * 3 + GAP_DOT_GAP * 2, height = GAP_DOT_SIZE)
                             .graphicsLayer {
@@ -444,7 +480,7 @@ private fun BitChordLyricsPanel(
                             transformOrigin = TransformOrigin(0f, 0.5f)
                             alpha = lineAlpha
                         }
-                        .blur(blur, BlurredEdgeTreatment.Unbounded)
+                        .then(if (blur > 0.dp) Modifier.blur(blur, BlurredEdgeTreatment.Unbounded) else Modifier)
                         .clickable { onSeek(line.timeMs) },
                 ) {
                     if (isActive && line.isWordSynced) {
@@ -518,8 +554,10 @@ private fun Modifier.fadingEdges(topFade: Dp = 48.dp, bottomFade: Dp = 64.dp): M
 private fun Color.tuned(): Color {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(toArgb(), hsl)
-    hsl[1] = (hsl[1] * 1.6f).coerceIn(0.55f, 1f)
-    hsl[2] = hsl[2].coerceIn(0.32f, 0.62f)
+    // Still the cover's colours, but graded nearer to what every other page rests on (the aurora keeps its
+    // saturation at 0.30–0.56): at ×1.6 with a floor of 0.55 the lyrics were a different, much louder room.
+    hsl[1] = (hsl[1] * 1.15f).coerceIn(LYRICS_MIN_SATURATION, LYRICS_MAX_SATURATION)
+    hsl[2] = hsl[2].coerceIn(0.28f, 0.52f)
     return Color(ColorUtils.HSLToColor(hsl))
 }
 

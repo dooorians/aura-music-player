@@ -49,6 +49,8 @@ private val THUMB_WIDTH = 3.5.dp
 private val THUMB_HEIGHT = 22.dp
 private val END_DOT_RADIUS = 2.dp
 
+/** The wave is stepped once every this many frames of the display. */
+private const val WAVE_FRAME_STRIDE = 2
 private const val WAVE_CYCLE_MS = 1400
 private const val AMPLITUDE_SETTLE_MS = 450
 
@@ -108,12 +110,22 @@ fun WavyProgressBar(
         val runForMs = if (waving) Long.MAX_VALUE else AMPLITUDE_SETTLE_MS.toLong()
         var last = -1L
         var elapsed = 0L
+        var owed = 0L
+        var frame = 0
         while (elapsed < runForMs) {
             withFrameMillis { now ->
                 if (last >= 0L) {
                     val dt = now - last
                     elapsed += dt
-                    phase.floatValue = (phase.floatValue + dt.toFloat() / WAVE_CYCLE_MS) % 1f
+                    owed += dt
+                    // Moved on every other frame: the wave travels about a pixel a frame, and each step redraws the
+                    // whole player (its glass is re-rendered whenever anything above it changes), so at ninety-odd
+                    // a second the screen was being rebuilt continuously for a progress bar. Every other frame keeps
+                    // the same pace and the same even rhythm — the skipped frames owe their time to the next.
+                    if (frame++ % WAVE_FRAME_STRIDE == 0) {
+                        phase.floatValue = (phase.floatValue + owed.toFloat() / WAVE_CYCLE_MS) % 1f
+                        owed = 0L
+                    }
                 }
                 last = now
             }

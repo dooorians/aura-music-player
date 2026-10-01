@@ -53,7 +53,8 @@ fun AddToPlaylistDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = AuraShapes.SquircleLarge,
-            color = AuraColors.SurfaceDark,
+            color = androidx.compose.ui.graphics.Color.Transparent,
+            modifier = Modifier.auraMenuSurface(AuraShapes.SquircleLarge),
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
@@ -105,7 +106,7 @@ fun AddToPlaylistDialog(
                                 onDismiss()
                             }
                         },
-                        tone = ButtonTone.Primary,
+                        tone = ButtonTone.Neutral,
                         size = 42.dp,
                     ) {
                         Icon(CupertinoIcons.Add, contentDescription = "Créer et ajouter", modifier = Modifier.size(20.dp))

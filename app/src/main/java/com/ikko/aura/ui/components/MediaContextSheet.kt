@@ -1,5 +1,7 @@
 package com.ikko.aura.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -63,8 +65,19 @@ fun MediaContextSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AuraColors.SurfaceVariantDark,
+        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
         contentColor = AuraColors.TextPrimary,
+        shape = AuraMenu.SheetShape,
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f),
+        dragHandle = {
+            androidx.compose.foundation.layout.Box(
+                Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 40.dp, height = 4.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                    .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.35f)),
+            )
+        },
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp)) {
             Header(target)

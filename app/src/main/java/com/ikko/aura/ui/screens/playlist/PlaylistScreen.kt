@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.playlist
 
+import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -105,7 +106,15 @@ fun PlaylistScreen(
                     AuraIconButton(onClick = { menuExpanded = true }) {
                         Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", modifier = Modifier.size(20.dp))
                     }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+                        shape = AuraMenu.Shape,
+                        border = AuraMenu.rimStroke,
+                        shadowElevation = 0.dp,
+                        tonalElevation = 0.dp,
+                    ) {
                         DropdownMenuItem(
                             text = { Text("Renommer") },
                             onClick = { menuExpanded = false; renaming = true },

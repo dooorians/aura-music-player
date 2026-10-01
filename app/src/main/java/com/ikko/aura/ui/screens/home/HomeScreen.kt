@@ -87,7 +87,7 @@ fun HomeScreen(
                 .verticalScroll(scroll)
                 .padding(top = statusBar + 8.dp),
         ) {
-            SectionTitle(title = "Favoris")
+            SectionTitle(title = "Albums favoris")
             if (uiState.favoriteAlbums.isEmpty()) {
                 Hint("Marque un album favori (★) pour le retrouver ici")
             } else {

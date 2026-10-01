@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.library
 
+import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.ui.theme.AuraMotion
 import androidx.compose.animation.togetherWith
 import com.ikko.aura.ui.components.LibraryContextTarget
@@ -406,10 +407,18 @@ private fun LibraryHeader(
                     ) {
                         Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(22.dp))
                     }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Nom") }, onClick = { onSortSelected(LibrarySort.NAME); menuExpanded = false })
-                        DropdownMenuItem(text = { Text("Artiste") }, onClick = { onSortSelected(LibrarySort.ARTIST); menuExpanded = false })
-                        DropdownMenuItem(text = { Text("Date d'ajout") }, onClick = { onSortSelected(LibrarySort.DATE_ADDED); menuExpanded = false })
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+                        shape = AuraMenu.Shape,
+                        border = AuraMenu.rimStroke,
+                        shadowElevation = 0.dp,
+                        tonalElevation = 0.dp,
+                    ) {
+                        SortItem("Nom", currentSort == LibrarySort.NAME) { onSortSelected(LibrarySort.NAME); menuExpanded = false }
+                        SortItem("Artiste", currentSort == LibrarySort.ARTIST) { onSortSelected(LibrarySort.ARTIST); menuExpanded = false }
+                        SortItem("Date d'ajout", currentSort == LibrarySort.DATE_ADDED) { onSortSelected(LibrarySort.DATE_ADDED); menuExpanded = false }
                     }
                 }
             }
@@ -767,4 +776,23 @@ private fun listBottomPadding(): androidx.compose.ui.unit.Dp {
     val shown = capsule != null && capsule.shown.targetValue > 0.5f
     return LocalPlayerPillHeight.current +
         if (shown) (PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP).dp else 0.dp
+}
+
+
+/** A row of the sort menu: the active sort carries a check, so the menu says how the list is ordered now. */
+@Composable
+private fun SortItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                label,
+                style = LibraryTypography.AlbumTitle,
+                color = if (selected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f),
+            )
+        },
+        trailingIcon = {
+            if (selected) Icon(CupertinoIcons.Check, contentDescription = "Tri actuel", modifier = Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color.White)
+        },
+        onClick = onClick,
+    )
 }

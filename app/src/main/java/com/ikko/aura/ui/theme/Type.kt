@@ -43,6 +43,7 @@ val AuraTypography = Typography(
     headlineLarge = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = 27.sp, lineHeight = 33.sp),
     headlineMedium = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = 23.sp, lineHeight = 29.sp),
     titleLarge = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 25.sp),
+    titleSmall = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 19.sp),
     titleMedium = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
     bodyLarge = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp),
     bodyMedium = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 19.sp),
