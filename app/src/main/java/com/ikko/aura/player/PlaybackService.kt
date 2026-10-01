@@ -25,6 +25,7 @@ import androidx.media3.common.ForwardingPlayer
 import com.ikko.aura.MainActivity
 import com.ikko.aura.R
 import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.playback.PlaybackRecoveryPolicy
 import com.ikko.aura.playback.TrackResolver
 import com.ikko.aura.player.smart.AutomixSettings
 import com.ikko.aura.player.smart.TrackAnalyzer
@@ -84,6 +85,9 @@ class PlaybackService : MediaSessionService() {
     private var crossfade: CrossfadeController? = null
     private var mediaSession: MediaSession? = null
 
+    /** Moves past a track that cannot be played; follows the session's player — see [adoptPlayer]. */
+    private val recovery by lazy { PlaybackRecovery(trackResolver, PlaybackRecoveryPolicy(), scope) }
+
     override fun onCreate() {
         super.onCreate()
         setMediaNotificationProvider(
@@ -98,6 +102,7 @@ class PlaybackService : MediaSessionService() {
         val standby = buildPlayer(spareFilter, ownsSession = false)
         player = active
         spare = standby
+        recovery.attach(active)
 
         val controller = CrossfadeController(
             scope = scope,
@@ -187,6 +192,7 @@ class PlaybackService : MediaSessionService() {
 
         player = incoming
         spare = outgoing
+        recovery.attach(incoming)
         val heldFilter = activeFilter
         activeFilter = spareFilter
         spareFilter = heldFilter
@@ -240,6 +246,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
+        recovery.release()
         crossfade?.release()
         crossfade = null
         scope.cancel()
