@@ -28,6 +28,16 @@ sealed class AuraDestination(val route: String) {
         fun route(playlistId: String) = "playlist/$playlistId"
     }
 
+    /** An album on YouTube Music: [albumId] is its playlist id. */
+    data object YtmAlbumPattern : AuraDestination("ytm_album/{albumId}") {
+        fun route(albumId: String) = "ytm_album/${android.net.Uri.encode(albumId)}"
+    }
+
+    /** An artist on YouTube Music, by name. */
+    data object YtmArtistPattern : AuraDestination("ytm_artist/{name}") {
+        fun route(name: String) = "ytm_artist/${android.net.Uri.encode(name)}"
+    }
+
     data object AlbumListPattern : AuraDestination("album_list/{mode}") {
         fun route(mode: String) = "album_list/$mode"
     }

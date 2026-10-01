@@ -10,6 +10,8 @@ import com.ikko.aura.data.model.Track
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.source.ytm.YtmAlbumRef
+import com.ikko.aura.source.ytm.YtmArtistRef
 import com.ikko.aura.source.ytm.YtmClient
 import com.ikko.aura.source.ytm.YtmLibrary
 import com.ikko.aura.source.ytm.YtmSong
@@ -58,11 +60,13 @@ data class YtmSearchState(
     val empty: Boolean = false,
     val hasMore: Boolean = false,
     val results: List<Track> = emptyList(),
+    val albums: List<YtmAlbumRef> = emptyList(),
+    val artists: List<YtmArtistRef> = emptyList(),
     /** Ids of results already kept in the library. */
     val saved: Set<String> = emptySet(),
 ) {
     /** Whether the section has anything to say: a search in flight, results, a failure, or an honest "nothing". */
-    val active: Boolean get() = enabled && (loading || error || empty || results.isNotEmpty())
+    val active: Boolean get() = enabled && (loading || error || empty || results.isNotEmpty() || albums.isNotEmpty() || artists.isNotEmpty())
 }
 
 @OptIn(FlowPreview::class)
@@ -95,17 +99,28 @@ class SearchViewModel @Inject constructor(
                     }
                     searchedQuery = q
                     ytmSearch.value = YtmSearchState(enabled = true, loading = true)
+                    // Albums and artists come on their own, so the songs are never held up by them.
+                    launch {
+                        val albums = runCatching { withContext(Dispatchers.IO) { ytmClient.searchAlbums(q) } }.getOrDefault(emptyList())
+                        if (q == searchedQuery) ytmSearch.update { it.copy(albums = albums) }
+                    }
+                    launch {
+                        val artists = runCatching { withContext(Dispatchers.IO) { ytmClient.searchArtists(q) } }.getOrDefault(emptyList())
+                        if (q == searchedQuery) ytmSearch.update { it.copy(artists = artists) }
+                    }
                     ytmJob = launch {
                         val page = runCatching { withContext(Dispatchers.IO) { ytmClient.search(q) } }
                         nextPage = page.getOrNull()?.next
                         val songs = page.getOrNull()?.songs.orEmpty()
-                        ytmSearch.value = YtmSearchState(
-                            enabled = true,
-                            error = page.isFailure,
-                            empty = page.isSuccess && songs.isEmpty(),
-                            hasMore = nextPage != null,
-                            results = songs.map(YtmLibrary::trackOf),
-                        )
+                        ytmSearch.update {
+                            it.copy(
+                                loading = false,
+                                error = page.isFailure,
+                                empty = page.isSuccess && songs.isEmpty() && it.albums.isEmpty() && it.artists.isEmpty(),
+                                hasMore = nextPage != null,
+                                results = songs.map(YtmLibrary::trackOf),
+                            )
+                        }
                     }
                 }
         }

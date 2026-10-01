@@ -63,6 +63,7 @@ fun MediaContextSheet(
     streamed: Boolean = false,
     keptInLibrary: Boolean = false,
     onToggleKeep: () -> Unit = {},
+    streamedHasAlbum: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -92,6 +93,8 @@ fun MediaContextSheet(
             ContextAction(CupertinoIcons.PlaylistAdd, "Ajouter à une playlist") { onAddToPlaylist() }
 
             if (streamed) {
+                if (streamedHasAlbum) ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }
+                ContextAction(CupertinoIcons.Person, "Voir l'artiste") { onOpenArtist(); onDismiss() }
                 if (keptInLibrary) {
                     ContextAction(CupertinoIcons.Delete, "Retirer de la bibliothèque", tint = AuraColors.AccentPink) { onToggleKeep(); onDismiss() }
                 } else {

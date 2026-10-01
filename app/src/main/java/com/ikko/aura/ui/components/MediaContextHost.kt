@@ -93,12 +93,23 @@ fun MediaContextHost(
                 val track = (shown as? LibraryContextTarget.TrackTarget)?.track ?: return@MediaContextSheet
                 if (track.id in keptStreamed) playerViewModel.unkeepStreamed(listOf(track)) else playerViewModel.keepStreamed(listOf(track))
             },
+            streamedHasAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId != null,
             onOpenAlbum = {
+                val streamedAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId
+                if (streamedAlbum != null) {
+                    navController.navigate(AuraDestination.YtmAlbumPattern.route(streamedAlbum))
+                    return@MediaContextSheet
+                }
                 val albumId = (shown as? LibraryContextTarget.TrackTarget)?.track?.albumId
                     ?: return@MediaContextSheet
                 navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
             },
             onOpenArtist = {
+                val streamedTrack = (shown as? LibraryContextTarget.TrackTarget)?.track?.takeIf(YtmLibrary::isStreamed)
+                if (streamedTrack != null) {
+                    navController.navigate(AuraDestination.YtmArtistPattern.route(streamedTrack.artist))
+                    return@MediaContextSheet
+                }
                 val artistId = when (shown) {
                     is LibraryContextTarget.TrackTarget -> shown.track.artistId
                     is LibraryContextTarget.AlbumTarget -> shown.album.artistId

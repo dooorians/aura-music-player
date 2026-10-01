@@ -112,6 +112,8 @@ import com.ikko.aura.ui.screens.nowplaying.NowPlayingScreen
 import com.ikko.aura.ui.screens.playlist.PlaylistScreen
 import com.ikko.aura.ui.screens.queue.QueueScreen
 import com.ikko.aura.ui.screens.search.SearchPanel
+import com.ikko.aura.ui.screens.ytm.YtmAlbumScreen
+import com.ikko.aura.ui.screens.ytm.YtmArtistScreen
 import com.ikko.aura.ui.screens.settings.SettingsScreen
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalNowPlayingMesh
@@ -786,6 +788,16 @@ fun MainLayout() {
                             navController = navController,
                             playerViewModel = playerViewModel,
                         )
+                    }
+                }
+                composable(AuraDestination.YtmAlbumPattern.route) {
+                    UnderSheet {
+                        YtmAlbumScreen(navController = navController, playerViewModel = playerViewModel)
+                    }
+                }
+                composable(AuraDestination.YtmArtistPattern.route) {
+                    UnderSheet {
+                        YtmArtistScreen(navController = navController, playerViewModel = playerViewModel)
                     }
                 }
                 composable(AuraDestination.AlbumListPattern.route) { backStack ->

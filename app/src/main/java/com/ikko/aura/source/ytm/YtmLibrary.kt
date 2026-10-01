@@ -30,10 +30,11 @@ class YtmLibrary @Inject constructor(
         key = track.id,
         title = track.title,
         artist = track.artist,
-        album = "",
+        album = track.album.takeIf { track.remoteAlbumId != null }.orEmpty(),
         durationMs = track.durationMs,
         artworkUrl = track.artworkUri?.toString().orEmpty(),
         inLibrary = inLibrary,
+        albumRef = track.remoteAlbumId.orEmpty(),
     )
 
     private fun binding(track: Track) = TrackBindingEntity(
@@ -45,6 +46,8 @@ class YtmLibrary @Inject constructor(
         val streamed = tracks.filter(::isStreamed)
         if (streamed.isEmpty()) return
         dao.rememberItems(streamed.map { entity(it, inLibrary = false) }, streamed.map(::binding))
+        // A song first met in a search and now played from its album learns which album it is on.
+        streamed.filter { it.remoteAlbumId != null }.forEach { dao.attachAlbum(it.id, it.album, it.remoteAlbumId.orEmpty()) }
     }
 
     /** Puts these songs in the library. */
@@ -75,7 +78,7 @@ class YtmLibrary @Inject constructor(
     }
 
     private fun trackOf(row: CatalogTrackEntity): Track =
-        trackOf(row.key.substringAfter(':'), row.title, row.artist, row.durationMs, row.artworkUrl)
+        trackOf(row.key.substringAfter(':'), row.title, row.artist, row.durationMs, row.artworkUrl, row.albumRef.ifEmpty { null }, row.album.ifEmpty { null })
 
     companion object {
         private const val PRUNE_AFTER_MS = 30L * 24 * 60 * 60 * 1000
@@ -93,18 +96,29 @@ class YtmLibrary @Inject constructor(
         fun keyOf(videoId: String) = "${YTM.value}:$videoId"
 
         /** A search result as the player and the lists see it. Not in the library until [keep]t. */
-        fun trackOf(song: YtmSong) = trackOf(song.videoId, song.title, song.artist, song.durationMs, song.thumbnailUrl)
+        fun trackOf(song: YtmSong) =
+            trackOf(song.videoId, song.title, song.artist, song.durationMs, song.thumbnailUrl, song.albumId, song.albumTitle)
 
-        fun trackOf(videoId: String, title: String, artist: String, durationMs: Long, thumbnailUrl: String?) = Track(
+        fun trackOf(
+            videoId: String,
+            title: String,
+            artist: String,
+            durationMs: Long,
+            thumbnailUrl: String?,
+            albumId: String? = null,
+            albumTitle: String? = null,
+        ) = Track(
             id = keyOf(videoId),
             title = title,
             artist = artist,
-            album = "YouTube Music",
+            album = albumTitle ?: "YouTube Music",
             artistId = 0L,
-            albumId = pseudoAlbumId(videoId),
+            // One id for the whole album when the song is known through it, so its songs share a cover and a page.
+            albumId = pseudoAlbumId(albumId ?: videoId),
             artworkUri = thumbnailUrl?.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
             contentUri = android.net.Uri.parse("$YTM_SCHEME://$videoId"),
             durationMs = durationMs,
+            remoteAlbumId = albumId,
         )
     }
 }

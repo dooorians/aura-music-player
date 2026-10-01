@@ -34,6 +34,7 @@ class HomeViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val recentlyPlayedTracker: RecentlyPlayedTracker,
     private val favoritesStore: FavoritesStore,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : ViewModel() {
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -44,6 +45,7 @@ class HomeViewModel @Inject constructor(
         favoritesStore.favoriteAlbumIds,
         recentlyPlayedTracker.playCounts,
         recentlyPlayedTracker.recentTrackIds,
+        ytmLibrary.observeKnown(),
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val tracks = values[0] as List<Track>
@@ -58,13 +60,16 @@ class HomeViewModel @Inject constructor(
         val plays = values[5] as List<AlbumPlayEntity>
         @Suppress("UNCHECKED_CAST")
         val recentTrackIds = values[6] as List<String>
+        @Suppress("UNCHECKED_CAST")
+        val streamed = values[7] as List<Track>
 
         val albumsById = albums.associateBy { it.id }
         HomeUiState(
             favoriteAlbums = albums.filter { it.id in favoriteIds },
             recentAlbums = recentIds.mapNotNull { albumsById[it] },
             // What was actually played, newest first — not simply the first tracks of the library.
-            recentTracks = tracks.associateBy { it.id }.let { byId -> recentTrackIds.mapNotNull { byId[it] } },
+            // Streamed songs count, kept or not (their ids resolve against what the app has met).
+            recentTracks = (tracks + streamed).associateBy { it.id }.let { byId -> recentTrackIds.mapNotNull { byId[it] } },
             rediscoverAlbums = rediscover(albums, plays, recentIds.toSet()),
             isScanning = isScanning,
         )

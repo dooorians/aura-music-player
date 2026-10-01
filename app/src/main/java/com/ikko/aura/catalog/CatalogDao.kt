@@ -21,6 +21,8 @@ data class CatalogTrackEntity(
     val artworkUrl: String = "",
     /** A streamed song is known (to a playlist, the queue) without being in the library; local files always are. */
     val inLibrary: Boolean = true,
+    /** A streamed song's album on its source (a playlist id), if it was met through one. */
+    val albumRef: String = "",
 )
 
 @Entity(
@@ -60,6 +62,9 @@ interface CatalogDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertBindingsIfAbsent(bindings: List<TrackBindingEntity>)
+
+    @Query("UPDATE catalog_tracks SET album = :album, albumRef = :ref WHERE `key` = :key AND albumRef = ''")
+    suspend fun attachAlbum(key: String, album: String, ref: String)
 
     @Query("UPDATE catalog_tracks SET inLibrary = :inLibrary WHERE `key` = :key")
     suspend fun setInLibrary(key: String, inLibrary: Boolean)

@@ -55,6 +55,7 @@ import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AlbumArt
+import com.ikko.aura.ui.screens.ytm.YtmAlbumCard
 import com.ikko.aura.ui.components.LiquidGlassPanel
 import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.components.SquircleCard
@@ -233,8 +234,34 @@ fun SearchPanel(
                                 }
                             }
                         }
+                        if (ytm.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
+                            item { SectionLabel("Artistes · YouTube Music") }
+                            items(ytm.artists.take(5), key = { "ytmartist_${it.name}" }) { artist ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        onNavigate()
+                                        navController.navigate(AuraDestination.YtmArtistPattern.route(artist.name))
+                                    }.padding(horizontal = 20.dp, vertical = 10.dp),
+                                ) {
+                                    Text(artist.name, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                                }
+                            }
+                        }
+                        if (ytm.albums.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ALBUMS)) {
+                            item { SectionLabel("Albums · YouTube Music") }
+                            item {
+                                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    items(ytm.albums, key = { "ytmalbum_${it.id}" }) { album ->
+                                        YtmAlbumCard(album) {
+                                            onNavigate()
+                                            navController.navigate(AuraDestination.YtmAlbumPattern.route(album.id))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (ytm.active && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
-                            item { SectionLabel("YouTube Music") }
+                            item { SectionLabel("Titres · YouTube Music") }
                             if (ytm.loading) item { YtmNote("Recherche…") }
                             if (ytm.empty) item { YtmNote("Aucun titre trouvé sur YouTube Music") }
                             if (ytm.error) item { YtmNote("YouTube Music ne répond pas pour le moment") }

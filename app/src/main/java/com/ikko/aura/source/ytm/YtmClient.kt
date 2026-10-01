@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.Page
+import org.schabi.newpipe.extractor.channel.ChannelInfoItem
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
@@ -28,7 +30,18 @@ data class YtmSong(
     val artist: String,
     val durationMs: Long,
     val thumbnailUrl: String?,
+    /** The album page it came from, when it came from one. */
+    val albumId: String? = null,
+    val albumTitle: String? = null,
 )
+
+/** An album as a search lists it: [id] is the YouTube Music playlist behind it. */
+data class YtmAlbumRef(val id: String, val title: String, val artist: String, val thumbnailUrl: String?)
+
+data class YtmArtistRef(val name: String, val thumbnailUrl: String?)
+
+/** An album and its songs, in order; every song carries the album's cover and identity. */
+data class YtmAlbum(val ref: YtmAlbumRef, val songs: List<YtmSong>)
 
 /** One page of search results, and the key to the next one if there is one. */
 data class YtmPage(val songs: List<YtmSong>, val next: Page?)
@@ -59,6 +72,64 @@ class YtmClient @Inject constructor(
         if (initialised) return
         NewPipe.init(Http, Localization.DEFAULT)
         initialised = true
+    }
+
+    fun searchAlbums(query: String): List<YtmAlbumRef> {
+        check(isEnabled()) { "YouTube Music is off" }
+        ensureInit()
+        val extractor = ServiceList.YouTube.getSearchExtractor(query, listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ALBUMS), "")
+        extractor.fetchPage()
+        return extractor.initialPage.items.filterIsInstance<PlaylistInfoItem>().mapNotNull { item ->
+            val id = PLAYLIST_ID.find(item.url)?.groupValues?.get(1) ?: return@mapNotNull null
+            YtmAlbumRef(id, item.name.removePrefix("Album – ").removePrefix("Album - "), item.uploaderName.orEmpty(), item.thumbnails.firstOrNull()?.url)
+        }
+    }
+
+    fun searchArtists(query: String): List<YtmArtistRef> {
+        check(isEnabled()) { "YouTube Music is off" }
+        ensureInit()
+        val extractor = ServiceList.YouTube.getSearchExtractor(query, listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ARTISTS), "")
+        extractor.fetchPage()
+        return extractor.initialPage.items.filterIsInstance<ChannelInfoItem>().map { item ->
+            YtmArtistRef(item.name.removeSuffix(" - Topic"), item.thumbnails.firstOrNull()?.url)
+        }
+    }
+
+    /** An album's songs. Albums are short, so its first pages are all there is. */
+    fun album(albumId: String): YtmAlbum {
+        check(isEnabled()) { "YouTube Music is off" }
+        ensureInit()
+        val extractor = ServiceList.YouTube.getPlaylistExtractor("https://music.youtube.com/playlist?list=$albumId")
+        extractor.fetchPage()
+        val title = extractor.name.removePrefix("Album – ").removePrefix("Album - ")
+        val cover = runCatching { extractor.thumbnails.maxByOrNull { it.width }?.url ?: extractor.thumbnails.firstOrNull()?.url }.getOrNull()
+        var page: org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage<StreamInfoItem> = extractor.initialPage
+        val items = ArrayList<StreamInfoItem>(page.items)
+        var pages = 1
+        while (page.hasNextPage() && pages < MAX_ALBUM_PAGES) {
+            page = extractor.getPage(page.nextPage)
+            items += page.items
+            pages++
+        }
+        val artist = items.firstOrNull()?.uploaderName.orEmpty().removeSuffix(" - Topic")
+        val songs = items.mapNotNull { item ->
+            val id = videoIdOf(item.url) ?: return@mapNotNull null
+            YtmSong(id, item.name, item.uploaderName.orEmpty().removeSuffix(" - Topic"), item.duration.coerceAtLeast(0) * 1000, cover, albumId, title)
+        }
+        return YtmAlbum(YtmAlbumRef(albumId, title, artist, cover), songs)
+    }
+
+    /** What an artist has, by name: their songs (the search's results whose artist is that name) and their albums. */
+    fun artistSongs(name: String): List<YtmSong> {
+        val key = name.lowercase()
+        val first = search(name)
+        val more = first.next?.let { runCatching { searchMore(name, it) }.getOrNull() }
+        return (first.songs + more?.songs.orEmpty()).filter { it.artist.lowercase().contains(key) || key.contains(it.artist.lowercase()) }
+    }
+
+    fun artistAlbums(name: String): List<YtmAlbumRef> {
+        val key = name.lowercase()
+        return searchAlbums(name).filter { it.artist.removeSuffix(" - Topic").lowercase().let { a -> a.contains(key) || key.contains(a) } }
     }
 
     /** Songs only, never videos or clips. [YtmPage.next] opens the following page of the same search. */
@@ -156,6 +227,8 @@ class YtmClient @Inject constructor(
 
     private companion object {
         val EXPIRE = Regex("[?&]expire=(\\d+)")
+        val PLAYLIST_ID = Regex("[?&]list=([\\w-]+)")
+        const val MAX_ALBUM_PAGES = 3
         val VIDEO_ID = Regex("[?&]v=([\\w-]{11})")
         const val EXPIRY_MARGIN_MS = 10 * 60_000L
         const val FALLBACK_TTL_MS = 2 * 60 * 60_000L

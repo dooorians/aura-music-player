@@ -34,6 +34,8 @@ data class Track(
     val bitrateKbps: Int = 0,
     val sampleRateHz: Int = 0,
     val bitDepth: Int = 16,
+    /** A streamed song's album on its source (a YouTube Music playlist id), when known. */
+    val remoteAlbumId: String? = null,
 ) {
     val isLossless: Boolean
         get() = format in LOSSLESS_FORMATS
