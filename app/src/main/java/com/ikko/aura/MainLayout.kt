@@ -117,7 +117,6 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalNowPlayingMesh
 import com.ikko.aura.ui.theme.LocalPageTheme
 import com.ikko.aura.ui.theme.LocalSearchOpener
-import com.ikko.aura.ui.components.pullToSearch
 import com.ikko.aura.ui.components.AuroraBackground
 import com.ikko.aura.ui.components.LocalPageMotion
 import com.ikko.aura.ui.components.LocalTabCapsule
@@ -732,9 +731,7 @@ fun MainLayout() {
             ) {
                 composable(AuraDestination.Tabs.route) {
                     UnderSheet {
-                        // Pulling a list down past its top opens the search: the only way in, now that the library's
-                        // header has no search button. Tabs only — an album or the lyrics pulled down stays put.
-                        Box(Modifier.fillMaxSize().pullToSearch(searchPull, searchOpen, ::openSearch, ::closeSearch)) {
+                        Box(Modifier.fillMaxSize()) {
                             TabPager(navController = navController, playerViewModel = playerViewModel, motion = pageMotion)
                         }
                     }
