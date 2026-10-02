@@ -170,3 +170,63 @@ fun LiquidGlassPanel(
         content()
     }
 }
+
+/**
+ * A shape that asks for its corners each time it is drawn, so a surface whose corners are animated can still be
+ * given a flat fill and a border under the battery saver.
+ */
+private class DynamicShape(private val provider: () -> CornerBasedShape) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ) = provider().createOutline(size, layoutDirection, density)
+}
+
+/**
+ * [liquidGlass] for a surface that changes shape while it is on screen: a menu growing out of the button that
+ * opened it. [shape] is asked for at every draw, so its corners can follow the animation, and [refraction] is how
+ * hard the lens bends what is behind the glass — 1 is the resting glass, more is the bulging, liquid look of a
+ * surface in motion, which is what iOS shows while its menus are travelling and then lets settle.
+ *
+ * Both are read while drawing, so animating them redraws the glass and nothing is recomposed.
+ */
+@Composable
+fun Modifier.liquidGlassMorphing(
+    shape: () -> CornerBasedShape,
+    refraction: () -> Float = { 1f },
+    tint: Color = GlassSurfaceTint,
+    tintAlpha: Float = SURFACE_OPACITY,
+    blurRadiusDp: Float = BLUR_RADIUS_DP,
+    dropShadow: Boolean = true,
+): Modifier {
+    if (LocalAuraBatterySaver.current) {
+        val movingShape = remember(shape) { DynamicShape(shape) }
+        return background(tint.copy(alpha = 0.55f), movingShape)
+            .border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, movingShape)
+    }
+    val backdrop = LocalAuraBackdrop.current
+    val density = LocalDensity.current
+    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+
+    return drawBackdrop(
+        backdrop = backdrop,
+        shape = shape,
+        effects = {
+            colorControls(saturation = 1f + 0.5f * VIBRANCY)
+            blur(blurPx)
+            lens(
+                refractionHeight = lensHeightPx,
+                refractionAmount = lensAmountPx * refraction().coerceIn(0f, 4f),
+                depthEffect = false,
+                chromaticAberration = false,
+            )
+        },
+        highlight = { Highlight.Default },
+        shadow = if (dropShadow) ({ Shadow.Default }) else null,
+        onDrawSurface = { drawRect(color = tint.copy(alpha = tintAlpha), size = size) },
+        backdropScale = GLASS_RESOLUTION_SCALE,
+    )
+}

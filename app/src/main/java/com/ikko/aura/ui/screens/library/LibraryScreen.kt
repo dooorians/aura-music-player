@@ -127,6 +127,11 @@ import com.ikko.aura.ui.components.AuraChip
 import com.ikko.aura.ui.components.AuraIconButton
 import com.ikko.aura.ui.components.AuraIconGroup
 import com.ikko.aura.ui.components.AuraGroupIcon
+import com.ikko.aura.ui.components.GlassMenu
+import com.ikko.aura.ui.components.GlassMenuItem
+import com.ikko.aura.ui.components.GlassMenuState
+import com.ikko.aura.ui.components.glassMenuAnchor
+import com.ikko.aura.ui.components.rememberGlassMenuState
 import com.ikko.aura.ui.components.ButtonTone
 import androidx.compose.foundation.layout.width
 
@@ -194,6 +199,9 @@ fun LibraryScreen(
     }
 
     val scope = rememberCoroutineScope()
+    // Shared by the sort button and the menu laid over the page: the menu grows out of the button, and the button
+    // empties while it does.
+    val sortMenu = rememberGlassMenuState()
     val capsule = LocalTabCapsule.current
     val reduceMotion = LocalPageMotion.current?.reduceMotion == true
     // A new view starts at its top, so its header is back, and the capsule with it.
@@ -237,6 +245,7 @@ fun LibraryScreen(
         // The strip holds still on the screen — 119 dp from the top — while the header above the list folds.
         LocalIndexStripShift provides { stripTopPx - (listTopBasePx + headerOffsetPx) },
     ) {
+    Box(Modifier.fillMaxSize()) {
     GradientScreenScaffold(
         applyStatusBarInset = false,
         // On the whole page, not only the list: the header folds up under the status bar too, and has to melt into
@@ -258,8 +267,7 @@ fun LibraryScreen(
                 LibraryHeader(
                     statusBarTop = statusBarTop,
                     countText = countText,
-                    currentSort = uiState.sort,
-                    onSortSelected = libraryViewModel::setSort,
+                    sortMenu = sortMenu,
                     onSmartShuffle = {
                         scope.launch {
                             val queue = libraryViewModel.smartShuffle()
@@ -341,6 +349,19 @@ fun LibraryScreen(
             }
         }
     }
+    // Over the whole page and outside the header's clip: the glass has to be able to leave the header's bounds.
+    GlassMenu(sortMenu) {
+        GlassMenuItem("Nom", uiState.sort == LibrarySort.NAME, {
+            libraryViewModel.setSort(LibrarySort.NAME); sortMenu.close()
+        })
+        GlassMenuItem("Artiste", uiState.sort == LibrarySort.ARTIST, {
+            libraryViewModel.setSort(LibrarySort.ARTIST); sortMenu.close()
+        })
+        GlassMenuItem("Date d'ajout", uiState.sort == LibrarySort.DATE_ADDED, {
+            libraryViewModel.setSort(LibrarySort.DATE_ADDED); sortMenu.close()
+        })
+    }
+    }
     }
     }
 }
@@ -355,11 +376,9 @@ private fun countLabel(count: Int, noun: String): String {
 private fun LibraryHeader(
     statusBarTop: androidx.compose.ui.unit.Dp,
     countText: String,
-    currentSort: LibrarySort,
-    onSortSelected: (LibrarySort) -> Unit,
+    sortMenu: GlassMenuState,
     onSmartShuffle: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     val cover = LocalCoverColors.current
     Box(
         modifier = Modifier
@@ -393,7 +412,7 @@ private fun LibraryHeader(
             horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Shuffle and sort share one capsule: presses tilt and expand more on the touched side
+            // Search, shuffle and sort share one capsule: a press swells it and lights the pressed button (see GlassPress.kt)
             val openSearch = LocalSearchOpener.current
             AuraIconGroup(light = 80f) {
                 AuraGroupIcon(
@@ -410,27 +429,14 @@ private fun LibraryHeader(
                 ) {
                     Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(20.dp))
                 }
-                Box {
-                    AuraGroupIcon(
-                        onClick = { menuExpanded = true },
-                        size = HEADER_BUTTON,
-                        side = 1f,
-                    ) {
-                        Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(20.dp))
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-                        shape = AuraMenu.Shape,
-                        border = AuraMenu.rimStroke,
-                        shadowElevation = 0.dp,
-                        tonalElevation = 0.dp,
-                    ) {
-                        SortItem("Nom", currentSort == LibrarySort.NAME) { onSortSelected(LibrarySort.NAME); menuExpanded = false }
-                        SortItem("Artiste", currentSort == LibrarySort.ARTIST) { onSortSelected(LibrarySort.ARTIST); menuExpanded = false }
-                        SortItem("Date d'ajout", currentSort == LibrarySort.DATE_ADDED) { onSortSelected(LibrarySort.DATE_ADDED); menuExpanded = false }
-                    }
+                // The menu grows out of this button: it tells the menu where it is, and empties while the menu is out.
+                AuraGroupIcon(
+                    onClick = sortMenu::open,
+                    modifier = Modifier.glassMenuAnchor(sortMenu),
+                    size = HEADER_BUTTON,
+                    side = 1f,
+                ) {
+                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -787,23 +793,4 @@ private fun listBottomPadding(): androidx.compose.ui.unit.Dp {
     val shown = capsule != null && capsule.shown.targetValue > 0.5f
     return LocalPlayerPillHeight.current +
         if (shown) (PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP).dp else 0.dp
-}
-
-
-/** A row of the sort menu: the active sort carries a check, so the menu says how the list is ordered now. */
-@Composable
-private fun SortItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                label,
-                style = LibraryTypography.AlbumTitle,
-                color = if (selected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f),
-            )
-        },
-        trailingIcon = {
-            if (selected) Icon(CupertinoIcons.Check, contentDescription = "Tri actuel", modifier = Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color.White)
-        },
-        onClick = onClick,
-    )
 }
