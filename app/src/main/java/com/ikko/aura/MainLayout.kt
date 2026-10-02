@@ -303,6 +303,15 @@ private class SheetFlags {
     }
 }
 
+/**
+ * How much of the mini player and the tab capsule is left while the search comes in: all of it when it is shut, none
+ * of it a third of the way in. Eased from the search's own pull, so they leave with it and come back with it — never cut.
+ */
+private fun searchClear(pull: Float): Float {
+    val u = (1f - pull * 2f).coerceIn(0f, 1f)
+    return u * u * (3f - 2f * u)
+}
+
 /** How dim the page under the player's card is, 0..1. Read in draw only. */
 val LocalSheetDim = androidx.compose.runtime.staticCompositionLocalOf<() -> Float> { { 0f } }
 
@@ -869,7 +878,10 @@ fun MainLayout() {
                         )
                     }
                 }
-                composable(AuraDestination.YtmAlbumPattern.route) {
+                composable(
+                    AuraDestination.YtmAlbumPattern.route,
+                    arguments = listOf(androidx.navigation.navArgument("online") { type = androidx.navigation.NavType.BoolType; defaultValue = false }),
+                ) {
                     UnderSheet {
                         YtmAlbumScreen(navController = navController, playerViewModel = playerViewModel)
                     }
@@ -879,7 +891,10 @@ fun MainLayout() {
                         YtmArtistScreen(navController = navController, playerViewModel = playerViewModel)
                     }
                 }
-                composable(AuraDestination.RemoteAlbumPattern.route) {
+                composable(
+                    AuraDestination.RemoteAlbumPattern.route,
+                    arguments = listOf(androidx.navigation.navArgument("online") { type = androidx.navigation.NavType.BoolType; defaultValue = false }),
+                ) {
                     UnderSheet {
                         RemoteAlbumScreen(navController = navController, playerViewModel = playerViewModel)
                     }
@@ -969,7 +984,7 @@ fun MainLayout() {
             // animation that only holds it at 0 — the one run when the player returns to a page the capsule does not
             // belong to — used to count, and composed an invisible capsule (alpha 0) in the very frame the closing card
             // uncovered the mini player: that frame's missed deadline, measured on every close from the home page.
-            val capsuleEnabled = isTabsRoute && !cardOverPill
+            val capsuleEnabled = isTabsRoute && !cardOverPill && !searchOpen
             
             TabCapsule(
                 state = capsule,
@@ -984,7 +999,7 @@ fun MainLayout() {
                     .graphicsLayer {
                         val isTabs = currentRoute == AuraDestination.Tabs.route
                         val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
-                        alpha = when {
+                        alpha = searchClear(searchPull.value) * when {
                             !isTabs && !isNowPlaying -> 0f
                             // The route is the player's but its card has not been claimed yet: the first frames of an
                             // opening from the mini player, before the player has composed. The capsule is not part of
@@ -1019,7 +1034,7 @@ fun MainLayout() {
                 }
             }
             if (pillComposed) {
-                val pillInteractive = showPill && sheetCard.owner == null
+                val pillInteractive = showPill && sheetCard.owner == null && !searchOpen
                 PlayerPillHost(
                     playerViewModel = playerViewModel,
                     backdrop = pillBackdrop,
@@ -1094,7 +1109,7 @@ fun MainLayout() {
                             scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
                             scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
                             translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f)
+                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value)
                         }
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(horizontal = 21.dp, vertical = 6.dp),

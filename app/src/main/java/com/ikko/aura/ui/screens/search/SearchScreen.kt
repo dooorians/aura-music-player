@@ -279,7 +279,7 @@ fun SearchPanel(
                                         items(section.albums, key = { "rs_album_${it.id}" }) { album ->
                                             YtmAlbumCard(album) {
                                                 onNavigate()
-                                                navController.navigate(streamedAlbumRoute(album.id))
+                                                navController.navigate(streamedAlbumRoute(album.id, online = true))
                                             }
                                         }
                                     }
@@ -336,7 +336,7 @@ fun SearchPanel(
                                     items(ytm.albums, key = { "ytmalbum_${it.id}" }) { album ->
                                         YtmAlbumCard(album) {
                                             onNavigate()
-                                            navController.navigate(AuraDestination.YtmAlbumPattern.route(album.id))
+                                            navController.navigate(AuraDestination.YtmAlbumPattern.route(album.id, online = true))
                                         }
                                     }
                                 }

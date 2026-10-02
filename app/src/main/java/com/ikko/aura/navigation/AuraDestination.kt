@@ -29,8 +29,10 @@ sealed class AuraDestination(val route: String) {
     }
 
     /** An album on YouTube Music: [albumId] is its playlist id. */
-    data object YtmAlbumPattern : AuraDestination("ytm_album/{albumId}") {
-        fun route(albumId: String) = "ytm_album/${android.net.Uri.encode(albumId)}"
+    data object YtmAlbumPattern : AuraDestination("ytm_album/{albumId}?online={online}") {
+        /** [online] is the search's way in: the album as the source has it, whatever has been downloaded of it. */
+        fun route(albumId: String, online: Boolean = false) =
+            "ytm_album/${android.net.Uri.encode(albumId)}" + if (online) "?online=true" else ""
     }
 
     /** An artist on YouTube Music, by name. */
@@ -39,8 +41,9 @@ sealed class AuraDestination(val route: String) {
     }
 
     /** An album on an added source: the source's id, then the album's. */
-    data object RemoteAlbumPattern : AuraDestination("remote_album/{source}/{albumId}") {
-        fun route(source: String, albumId: String) = "remote_album/${android.net.Uri.encode(source)}/${android.net.Uri.encode(albumId)}"
+    data object RemoteAlbumPattern : AuraDestination("remote_album/{source}/{albumId}?online={online}") {
+        fun route(source: String, albumId: String, online: Boolean = false) =
+            "remote_album/${android.net.Uri.encode(source)}/${android.net.Uri.encode(albumId)}" + if (online) "?online=true" else ""
     }
 
     /** An artist on an added source, by name. */
@@ -70,10 +73,10 @@ fun com.ikko.aura.data.model.Album.route(): String =
     remoteId?.let { streamedAlbumRoute(it) } ?: AuraDestination.AlbumPattern.route(id.toString())
 
 /** The page of a streamed album: [ref] is a YouTube Music playlist id, or `<source>:<albumId>` for an added source. */
-fun streamedAlbumRoute(ref: String): String {
+fun streamedAlbumRoute(ref: String, online: Boolean = false): String {
     val source = ref.substringBefore(':', "")
-    return if (ref.contains(':')) AuraDestination.RemoteAlbumPattern.route(source, ref.substringAfter(':'))
-    else AuraDestination.YtmAlbumPattern.route(ref)
+    return if (ref.contains(':')) AuraDestination.RemoteAlbumPattern.route(source, ref.substringAfter(':'), online)
+    else AuraDestination.YtmAlbumPattern.route(ref, online)
 }
 
 /** The album page of a streamed song, if its album is known. */

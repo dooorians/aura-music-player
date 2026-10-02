@@ -60,6 +60,8 @@ class YtmAlbumViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
     private val albumId: String = savedStateHandle.get<String>("albumId").orEmpty()
+    /** Opened from the search, which is explicitly online: the album as the source has it. Everywhere else, what is on the device wins. */
+    private val online: Boolean = savedStateHandle.get<Boolean>("online") ?: false
     private val _state = MutableStateFlow(YtmAlbumState())
     val state: StateFlow<YtmAlbumState> = _state.asStateFlow()
 
@@ -90,6 +92,21 @@ class YtmAlbumViewModel @Inject constructor(
     fun load() {
         _state.value = YtmAlbumState()
         viewModelScope.launch {
+            // Once any of it is downloaded, the album is the one on the device: its downloaded songs, no network, from
+            // wherever it is opened but the search.
+            if (!online) {
+                val onDevice = library.downloadedOfAlbum(albumId)
+                if (onDevice.isNotEmpty()) {
+                    _state.value = YtmAlbumState(
+                        loading = false,
+                        title = onDevice.first().album,
+                        artist = onDevice.first().artist,
+                        coverUrl = onDevice.first().artworkUri?.toString(),
+                        tracks = onDevice,
+                    )
+                    return@launch
+                }
+            }
             val album = runCatching { withContext(Dispatchers.IO) { client.album(albumId) } }.getOrNull()
             _state.value = if (album == null || album.songs.isEmpty()) {
                 // No answer (no network, the source off): the downloaded songs of this album are files, and the page

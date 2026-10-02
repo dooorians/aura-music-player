@@ -40,6 +40,7 @@ class RemoteAlbumViewModel @Inject constructor(
 ) : ViewModel() {
     private val sourceId: String = savedStateHandle.get<String>("source").orEmpty()
     private val albumId: String = savedStateHandle.get<String>("albumId").orEmpty()
+    private val online: Boolean = savedStateHandle.get<Boolean>("online") ?: false
     private val _state = MutableStateFlow(YtmAlbumState())
     val state: StateFlow<YtmAlbumState> = _state.asStateFlow()
 
@@ -68,6 +69,19 @@ class RemoteAlbumViewModel @Inject constructor(
     fun load() {
         _state.value = YtmAlbumState()
         viewModelScope.launch {
+            if (!online) {
+                val onDevice = library.downloadedOfAlbum("$sourceId:$albumId")
+                if (onDevice.isNotEmpty()) {
+                    _state.value = YtmAlbumState(
+                        loading = false,
+                        title = onDevice.first().album,
+                        artist = onDevice.first().artist,
+                        coverUrl = onDevice.first().artworkUri?.toString(),
+                        tracks = onDevice,
+                    )
+                    return@launch
+                }
+            }
             val client = sources.client(sourceId)
             val page: RemoteAlbumPage? = client?.let { runCatching { withContext(Dispatchers.IO) { it.album(albumId) } }.getOrNull() }
             _state.value = if (client == null || page == null || page.songs.isEmpty()) {
