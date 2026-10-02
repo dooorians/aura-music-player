@@ -115,6 +115,7 @@ import com.ikko.aura.viewmodel.LyricsUiState
 import com.ikko.aura.viewmodel.LyricsViewModel
 import com.ikko.aura.viewmodel.PlayerUiState
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.viewmodel.keyAt
 import com.ikko.aura.viewmodel.RepeatMode
 import kotlin.math.abs
 
@@ -496,6 +497,7 @@ fun NowPlayingScreen(
             Box(Modifier.padding(horizontal = SCREEN_PADDING), contentAlignment = Alignment.Center) {
                 UpNextPanel(
                     queue = uiState.queue,
+                    queueKeys = uiState.queueKeys,
                     queueIndex = uiState.queueIndex,
                     onOpenQueue = { navController.navigate(AuraDestination.Queue.route) },
                     onJumpTo = viewModel::jumpToQueueIndex,
@@ -934,6 +936,7 @@ private fun UtilityIcon(
 @Composable
 private fun UpNextPanel(
     queue: List<Track>,
+    queueKeys: List<Long>,
     queueIndex: Int,
     onOpenQueue: () -> Unit,
     onJumpTo: (Int) -> Unit,
@@ -992,7 +995,7 @@ private fun UpNextPanel(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                itemsIndexed(upcoming, key = { _, track -> track.id }) { index, track ->
+                itemsIndexed(upcoming, key = { index, _ -> queueKeys.keyAt(queueIndex + 1 + index) }) { index, track ->
                     UpNextItem(
                         track = track,
                         onClick = { onJumpTo(queueIndex + 1 + index) },

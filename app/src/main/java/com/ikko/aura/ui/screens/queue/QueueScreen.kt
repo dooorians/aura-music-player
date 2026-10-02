@@ -47,6 +47,7 @@ import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.viewmodel.keyAt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import com.ikko.aura.ui.components.AuraButton
@@ -121,7 +122,10 @@ fun QueueScreen(
             modifier = Modifier.fillMaxWidth().listTopBlur(listState),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
-            itemsIndexed(uiState.queue, key = { _, track -> track.id }) { index, track ->
+            itemsIndexed(uiState.queue, key = { index, _ -> uiState.queueKeys.keyAt(index) }) { index, track ->
+                // The row's position as it is now: the drag below outlives the moves it makes, and its gesture block is
+                // keyed on the entry, not on where the entry was when the block was made.
+                val rowIndex by androidx.compose.runtime.rememberUpdatedState(index)
                 val isCurrent = index == uiState.queueIndex
                 val isDragged = draggedIndex == index
 
@@ -167,10 +171,10 @@ fun QueueScreen(
                                     // tap already means "play this", and a queue is a thing you
                                     // scroll, so a drag starting anywhere on it would fight the
                                     // list for every gesture.
-                                    .pointerInput(track.id) {
+                                    .pointerInput(uiState.queueKeys.keyAt(index)) {
                                         detectDragGestures(
                                             onDragStart = {
-                                                draggedIndex = index
+                                                draggedIndex = rowIndex
                                                 dragOffset = 0f
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                             },

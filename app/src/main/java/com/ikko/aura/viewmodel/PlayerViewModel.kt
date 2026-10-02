@@ -57,6 +57,8 @@ enum class RepeatMode { OFF, ALL, ONE }
 data class PlayerUiState(
     val currentTrack: Track? = null,
     val queue: List<Track> = emptyList(),
+    /** One stable key per entry of [queue], same order (see [QueueKeys]): the same song can be queued twice. */
+    val queueKeys: List<Long> = emptyList(),
     val queueIndex: Int = -1,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
@@ -101,6 +103,7 @@ class PlayerViewModel @Inject constructor(
 
     fun livePositionMs(): Long = boundPlayer?.currentPosition?.coerceAtLeast(0L) ?: _positionMs.value
 
+    private val entryKeys = QueueKeys()
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
@@ -269,6 +272,7 @@ class PlayerViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 queue = queue,
+                queueKeys = entryKeys.fresh(queue.size),
                 queueIndex = index,
                 currentTrack = queue[index],
                 isPlaying = player.isPlaying,
@@ -304,6 +308,7 @@ class PlayerViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 queue = queue,
+                queueKeys = entryKeys.fresh(queue.size),
                 queueIndex = snapshot.index,
                 currentTrack = track,
                 isPlaying = false,
@@ -356,7 +361,7 @@ class PlayerViewModel @Inject constructor(
 
     fun playQueue(tracks: List<Track>, startIndex: Int) {
         rememberStreamed(tracks)
-        _uiState.update { it.copy(queue = tracks, queueIndex = startIndex) }
+        _uiState.update { it.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = startIndex) }
         playerController.playQueue(tracks, startIndex)
     }
 
@@ -386,10 +391,13 @@ class PlayerViewModel @Inject constructor(
         playerController.playNext(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
-                state.copy(queue = tracks, queueIndex = 0)
+                state.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = 0)
             } else {
                 val at = (state.queueIndex + 1).coerceIn(0, state.queue.size)
-                state.copy(queue = state.queue.toMutableList().apply { addAll(at, tracks) })
+                state.copy(
+                    queue = state.queue.toMutableList().apply { addAll(at, tracks) },
+                    queueKeys = entryKeys.inserted(state.queueKeys, at, tracks.size),
+                )
             }
         }
     }
@@ -400,9 +408,9 @@ class PlayerViewModel @Inject constructor(
         playerController.addToQueue(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
-                state.copy(queue = tracks, queueIndex = 0)
+                state.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = 0)
             } else {
-                state.copy(queue = state.queue + tracks)
+                state.copy(queue = state.queue + tracks, queueKeys = entryKeys.appended(state.queueKeys, tracks.size))
             }
         }
     }
@@ -426,7 +434,7 @@ class PlayerViewModel @Inject constructor(
                 from > state.queueIndex && target <= state.queueIndex -> state.queueIndex + 1
                 else -> state.queueIndex
             }
-            state.copy(queue = queue, queueIndex = playing)
+            state.copy(queue = queue, queueKeys = entryKeys.moved(state.queueKeys, from, to), queueIndex = playing)
         }
     }
 
@@ -453,7 +461,7 @@ class PlayerViewModel @Inject constructor(
         playerController.clearQueueExceptCurrent()
         _uiState.update { state ->
             val current = state.queue.getOrNull(state.queueIndex) ?: return@update state
-            state.copy(queue = listOf(current), queueIndex = 0)
+            state.copy(queue = listOf(current), queueKeys = listOf(state.queueKeys.keyAt(state.queueIndex)), queueIndex = 0)
         }
     }
 
@@ -462,7 +470,7 @@ class PlayerViewModel @Inject constructor(
         _uiState.update { state ->
             val newQueue = state.queue.toMutableList().apply { if (index in indices) removeAt(index) }
             val newIndex = if (index < state.queueIndex) state.queueIndex - 1 else state.queueIndex
-            state.copy(queue = newQueue, queueIndex = newIndex)
+            state.copy(queue = newQueue, queueKeys = entryKeys.removed(state.queueKeys, index), queueIndex = newIndex)
         }
     }
 
