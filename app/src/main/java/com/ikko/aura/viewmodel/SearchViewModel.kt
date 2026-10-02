@@ -151,7 +151,7 @@ class SearchViewModel @Inject constructor(
                                     artist = artistName,
                                     album = res.moreInfo.album.ifBlank { "" },
                                     artistId = 0L,
-                                    albumId = 0L, // Handled properly in RemoteTracks? No, we just need a unique album ID if any. We can put 0L since JioSaavn is flat search
+                                    albumId = com.ikko.aura.source.jiosaavn.jioSaavnAlbumId(res.moreInfo.album_id, res.id),
                                     artworkUri = android.net.Uri.parse(thumbnail),
                                     contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(res.id).build(),
                                     durationMs = durationMillis,

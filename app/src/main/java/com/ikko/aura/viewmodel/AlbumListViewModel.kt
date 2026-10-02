@@ -51,7 +51,11 @@ class AlbumListViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST") val kept = values[5] as List<com.ikko.aura.data.model.Track>
         val albumsById = (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf(known)).associateBy { it.id }
         when (mode) {
-            "favorites" -> AlbumListUiState("Albums favoris", albums.filter { it.id in favoriteIds })
+            // As Home's row has it: a starred streamed album is a favourite like any other.
+            "favorites" -> AlbumListUiState(
+                "Albums favoris",
+                (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf((known + kept).distinctBy { it.id })).distinctBy { it.id }.filter { it.id in favoriteIds },
+            )
             "recent" -> AlbumListUiState("Écoutés récemment", recentIds.mapNotNull { albumsById[it] })
             // Same ordering Home's row uses, uncapped: least-played first. "Tout voir" on a row
             // about what you have forgotten should not reorder it into the plain album list.

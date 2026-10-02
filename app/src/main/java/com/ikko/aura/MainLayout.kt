@@ -629,7 +629,9 @@ fun MainLayout() {
 
     // Search: how far the page has receded to make room for it, 0 shut, 1 open.
     var searchOpen by rememberSaveable { mutableStateOf(false) }
-    val searchPull = remember { Animatable(0f) }
+    // Open already when the activity came back with the search open (rotation, dark mode, locale): the open flag is
+    // saved, the pull is not, and a search that is "open" at pull 0 is invisible and eats the first Back.
+    val searchPull = remember { Animatable(if (searchOpen) 1f else 0f) }
     val scope = rememberCoroutineScope()
 
     fun openSearch() {
