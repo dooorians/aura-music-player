@@ -304,11 +304,18 @@ private class SheetFlags {
 }
 
 /**
- * How much of the mini player and the tab capsule is left while the search comes in: all of it when it is shut, none
- * of it a third of the way in. Eased from the search's own pull, so they leave with it and come back with it — never cut.
+ * How much of the mini player and the tab capsule is left while the search is in: all of it when it is shut, none of it
+ * once it is half way in. Going out it follows the search's pull at once; coming back it waits for the page to be nearly
+ * itself again ([BACK_FROM], [BACK_TO]) — their glass shows what is behind it, and with the page still blurred and
+ * shrunk (and the fade not done) it was see-through for the first moments, the text of the page showing in it.
  */
-private fun searchClear(pull: Float): Float {
-    val u = (1f - pull * 2f).coerceIn(0f, 1f)
+private const val BACK_FROM = 0.22f
+private const val BACK_TO = 0.04f
+
+private fun searchClear(pull: Float, closing: Boolean): Float {
+    val out = (1f - pull * 2f).coerceIn(0f, 1f)
+    val back = ((BACK_FROM - pull) / (BACK_FROM - BACK_TO)).coerceIn(0f, 1f)
+    val u = if (closing) back else out
     return u * u * (3f - 2f * u)
 }
 
@@ -999,7 +1006,7 @@ fun MainLayout() {
                     .graphicsLayer {
                         val isTabs = currentRoute == AuraDestination.Tabs.route
                         val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
-                        alpha = searchClear(searchPull.value) * when {
+                        alpha = searchClear(searchPull.value, !searchOpen) * when {
                             !isTabs && !isNowPlaying -> 0f
                             // The route is the player's but its card has not been claimed yet: the first frames of an
                             // opening from the mini player, before the player has composed. The capsule is not part of
@@ -1109,7 +1116,7 @@ fun MainLayout() {
                             scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
                             scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
                             translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value)
+                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                         }
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(horizontal = 21.dp, vertical = 6.dp),
