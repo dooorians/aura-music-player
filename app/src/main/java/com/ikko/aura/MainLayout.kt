@@ -217,6 +217,18 @@ class SheetCard {
      */
     var passing by mutableStateOf(false)
 
+    /**
+     * The player is leaving sideways (for the lyrics, the queue, an album) and [topRoute] is where it is going. The pages
+     * kept under the player are put away for that time: with the card gone to the edge they were drawn whole, and for a
+     * tap soon after the player had opened — before the page under it had been let go — the home page showed through the
+     * player as it faded, over the background it was dissolving into.
+     */
+    var leavingSideways by mutableStateOf(false)
+        internal set
+
+    var topRoute: String? by mutableStateOf(null)
+        internal set
+
     /** Set by the player while its card is going back down to the mini player (its Closing phase). */
     var sinking by mutableStateOf(false)
         internal set
@@ -276,7 +288,7 @@ val LocalSheetCard = androidx.compose.runtime.staticCompositionLocalOf { SheetCa
 private const val CARD_COVERS_PILL_BELOW = 0.70f
 
 /** What the navigation transitions have worked out about the player, for the screen itself to read. */
-private class SheetFlags {
+private class SheetFlags(private val card: SheetCard) {
     var opening = false
     var closing = false
 
@@ -287,6 +299,10 @@ private class SheetFlags {
      * being opened from the pill, and held the card hidden at the pill — drawing the pill — until it had shown.
      */
     var away = false
+        set(value) {
+            field = value
+            card.leavingSideways = value
+        }
 
     /** The player is being opened from the pill, as opposed to coming back from a page it had left for. */
     val fromPill: Boolean get() = opening && !away
@@ -338,6 +354,8 @@ private fun UnderSheet(content: @Composable () -> Unit) {
         card.pagesComposed++
         onDispose { card.pagesComposed-- }
     }
+    // Which page this is, to tell it from the one the player is leaving for.
+    val myRoute = (androidx.lifecycle.compose.LocalLifecycleOwner.current as? androidx.navigation.NavBackStackEntry)?.destination?.route
     val cutout = remember { androidx.compose.ui.graphics.Path() }
     val revealPaint = remember { androidx.compose.ui.graphics.Paint() }
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -348,6 +366,8 @@ private fun UnderSheet(content: @Composable () -> Unit) {
         Modifier
             .fillMaxSize()
             .drawWithContent {
+                // A page under the player, while the player leaves for another one: not drawn at all.
+                if (card.leavingSideways && card.owner != null && myRoute != null && myRoute != card.topRoute) return@drawWithContent
                 val o = card.edge
                 // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
                 // drawn whole.
@@ -513,8 +533,8 @@ private data class CapsuleTrigger(
 @Composable
 fun MainLayout() {
     val navController = rememberNavController()
-    val sheetFlags = remember { SheetFlags() }
     val sheetCard = remember { SheetCard() }
+    val sheetFlags = remember { SheetFlags(sheetCard) }
     // The dissolve back to the player lasts as long as the outgoing page's own exit (its start delay and its slide).
     LaunchedEffect(sheetCard.passing) {
         if (sheetCard.passing) {
@@ -548,6 +568,7 @@ fun MainLayout() {
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    sheetCard.topRoute = currentRoute
     // Never in a menu of the player: not in its own screens (the lyrics, the queue, the equaliser), and not in a page
     // reached from it (an album, an artist) — the player is still in the back stack under those, and the mini player,
     // which is the player folded away, has no business over the screen it is open on.
