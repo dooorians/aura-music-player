@@ -37,6 +37,14 @@ class AlbumTheme(
 ) {
     fun withArt(seed: Int, art: Bitmap) = AlbumTheme(accent, accentSoft, onAccent, solid, glows, seed, art, hue)
 
+    /**
+     * Whether this theme lights the background exactly as [other] does. Every track change builds a new theme object,
+     * and the aurora is made from the cover and the seed alone: the same cover (the cache hands back the one bitmap
+     * for an album) and seed mean the same picture, whatever the object.
+     */
+    fun sameLook(other: AlbumTheme?): Boolean =
+        this === other || (other != null && sameLook(art, seed, other.art, other.seed))
+
     companion object {
         /** Before the cover has been read, and for a cover with no colour to speak of. */
         val Neutral = AlbumTheme(
@@ -223,3 +231,7 @@ private fun neutralFor(palette: Palette): AlbumTheme {
         )
     }
 }
+
+/** The comparison behind [AlbumTheme.sameLook]: one cover instance and one seed. Separate so it can be tested on any objects. */
+internal fun sameLook(artA: Any?, seedA: Int, artB: Any?, seedB: Int): Boolean =
+    artA != null && artA === artB && seedA == seedB

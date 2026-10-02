@@ -689,13 +689,14 @@ private fun PlayingBars(color: Color, animate: Boolean) {
     val clock = remember { mutableFloatStateOf(0f) }
     if (animate) {
         LaunchedEffect(Unit) {
-            var lastTime = 0L
+            // On a timer of its own, BARS_STEP_MS apart, not on the display's frame clock: a loop on every frame
+            // redrew the page at the screen's rate (90 a second here) for three bars that look the same at 25.
+            var last = android.os.SystemClock.uptimeMillis()
             while (true) {
-                withFrameMillis { time ->
-                    if (lastTime == 0L) lastTime = time
-                    clock.floatValue += (time - lastTime) / 1000f
-                    lastTime = time
-                }
+                kotlinx.coroutines.delay(BARS_STEP_MS)
+                val now = android.os.SystemClock.uptimeMillis()
+                clock.floatValue += (now - last) / 1000f
+                last = now
             }
         }
     }

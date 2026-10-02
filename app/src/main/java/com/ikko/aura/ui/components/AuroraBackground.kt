@@ -181,7 +181,7 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         val next = wanted
         var changed = false
         val step = if (now - AuroraPace.lastTouchAt < BUSY_HOLD_MS) STEP_BUSY_MS else STEP_MS
-        if (next != null && next !== theme) {
+        if (next != null && !next.sameLook(theme)) {
             // Whatever is on screen right now — a settled picture, or a change caught half way — becomes
             // the picture to fade out of, so a change that arrives during another starts from what the
             // eye is looking at rather than jumping back to the earlier one.
@@ -189,6 +189,9 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
             renderer = AuroraRenderer(next.art ?: neutralArt(next))
             theme = next
             changed = true
+        } else if (next != null) {
+            // Same picture under a new object: nothing to fade, but kept current so the next comparison is by identity.
+            theme = next
         }
         // Covered (active is false), it does nothing — except take in a new cover and finish fading to it, so
         // that what is uncovered is already the settled picture rather than a jump to it.
