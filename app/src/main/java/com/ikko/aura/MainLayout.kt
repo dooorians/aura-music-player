@@ -290,6 +290,17 @@ private class SheetFlags {
 
     /** The player is being opened from the pill, as opposed to coming back from a page it had left for. */
     val fromPill: Boolean get() = opening && !away
+
+    /**
+     * Said at the touch that opens the player, before the navigation. The transition says the same thing, but it is
+     * worked out a few frames after the route has changed, and in those frames the mini player — whose alpha follows
+     * [fromPill] — was drawn as if no player were coming: it went out, came back once the transition had spoken, and
+     * went out again under the card. One blink, on every first opening.
+     */
+    fun openingFromPill() {
+        opening = true
+        away = false
+    }
 }
 
 /** How dim the page under the player's card is, 0..1. Read in draw only. */
@@ -720,7 +731,12 @@ fun MainLayout() {
         // travel, for a picture nobody was looking through.
         // And never under the battery saver: its glass is a flat fill that samples no backdrop, so recording the whole
         // page into a layer every frame of every transition was work for a picture nobody could look through.
-        val pageBackdropNeeded = !batterySaver && (showPill || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
+        // And in the frames of an opening from the pill before the player has claimed its card: the route is already the
+        // player's (so `showPill` is false) and nothing owns the card yet, but the mini player is still on screen and is a
+        // glass that samples this recording. Not recorded there, it drew nothing — it went out for those frames, came
+        // back when the card was claimed, and went out again under the card: the blink on the first opening.
+        val playerOpening = currentRoute == AuraDestination.NowPlaying.route && sheetCard.owner == null
+        val pageBackdropNeeded = !batterySaver && (showPill || playerOpening || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
         // A layer of its own, before the recording. Without one, the page shares its picture with everything
         // drawn beside it — the mini player, the tab capsule — so each frame of their own arrival had the
         // whole page recorded again for a backdrop whose content had not changed.
@@ -1013,6 +1029,7 @@ fun MainLayout() {
                     onPrewarm = {
                         val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
                         if (!playerOnTop && sheetCard.acceptsOpen) {
+                            sheetFlags.openingFromPill()
                             navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
                         }
                     },
@@ -1030,6 +1047,7 @@ fun MainLayout() {
                         // cover's wash showed across the whole screen. Read here, at the tap, not captured.
                         val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
                         if (!playerOnTop && sheetCard.acceptsOpen) {
+                            sheetFlags.openingFromPill()
                             navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
                         }
                     },
