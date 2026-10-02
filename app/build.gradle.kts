@@ -48,6 +48,16 @@ android {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
         }
+        // QA: exactly the release build (R8, shrunk, not debuggable, same code), under its own application id so it installs
+        // beside the daily app and shares nothing with it: the id decides the app's private storage (queue, history,
+        // favourites, downloads, settings and databases), and nothing here writes outside it. Built with
+        // `./gradlew :app:assembleQa`; its name on the launcher is "Aura QA" (src/qa/res).
+        create("qa") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".qa"
+            versionNameSuffix = "-qa"
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {
