@@ -72,8 +72,15 @@ class LocalMusicRepository @Inject constructor(
 
     private var hasScanned = false
 
+    /**
+     * Tracks deleted on purpose in this session. A scan or the enrichment that was already running holds a list from
+     * before the deletion and publishes it whole: without this, a deleted track came back in the library.
+     */
+    private val forgotten: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     override fun forget(trackIds: Set<String>) {
         if (trackIds.isEmpty()) return
+        forgotten += trackIds
         _tracks.value = _tracks.value.filterNot { it.id in trackIds }
         // Deleted on purpose, so not "unavailable": nothing is left to list or re-link.
         repositoryScope.launch { catalog.forgetKeys(trackIds) }
@@ -81,21 +88,27 @@ class LocalMusicRepository @Inject constructor(
 
     override suspend fun refresh(forceRescan: Boolean) {
         if (_isScanning.value || (hasScanned && !forceRescan)) return
-        hasScanned = true
         _isScanning.value = true
         try {
             val scan = withContext(Dispatchers.IO) { keyed(queryMediaStore()) }
             val cached = withContext(Dispatchers.IO) { propertiesCache.read() }
             // Everything already measured goes in straight away, so the library is complete from its
             // first emission and only new or changed files are left for the extractor.
-            val initial = canonicaliseAlbums(scan.tracks).map { track ->
+            val initial = canonicaliseAlbums(scan.tracks).filterNot { it.id in forgotten }.map { track ->
                 cached[track.id]?.takeIf { it.stamp == scan.stamps[track.id] }
                     ?.let { track.withProperties(it.properties) }
                     ?: track
             }
             _tracks.value = initial
             _scanned.value = true
+            // Only now: a scan that failed (no permission yet, a provider error) leaves the library to be tried again.
+            hasScanned = true
             enrichAudioProperties(initial, scan.stamps, cached)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Callers launch this in a viewModelScope: letting it out takes the app down. The library stays as it was.
+            android.util.Log.w("LocalMusicRepository", "Scan failed", e)
         } finally {
             _isScanning.value = false
         }
@@ -246,21 +259,23 @@ class LocalMusicRepository @Inject constructor(
                 stamps[track.id]?.let { fresh[track.id] = AudioPropertiesCache.Entry(it, properties) }
                 val now = System.currentTimeMillis()
                 if (now - lastEmitAt >= ENRICHMENT_EMIT_INTERVAL_MS) {
-                    _tracks.value = enriched.toList()
+                    _tracks.value = enriched.filterNot { it.id in forgotten }
                     lastEmitAt = now
                 }
                 // Yield between files so thumbnail decoding for on-screen items isn't
                 // starved of IO/binder time by this background scan on low-end SoCs.
                 delay(ENRICHMENT_STEP_DELAY_MS)
             }
-            _tracks.value = enriched.toList()
+            _tracks.value = enriched.filterNot { it.id in forgotten }
         }
         if (toMeasure.isNotEmpty() || fresh.size != cached.size) propertiesCache.write(fresh)
     }
 
     /** Exactly what a fresh measurement puts on the track, whether it was just made or read back. */
     private fun Track.withProperties(properties: TrackAudioProperties) = copy(
-        format = properties.format,
+        // The probe cannot name some codecs (MP3, WAV, Vorbis, WMA, AIFF come back UNKNOWN): the format MediaStore
+        // gave the file is kept then, instead of replacing it with "unknown" — and caching that.
+        format = preferKnownFormat(properties.format, format),
         sampleRateHz = properties.sampleRateHz,
         bitDepth = properties.bitDepth,
         bitrateKbps = properties.bitrateKbps,
@@ -367,3 +382,7 @@ class LocalMusicRepository @Inject constructor(
 
 private fun String?.knownOr(fallback: String): String =
     if (this == null || isBlank() || this == MediaStore.UNKNOWN_STRING) fallback else this
+
+/** What the probe made of a file, unless it could not name the codec: then what MediaStore said it was. */
+internal fun preferKnownFormat(probed: AudioFormat, fromMediaStore: AudioFormat): AudioFormat =
+    probed.takeIf { it != AudioFormat.UNKNOWN } ?: fromMediaStore
