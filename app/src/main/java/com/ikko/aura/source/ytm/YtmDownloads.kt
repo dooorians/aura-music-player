@@ -18,7 +18,9 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 
 enum class DownloadState { QUEUED, DOWNLOADING, DONE, FAILED }
 
@@ -52,7 +54,7 @@ class YtmDownloads @Inject constructor(
                 progress = progress[row.key] ?: if (row.state == "DONE") 1f else 0f,
             )
         }
-    }
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default) // Rebuilt off the main thread, whoever is listening.
 
     val doneBytes: Flow<Long> = dao.observeAll().map { rows -> rows.filter { it.state == "DONE" }.sumOf { it.bytes } }
     val doneCount: Flow<Int> = dao.observeAll().map { rows -> rows.count { it.state == "DONE" } }
@@ -184,6 +186,12 @@ class YtmDownloads @Inject constructor(
         var contentType: String? = null
         var position = if (part.exists()) part.length() else 0L
         var total = -1L
+        val gate = DownloadProgressGate()
+        fun publish(position: Long, force: Boolean) {
+            if (total > 0 && gate.shouldPublish(System.currentTimeMillis(), force)) {
+                running.update { it + (key to (position.toFloat() / total).coerceIn(0f, 1f)) }
+            }
+        }
         RandomAccessFile(part, "rw").use { out ->
             out.seek(position)
             while (total < 0 || position < total) {
@@ -211,9 +219,10 @@ class YtmDownloads @Inject constructor(
                             if (read < 0) break
                             out.write(buffer, 0, read)
                             position += read
-                            if (total > 0) running.value = running.value + (key to (position.toFloat() / total).coerceIn(0f, 1f))
+                            publish(position, force = false)
                         }
                     }
+                    publish(position, force = true)
                     if (code == 200) break
                 } finally {
                     connection.disconnect()
