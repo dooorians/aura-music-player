@@ -140,7 +140,7 @@ private val PAGE_MARGIN = 21.dp
 private val TITLE_RELATIVE_BASELINE = 45.dp
 private val COUNT_RELATIVE_BASELINE = 67.dp
 private val HEADER_RELATIVE_HEIGHT = 88.dp
-private val HEADER_BUTTON = 47.dp
+private val HEADER_BUTTON = 40.dp
 private val STRIP_RELATIVE_TOP = 78.dp
 private val HEADER_BUTTON_GAP = 10.dp
 
@@ -401,14 +401,14 @@ private fun LibraryHeader(
                     size = HEADER_BUTTON,
                     side = -1f,
                 ) {
-                    Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(22.dp))
+                    Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(20.dp))
                 }
                 AuraGroupIcon(
                     onClick = onSmartShuffle,
                     size = HEADER_BUTTON,
                     side = 0f,
                 ) {
-                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(22.dp))
+                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(20.dp))
                 }
                 Box {
                     AuraGroupIcon(
@@ -416,7 +416,7 @@ private fun LibraryHeader(
                         size = HEADER_BUTTON,
                         side = 1f,
                     ) {
-                        Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(22.dp))
+                        Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(20.dp))
                     }
                     DropdownMenu(
                         expanded = menuExpanded,

@@ -55,6 +55,7 @@ data class YtmArtistState(
 class YtmAlbumViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val client: YtmClient,
+    private val library: YtmLibrary,
     private val favoritesStore: FavoritesStore,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -91,7 +92,17 @@ class YtmAlbumViewModel @Inject constructor(
         viewModelScope.launch {
             val album = runCatching { withContext(Dispatchers.IO) { client.album(albumId) } }.getOrNull()
             _state.value = if (album == null || album.songs.isEmpty()) {
-                YtmAlbumState(loading = false, failed = true)
+                // No answer (no network, the source off): the downloaded songs of this album are files, and the page
+                // can be drawn from them.
+                val saved = library.downloadedOfAlbum(albumId)
+                if (saved.isEmpty()) YtmAlbumState(loading = false, failed = true)
+                else YtmAlbumState(
+                    loading = false,
+                    title = saved.first().album,
+                    artist = saved.first().artist,
+                    coverUrl = saved.first().artworkUri?.toString(),
+                    tracks = saved,
+                )
             } else {
                 YtmAlbumState(
                     loading = false,

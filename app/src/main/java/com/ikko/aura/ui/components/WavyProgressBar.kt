@@ -40,18 +40,27 @@ import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.sin
 
-private val TRACK_HEIGHT = 26.dp
-private val WAVE_STROKE = 2.5.dp
-private val LINE_STROKE = 2.dp
-private val WAVE_AMPLITUDE = 5.5.dp
-private val WAVELENGTH = 20.dp
-private val THUMB_WIDTH = 3.5.dp
-private val THUMB_HEIGHT = 22.dp
-private val END_DOT_RADIUS = 2.dp
+// The wave of the reference (Cobalt), measured frame by frame: a wavelength a tenth of the bar, a thick stroke, one
+// cycle a second, and an amplitude that swells on every beat of the music.
+private val TRACK_HEIGHT = 34.dp
+private val WAVE_STROKE = 4.5.dp
+private val LINE_STROKE = 4.dp
+private val WAVE_AMPLITUDE = 4.5.dp
+private val WAVELENGTH = 40.dp
+private val THUMB_WIDTH = 4.dp
+private val THUMB_HEIGHT = 28.dp
+private val END_DOT_RADIUS = 2.5.dp
+
+/** How much taller the wave stands on a beat: the reference goes from 9 px to 13 px, a little under half again. */
+private const val BEAT_GAIN = 0.45f
+
+/** The swell on a beat: up in this long, back to rest in that long (read off the reference's 60 fps frames). */
+private const val BEAT_ATTACK_S = 0.12f
+private const val BEAT_DECAY_S = 0.22f
 
 /** The wave is stepped once every this many frames of the display. */
 private const val WAVE_FRAME_STRIDE = 2
-private const val WAVE_CYCLE_MS = 1400
+private const val WAVE_CYCLE_MS = 1000
 private const val AMPLITUDE_SETTLE_MS = 450
 
 /**
@@ -76,6 +85,8 @@ fun WavyProgressBar(
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /** Seconds since the last beat of what is being heard, or null while the tempo is not known: the wave then holds steady. */
+    sinceBeat: () -> Double? = { null },
     /**
      * How far in from its own edges the bar is drawn. Given the whole screen's width with this as its margin (in
      * the player), it is drawn where it always was while its touch area runs to the screen's edges — where the
@@ -105,6 +116,8 @@ fun WavyProgressBar(
     // the player is composed: a paused player drew nothing, but its main thread still woke ~90 times a
     // second (17% of a core, measured) to step a value nobody read.
     val phase = remember { mutableFloatStateOf(0f) }
+    // 0 at rest, 1 at the top of a beat's swell.
+    val pulse = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(waving) {
         if (!waving && amplitudeScale.value == 0f) return@LaunchedEffect
         val runForMs = if (waving) Long.MAX_VALUE else AMPLITUDE_SETTLE_MS.toLong()
@@ -125,6 +138,8 @@ fun WavyProgressBar(
                     if (frame++ % WAVE_FRAME_STRIDE == 0) {
                         phase.floatValue = (phase.floatValue + owed.toFloat() / WAVE_CYCLE_MS) % 1f
                         owed = 0L
+                        val since = if (waving) sinceBeat() else null
+                        pulse.floatValue = if (since == null) 0f else beatSwell(since.toFloat())
                     }
                 }
                 last = now
@@ -190,7 +205,7 @@ fun WavyProgressBar(
             val linePx = LINE_STROKE.toPx()
             val thumbW = THUMB_WIDTH.toPx()
             val wavelength = WAVELENGTH.toPx()
-            val amplitude = WAVE_AMPLITUDE.toPx() * amplitudeScale.value
+            val amplitude = WAVE_AMPLITUDE.toPx() * (1f + BEAT_GAIN * pulse.floatValue) * amplitudeScale.value
 
             // Half the thumb is kept clear at either end so it never hangs off the edge, and the
             // wave and the line are laid out inside what is left.
@@ -199,17 +214,25 @@ fun WavyProgressBar(
             val usable = (end - start).coerceAtLeast(1f)
             val thumbX = start + usable * playedFraction
 
-            if (thumbX > start + 0.5f) {
+            // As in the reference: what has been played is a short flat dash at first, and the wave rises out of it as the
+            // played part grows — a third of a wavelength is still flat, a wavelength and a half is the full wave. No dot,
+            // no hook at the left end: it starts on the line's own level and only ever gets taller.
+            val played = thumbX - start
+            if (played > strokePx) {
                 val path = wavePath.apply { reset() }
                 // Read only while there is a wave to move. Not reading it is what unsubscribes
                 // this draw from the animation, so a paused track stops invalidating the canvas
                 // ninety times a second to redraw the same straight line.
                 val shift = if (amplitude > 0f) phase.floatValue * wavelength else 0f
+                val grow = ((played - wavelength * 0.3f) / (wavelength * 1.2f)).coerceIn(0f, 1f)
+                val height = amplitude * grow * grow * (3f - 2f * grow)
+                // The wave's end stops a little short of the thumb, as the reference's does.
+                val tip = (thumbX - thumbW * 0.5f - strokePx * 0.25f).coerceAtLeast(start + 0.5f)
                 var x = start
-                path.moveTo(x, centerY)
-                while (x < thumbX) {
-                    val next = (x + WAVE_STEP_PX).coerceAtMost(thumbX)
-                    val y = centerY + amplitude * sin((next - start + shift) / wavelength * 2f * PI.toFloat())
+                path.moveTo(x, centerY + height * sin(shift / wavelength * 2f * PI.toFloat()))
+                while (x < tip) {
+                    val next = (x + WAVE_STEP_PX).coerceAtMost(tip)
+                    val y = centerY + height * sin((next - start + shift) / wavelength * 2f * PI.toFloat())
                     path.lineTo(next, y)
                     x = next
                 }
@@ -269,7 +292,17 @@ fun WavyProgressBar(
  */
 private const val WAVE_STEP_PX = 2f
 
-private val RemainingTrackColor = Color(0x59FFFFFF)
+private val RemainingTrackColor = Color(0x99FFFFFF)
+
+/** The swell [sinceBeat] seconds after a beat: a quick rise that eases off, then a slower, softer return to rest. */
+private fun beatSwell(sinceBeat: Float): Float = when {
+    sinceBeat < BEAT_ATTACK_S -> sin(sinceBeat / BEAT_ATTACK_S * (PI.toFloat() / 2f))
+    sinceBeat < BEAT_ATTACK_S + BEAT_DECAY_S -> {
+        val u = (sinceBeat - BEAT_ATTACK_S) / BEAT_DECAY_S
+        1f - u * u * (3f - 2f * u)
+    }
+    else -> 0f
+}
 
 private fun formatDuration(ms: Long): String {
     val totalSeconds = ms / 1000

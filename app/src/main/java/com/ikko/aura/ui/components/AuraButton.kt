@@ -85,7 +85,7 @@ fun AuraButton(
     modifier: Modifier = Modifier,
     tone: ButtonTone = ButtonTone.Neutral,
     shape: Shape = TileShape,
-    minHeight: Dp = 48.dp,
+    minHeight: Dp = 44.dp,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
@@ -107,7 +107,7 @@ fun AuraIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tone: ButtonTone = ButtonTone.Neutral,
-    size: Dp = 46.dp,
+    size: Dp = 44.dp,
     light: Float? = null,
     content: @Composable () -> Unit,
 ) {
@@ -173,7 +173,7 @@ fun AuraIconGroup(
 fun AuraGroupIcon(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 46.dp,
+    size: Dp = 44.dp,
     side: Float = 0f, // -1f = left, 0f = center, +1f = right
     content: @Composable () -> Unit,
 ) {

@@ -34,6 +34,7 @@ import kotlinx.coroutines.withContext
 class RemoteAlbumViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sources: RemoteSources,
+    private val library: com.ikko.aura.source.ytm.YtmLibrary,
     private val favoritesStore: FavoritesStore,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -70,7 +71,16 @@ class RemoteAlbumViewModel @Inject constructor(
             val client = sources.client(sourceId)
             val page: RemoteAlbumPage? = client?.let { runCatching { withContext(Dispatchers.IO) { it.album(albumId) } }.getOrNull() }
             _state.value = if (client == null || page == null || page.songs.isEmpty()) {
-                YtmAlbumState(loading = false, failed = true)
+                // No answer: the downloaded songs of this album are files, and the page can be drawn from them.
+                val saved = library.downloadedOfAlbum("$sourceId:$albumId")
+                if (saved.isEmpty()) YtmAlbumState(loading = false, failed = true)
+                else YtmAlbumState(
+                    loading = false,
+                    title = saved.first().album,
+                    artist = saved.first().artist,
+                    coverUrl = saved.first().artworkUri?.toString(),
+                    tracks = saved,
+                )
             } else {
                 val tracks = page.songs.map { song ->
                     // Every song carries its album, whatever the listing said.

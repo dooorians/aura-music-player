@@ -156,7 +156,13 @@ class LocalMusicRepository @Inject constructor(
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DISPLAY_NAME,
         )
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        // Not only what the scanner flagged as music: a file it left unflagged (a mix, a set, a flac
+        // with no tags) is still audio, and those flags are NULL rather than 0 when unknown. Ringtones, notifications and
+        // alarms stay out.
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%') AND " +
+            "COALESCE(${MediaStore.Audio.Media.IS_RINGTONE}, 0) = 0 AND " +
+            "COALESCE(${MediaStore.Audio.Media.IS_NOTIFICATION}, 0) = 0 AND " +
+            "COALESCE(${MediaStore.Audio.Media.IS_ALARM}, 0) = 0"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         val results = mutableListOf<Track>()
@@ -185,7 +191,9 @@ class LocalMusicRepository @Inject constructor(
 
                 val track = Track(
                     id = id.toString(),
-                    title = cursor.getString(titleCol) ?: "Titre inconnu",
+                    title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
+                        ?: cursor.getString(nameCol)?.substringBeforeLast('.')
+                        ?: "Titre inconnu",
                     // MediaStore does not return null for a missing tag: it returns the literal "<unknown>".
                     artist = cursor.getString(artistCol).knownOr("Artiste inconnu"),
                     album = cursor.getString(albumCol).knownOr("Album inconnu"),

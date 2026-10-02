@@ -87,6 +87,17 @@ class YtmLibrary @Inject constructor(
             albumsOf(known.filter { it.id in doneKeys })
         }
 
+    /**
+     * What an album page can show without a network: the downloaded songs of the album [albumRef] (a playlist id, or
+     * `<source>:<albumId>`), in album order. Files, so they are there whatever the source or the connection says.
+     */
+    suspend fun downloadedOfAlbum(albumRef: String): List<Track> {
+        val done = downloads.observeDoneKeys().first().toHashSet()
+        return observeKnown().first()
+            .filter { it.id in done && it.remoteAlbumId == albumRef }
+            .sortedBy { it.trackNumber }
+    }
+
     fun observeKeptIds(): Flow<Set<String>> = observeKept().map { list -> list.mapTo(HashSet()) { it.id } }
 
     suspend fun prune(now: Long = System.currentTimeMillis()) {

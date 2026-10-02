@@ -353,6 +353,6 @@ class SearchViewModel @Inject constructor(
 
     private companion object {
         const val FILTER_DEBOUNCE_MS = 120L
-        const val YTM_DEBOUNCE_MS = 700L
+        const val YTM_DEBOUNCE_MS = 300L
     }
 }

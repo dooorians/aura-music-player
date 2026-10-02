@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.album
 
+import com.ikko.aura.ui.components.listTopBlur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,9 +53,11 @@ fun AlbumListScreen(
                 )
             }
         } else {
+            val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().weight(1f),
+                modifier = Modifier.fillMaxSize().weight(1f).listTopBlur(gridState),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

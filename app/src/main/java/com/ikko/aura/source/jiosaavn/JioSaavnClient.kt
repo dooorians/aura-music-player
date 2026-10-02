@@ -24,6 +24,9 @@ class JioSaavnClient @Inject constructor() {
 
     private val baseUrl = String(Base64.decode("aHR0cHM6Ly93d3cuamlvc2Fhdm4uY29tL2FwaS5waHA=", Base64.DEFAULT), Charsets.UTF_8)
 
+    /** Opens the connection (lookup, handshake) ahead of the first real search. */
+    suspend fun warmUp() { searchSongs("music") }
+
     suspend fun searchSongs(query: String): List<RawSongItem> = withContext(Dispatchers.IO) {
         runCatching {
             val urlString = "$baseUrl?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&p=1&n=10&q=${java.net.URLEncoder.encode(query, "UTF-8")}"

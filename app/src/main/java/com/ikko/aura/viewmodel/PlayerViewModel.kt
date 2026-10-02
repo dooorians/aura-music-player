@@ -96,6 +96,9 @@ class PlayerViewModel @Inject constructor(
      * observe. The lyrics ask it on every frame to choose the line and to sweep a word, so a line changes when it is
      * sung and not up to half a second after.
      */
+    /** How long ago the last beat of the music being heard was; null until its tempo has been found. */
+    fun sinceBeat(): Double? = com.ikko.aura.player.beat.BeatGrids.sinceBeat()
+
     fun livePositionMs(): Long = boundPlayer?.currentPosition?.coerceAtLeast(0L) ?: _positionMs.value
 
     private val _uiState = MutableStateFlow(PlayerUiState())

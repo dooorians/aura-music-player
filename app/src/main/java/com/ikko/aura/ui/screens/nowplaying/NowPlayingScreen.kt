@@ -463,6 +463,7 @@ fun NowPlayingScreen(
                 durationMs = { durationMs },
                 isPlaying = uiState.isPlaying,
                 onSeek = viewModel::seekTo,
+                sinceBeat = viewModel::sinceBeat,
                 // The full width of the screen, drawn inset by the page's margin: its touch area reaches the edges
                 // and is kept out of Android's back gesture — grabbing the bar from the side went back instead.
                 edgeInset = SCREEN_PADDING,

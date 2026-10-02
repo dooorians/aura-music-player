@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.equalizer
 
+import com.ikko.aura.ui.components.listTopBlur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,8 +65,10 @@ fun EqualizerScreen(
             return@GradientScreenScaffold
         }
 
+        val eqListState = androidx.compose.foundation.lazy.rememberLazyListState()
         LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            state = eqListState,
+            modifier = Modifier.fillMaxWidth().weight(1f).listTopBlur(eqListState),
             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {

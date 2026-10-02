@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.search
 
+import com.ikko.aura.ui.components.listTopBlur
 import com.ikko.aura.ui.theme.AuraMotion
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -387,8 +388,10 @@ fun SearchPanel(
                             }
                         }
                         }
+                        val resultsState = androidx.compose.foundation.lazy.rememberLazyListState()
                         LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
+                            state = resultsState,
+                            modifier = Modifier.fillMaxWidth().listTopBlur(resultsState),
                             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                         ) {
                             localBlock()

@@ -126,6 +126,8 @@ dependencies {
     implementation(libs.media3.common)
     implementation(libs.media3.datasource)
     implementation(libs.media3.extractor)
+    // FFmpeg audio decoders for what the phone's own codecs do not play (AC3, DTS, ALAC, WMA, APE…), used as a fallback.
+    implementation(libs.nextlib.media3ext)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 
     implementation(libs.kotlinx.coroutines.android)

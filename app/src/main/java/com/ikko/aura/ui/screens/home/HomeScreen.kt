@@ -155,8 +155,8 @@ private fun SectionTitle(title: String, modifier: Modifier = Modifier, onSeeAll:
         )
         if (onSeeAll != null) {
             Spacer(Modifier.size(8.dp))
-            AuraIconButton(onClick = onSeeAll, size = 38.dp, light = 12f) {
-                Icon(CupertinoIcons.ChevronRight, contentDescription = "Tout voir", modifier = Modifier.size(15.dp))
+            AuraIconButton(onClick = onSeeAll, size = 32.dp, light = 12f) {
+                Icon(CupertinoIcons.ChevronRight, contentDescription = "Tout voir", modifier = Modifier.size(14.dp))
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.queue
 
+import com.ikko.aura.ui.components.listTopBlur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -117,7 +118,7 @@ fun QueueScreen(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().listTopBlur(listState),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             itemsIndexed(uiState.queue, key = { _, track -> track.id }) { index, track ->

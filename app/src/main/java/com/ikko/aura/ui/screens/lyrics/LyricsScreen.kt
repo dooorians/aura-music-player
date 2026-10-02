@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.lyrics
 
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -113,14 +114,9 @@ fun LyricsScreen(
     LaunchedEffect(currentTrack?.id) { lyricsViewModel.loadFor(currentTrack) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Composed and drawn only once the page has settled, and faded in. Built while it was still sliding, the
-        // list was most of what the GPU had to do in a transition already made of two full screens.
-        val contentAlpha by animateFloatAsState(
-            targetValue = if (isTransitioning) 0f else 1f,
-            animationSpec = tween(durationMillis = if (isTransitioning) 120 else 260),
-            label = "lyricsContent",
-        )
-        if (!isTransitioning || contentAlpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha }) {
+        // Composed from the first frame, with the page: held back until the slide was over it left only the buttons on
+        // the bare cover for a quarter of a second between the player fading out and the lines arriving.
+        Box(Modifier.fillMaxSize()) {
             when (val state = lyricsState) {
                 is LyricsUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color.White)
@@ -145,22 +141,6 @@ fun LyricsScreen(
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            AuraIconButton(onClick = { navController.popBackStack() }, size = 42.dp) {
-                Icon(CupertinoIcons.ChevronLeft, contentDescription = "Retour", modifier = Modifier.size(20.dp), tint = Color.White)
-            }
-            Spacer(Modifier.weight(1f))
-            AuraIconButton(onClick = { lyricsViewModel.refetch(currentTrack) }, size = 42.dp) {
-                Icon(CupertinoIcons.Refresh, contentDescription = "Rechercher les paroles à nouveau", modifier = Modifier.size(18.dp), tint = Color.White)
-            }
-        }
     }
 }
 
@@ -220,9 +200,10 @@ private fun LyricsPanel(
     )
     val inactiveStyle = activeStyle.copy(fontWeight = FontWeight.SemiBold)
 
+    val statusBarTop = with(androidx.compose.ui.platform.LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().scrollTopBlur(topInset = statusBarTop) { 1_000_000f },
         // Room above and below the first and last lines to reach the resting place, so the sung line is where the eye
         // expects it from the first line to the last.
         contentPadding = PaddingValues(

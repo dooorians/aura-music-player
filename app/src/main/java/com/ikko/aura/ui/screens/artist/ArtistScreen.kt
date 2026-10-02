@@ -1,5 +1,9 @@
 package com.ikko.aura.ui.screens.artist
 
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.WindowInsets
+import com.ikko.aura.ui.components.topScrollPx
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,12 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,16 +72,17 @@ fun ArtistPageContent(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
 ) {
+    val statusBarTop = with(androidx.compose.ui.platform.LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    GradientScreenScaffold {
+    GradientScreenScaffold(
+        applyStatusBarInset = false,
+        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { listState.topScrollPx() },
+    ) {
       MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-       androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-        // The aurora shows at the top of the page; below, the page is AMOLED black.
-        ArtistGround(listState)
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
+            contentPadding = PaddingValues(top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
@@ -178,7 +177,6 @@ fun ArtistPageContent(
                 )
             }
         }
-       }
       }
     }
 }
@@ -201,42 +199,4 @@ private fun ArtistAlbumCard(album: Album, navController: NavHostController) {
             modifier = Modifier.padding(top = 8.dp),
         )
     }
-}
-
-/** Where the aurora is fully clear, and where the black is fully there, from the top of the page. */
-private const val GROUND_CLEAR_DP = 170
-private const val GROUND_SOLID_DP = 360
-
-/**
- * What turns the app's background into an artist page: the aurora shows through at the top, and a gradient over it
- * gives way to AMOLED black below. It rides up with the header as the list scrolls — the aurora is a surface behind the
- * window and cannot move, so this is what slides over it — and once the header is gone the page is black throughout.
- */
-@Composable
-private fun ArtistGround(listState: androidx.compose.foundation.lazy.LazyListState) {
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                translationY = -(if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else GROUND_SOLID_DP.dp.toPx())
-                    .coerceAtMost(GROUND_SOLID_DP.dp.toPx())
-            }
-            .drawBehind {
-                val fadeStart = GROUND_CLEAR_DP.dp.toPx()
-                val fadeEnd = GROUND_SOLID_DP.dp.toPx()
-                drawRect(
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0f),
-                        0.42f to Color.Black.copy(alpha = 0.38f),
-                        0.78f to Color.Black.copy(alpha = 0.86f),
-                        1f to Color.Black,
-                        startY = fadeStart,
-                        endY = fadeEnd,
-                    ),
-                    topLeft = Offset(0f, fadeStart),
-                    size = Size(size.width, fadeEnd - fadeStart),
-                )
-                drawRect(Color.Black, topLeft = Offset(0f, fadeEnd), size = Size(size.width, size.height * 3f))
-            },
-    )
 }

@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.playlist
 
+import com.ikko.aura.ui.components.listTopBlur
 import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID
 import androidx.compose.foundation.clickable
@@ -180,8 +181,10 @@ fun PlaylistScreen(
 
                 Spacer(Modifier.height(16.dp))
 
+                val plListState = androidx.compose.foundation.lazy.rememberLazyListState()
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    state = plListState,
+                    modifier = Modifier.fillMaxSize().listTopBlur(plListState),
                     contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                 ) {
                     itemsIndexed(current.tracks, key = { _, track -> track.id }) { index, track ->

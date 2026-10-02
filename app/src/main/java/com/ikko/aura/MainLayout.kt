@@ -209,6 +209,14 @@ class SheetCard {
     var pagesComposed by androidx.compose.runtime.mutableIntStateOf(0)
         internal set
 
+    /**
+     * True while the player is coming back from one of its own pages (the lyrics, the queue, an album) by a dissolve.
+     * The page under the card is cut out wherever the card is, and a returning player claims the card at the very top
+     * in its first frame: the page it was dissolving into vanished at once, and for the frames the player took to
+     * fade in there was nothing on screen but the cover's wash — the blink on the way back.
+     */
+    var passing by mutableStateOf(false)
+
     /** Set by the player while its card is going back down to the mini player (its Closing phase). */
     var sinking by mutableStateOf(false)
         internal set
@@ -253,7 +261,9 @@ class SheetCard {
 
     /** Progress of opening the player sheet: 0f at mini player or closed, 1f at fullscreen. */
     val openProgress: Float
-        get() = if (owner == null || !ready) 0f else (1f - (edge / AuraMotion.SHEET_PILL_TOP_FRACTION)).coerceIn(0f, 1f)
+        // Not while the player is dissolving back over one of its own pages: that page is not under a card, it is
+        // being faded into, and shrinking it and darkening it with the card's rise was the dark step of the blink.
+        get() = if (owner == null || !ready || passing) 0f else (1f - (edge / AuraMotion.SHEET_PILL_TOP_FRACTION)).coerceIn(0f, 1f)
 
     /** How dark the page under the card is: none of it when the card is at the mini player, all of it when the card is up. */
     val dim: Float
@@ -314,7 +324,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                 val o = card.edge
                 // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
                 // drawn whole.
-                if (card.owner == null || !card.ready || o >= 1f || card.cardAlpha <= 0f) {
+                if (card.passing || card.owner == null || !card.ready || o >= 1f || card.cardAlpha <= 0f) {
                     drawContent()
                     return@drawWithContent
                 }
@@ -434,25 +444,37 @@ private fun popExit() =
 private fun isLyrics(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.Lyrics.route
 private fun isLyricsOrAlbum(entry: NavBackStackEntry): Boolean {
     val route = entry.destination.route ?: return false
-    return route == AuraDestination.Lyrics.route || route.startsWith("album/")
+    return route == AuraDestination.Lyrics.route || route == AuraDestination.Queue.route || route.startsWith("album/")
 }
 
-private fun throughEnter(fromLeft: Boolean) =
-    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { if (fromLeft) -it / 4 else it / 4 } +
-        fadeIn(tween(AuraMotion.PUSH_MS - THROUGH_DELAY_MS, delayMillis = THROUGH_DELAY_MS))
+// The incoming page's first frame is the heavy one (it is composed there), and the transition's clock runs through it:
+// an outgoing fade that began with it was already over when it ended — the screen went blank in a single frame and the
+// new one then took twelve to arrive (measured: edge energy 12 -> 2 -> 11). So the incoming page fades in from the
+// start, over the outgoing one, which holds until the new one is mostly there and only then clears.
+// A dissolve, not a hand-over: the outgoing screen clears while the incoming one is already arriving, so
+// at no frame is there only the background. Both fades are linear and their alphas add up to about one
+// across the overlap; with a gap between them (out in 90 ms, in after a slow-starting ease) the screen
+// showed the bare cover for several frames in the middle — the blink between the player's menus.
+// Between the player and one of its pages the two screens trade places in one gesture, the same both ways: the outgoing one
+// slides a quarter of the width away and clears while the incoming one slides in from the other side and arrives, over
+// the same short window — so going and coming back are mirror images. [startMs] is how long both wait before moving: the
+// incoming screen's first frame is the heavy one, and moving anything during it only drops it.
+// The outgoing screen clears a little ahead of the incoming one arriving, so the two overlap for a few frames (a
+// dissolve) and never leave the bare background between them, and never print two screens' text over each other for long.
+private fun throughEnter(fromLeft: Boolean, startMs: Int = AuraMotion.PUSH_START_DELAY_MS) =
+    slideInHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = startMs, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) { if (fromLeft) -it / 4 else it / 4 } +
+        fadeIn(tween(THROUGH_IN_MS, delayMillis = startMs + THROUGH_IN_LAG_MS, easing = LinearEasing))
 
-private fun throughExit(toLeft: Boolean) =
-    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { if (toLeft) -it / 4 else it / 4 } +
-        fadeOut(tween(THROUGH_OUT_MS))
+private fun throughExit(toLeft: Boolean, startMs: Int = AuraMotion.PUSH_START_DELAY_MS) =
+    slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = startMs, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { if (toLeft) -it / 4 else it / 4 } +
+        fadeOut(tween(THROUGH_OUT_MS, delayMillis = startMs, easing = LinearEasing))
 
-private const val THROUGH_OUT_MS = 90
+private const val THROUGH_OUT_MS = 120
+private const val THROUGH_IN_MS = 150
+private const val THROUGH_IN_LAG_MS = 30
 
 /** The player's cover wash fading into the lyrics' aurora and back. */
 private const val LYRICS_WASH_FADE_MS = 300
-
-/** How long the background takes to go from black to the aurora, and back, between two pages. */
-private const val GROUND_FADE_MS = 260
-private const val THROUGH_DELAY_MS = 50
 
 private data class CapsuleTrigger(
     val wanted: Boolean,
@@ -466,6 +488,13 @@ fun MainLayout() {
     val navController = rememberNavController()
     val sheetFlags = remember { SheetFlags() }
     val sheetCard = remember { SheetCard() }
+    // The dissolve back to the player lasts as long as the outgoing page's own exit (its start delay and its slide).
+    LaunchedEffect(sheetCard.passing) {
+        if (sheetCard.passing) {
+            kotlinx.coroutines.delay((AuraMotion.POP_START_DELAY_MS + AuraMotion.PUSH_MS + 60).toLong())
+            sheetCard.passing = false
+        }
+    }
     val cardOverPill by remember { derivedStateOf { sheetCard.coversPill } }
     // Every weight of the typeface is built once, off the first frame that would otherwise build it: a
     // variable font makes one instance per weight, and the player's first frame was where several of them
@@ -492,7 +521,12 @@ fun MainLayout() {
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showPill = currentRoute !in AuraDestination.fullScreenRoutes
+    // Never in a menu of the player: not in its own screens (the lyrics, the queue, the equaliser), and not in a page
+    // reached from it (an album, an artist) — the player is still in the back stack under those, and the mini player,
+    // which is the player folded away, has no business over the screen it is open on.
+    val backStack by navController.currentBackStack.collectAsStateWithLifecycle()
+    val playerBelow = backStack.any { it.destination.route == AuraDestination.NowPlaying.route }
+    val showPill = currentRoute !in AuraDestination.fullScreenRoutes && !playerBelow
     // `showPill` above flips the instant the route changes — a frame or more before the card has
     // even claimed `sheetCard.owner`, let alone risen. Anything downstream that keys off `showPill`
     // alone (the room reserved for the pill, and so the capsule's position above it) jumped on that
@@ -598,69 +632,15 @@ fun MainLayout() {
                 }
             },
         ) {
-        // The background. Three looks, by where you are:
-        //  - the player and everything inside it (lyrics, queue, equaliser): the aurora, moving, in the playing
-        //    cover's colours;
-        //  - an album or an artist: the aurora at the top of the page, still, which the page's own ground fades
-        //    into its colour lower down;
-        //  - everywhere else: AMOLED black.
-        // The aurora is a surface of its own behind the window and costs the interface nothing; black is a plain
-        // rectangle drawn over it, faded in and out between the looks. The battery saver is not part of this: it is
-        // for the glass alone.
-        val onPlayerPage = currentRoute != null && currentRoute in AuraDestination.fullScreenRoutes
-        val onAlbumPage = currentRoute?.let { it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/") } == true
-        val onArtistPage = currentRoute?.let { it.startsWith("artist/") || it.startsWith("ytm_artist/") || it.startsWith("remote_artist/") } == true
-        // What the player's card rose from. While the card is on its way the page under it keeps its own ground;
-        // only the card shows the aurora.
-        var underCardRoute by remember { mutableStateOf<String?>(null) }
-        if (currentRoute != null && currentRoute != AuraDestination.NowPlaying.route && currentRoute !in AuraDestination.fullScreenRoutes) {
-            underCardRoute = currentRoute
-        }
-        val groundRoute = if (currentRoute == AuraDestination.NowPlaying.route) underCardRoute else currentRoute
-        val groundIsAurora = groundRoute != null && (
-            groundRoute in AuraDestination.fullScreenRoutes ||
-                groundRoute.startsWith("album/") || groundRoute.startsWith("ytm_album/") || groundRoute.startsWith("remote_album/") ||
-                groundRoute.startsWith("artist/") || groundRoute.startsWith("ytm_artist/") || groundRoute.startsWith("remote_artist/")
-            )
-        val cardUp = sheetCard.owner != null
         // Outside the page's recorded layer: the background is its own surface, not something the
-        // mini player has to re-process when it changes.
+        // mini player has to re-process when it changes. The pill loses nothing it could show — what
+        // it refracts is the page, and the background under it is smooth colour.
         AuroraBackground(
-            theme = if (onPlayerPage || cardUp) backdrop.theme else (pageTheme.value ?: backdrop.theme),
-            active = onPlayerPage || cardUp || onAlbumPage || onArtistPage,
-            animate = onPlayerPage || cardUp,
+            theme = pageTheme.value ?: backdrop.theme,
+            // Not while the player or any of its screens (lyrics, queue, equalizer) covers it: they all share the
+            // player's own background, the blurred cover.
+            active = currentRoute !in AuraDestination.fullScreenRoutes,
             modifier = Modifier.fillMaxSize(),
-        )
-        val blackness by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (groundIsAurora) 0f else 1f,
-            animationSpec = tween(GROUND_FADE_MS, easing = LinearEasing),
-            label = "amoled-ground",
-        )
-        val groundHole = remember { androidx.compose.ui.graphics.Path() }
-        Box(
-            Modifier.fillMaxSize().drawWithContent {
-                val black = blackness
-                val edge = sheetCard.cardTop
-                // The card shows the aurora through a hole in the black, in its own shape, for as long as it exists
-                // and has something to show; as it clears on its way down the hole fills back in with it.
-                val holeOpen = sheetCard.owner != null && sheetCard.ready && edge > 0f
-                if (sheetCard.owner != null && sheetCard.ready && edge <= 0f) {
-                    // Up and covering everything: nothing to cover.
-                    return@drawWithContent
-                }
-                if (!holeOpen) {
-                    if (black > 0f) drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = black))
-                    return@drawWithContent
-                }
-                setToCard(groundHole, edge, size, AuraMotion.cornerAt(edge).toPx())
-                if (black > 0f) clipPath(groundHole, androidx.compose.ui.graphics.ClipOp.Difference) {
-                    drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = black))
-                }
-                val filling = black * (1f - sheetCard.cardAlpha)
-                if (filling > 0f) clipPath(groundHole) {
-                    drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = filling))
-                }
-            },
         )
         // Clipped to the card while it travels: the cover's wash is the player's own background, so above the
         // card's top edge the page keeps the plain one it always has. Drawn full-screen through the whole
@@ -670,22 +650,27 @@ fun MainLayout() {
         // Between the player and its lyrics the cover's wash cross-fades with the aurora the lyrics sit on, both
         // ways, rather than cutting: it came on at once going back to the player and was dropped outright once the
         // player had left for the lyrics. Only there — opening and closing the player keep their own timing.
-        val fadingRoute = currentRoute == AuraDestination.Lyrics.route || currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true
+        val onPlayerScreen = currentRoute in AuraDestination.fullScreenRoutes
+        // The route before this one, for the way back from the lyrics or the queue: there the cover's wash is already on
+        // screen and must stay, whole, under the dissolve. Treated as the opening of the player (1% until the card is
+        // claimed, then clipped to the card), it dropped out for the length of the player's first frames and the
+        // background fell dark — the big blink on the way back — before rising again.
+        val routeTrail = remember { object { var last: String? = null; var before: String? = null } }
+        if (currentRoute != routeTrail.last) { routeTrail.before = routeTrail.last; routeTrail.last = currentRoute }
+        val fadingRoute = currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true
         val washFade by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (fadingRoute) 0f else 1f,
             animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
             label = "lyrics-wash-fade",
         )
-        // The cover's wash is what the live glass refracts, and nothing else: with the glass flat (battery saver) it is
-        // not drawn at all, and the aurora is the player's background.
-        if (!batterySaver) AlbumArtBackground(
+        AlbumArtBackground(
             artworkUri = backdrop.artworkUri,
             artworkKey = backdrop.artworkKey,
             fallbackColors = backdrop.meshColors,
             // For as long as the card exists, not only while the route says "player": closing pops the route
             // at the start of the gesture, before the card has moved, and the cover went (and the aurora came
             // back behind the glass) while the card was still full screen — the flash on closing.
-            forceArtwork = currentRoute == AuraDestination.NowPlaying.route || sheetCard.owner != null,
+            forceArtwork = onPlayerScreen || sheetCard.owner != null,
             // Recorded around the settled backdrop only, not around the whole thing: the cover on
             // its way out is drawn above this and deliberately outside the record. See the
             // parameter's own note for what that buys.
@@ -702,16 +687,26 @@ fun MainLayout() {
                 // across the whole screen at full strength — the cover's blur flashing over the aurora on opening.
                 .graphicsLayer {
                     val playerNotYetThere = sheetCard.owner == null && currentRoute == AuraDestination.NowPlaying.route
-                    alpha = (if (sheetCard.waitingToShow || playerNotYetThere) 0.01f else sheetCard.cardAlpha) * washFade
+                    // The player's other screens sit on the same cover whole, with or without the card.
+                    val comingBack = currentRoute == AuraDestination.NowPlaying.route &&
+                        routeTrail.before in AuraDestination.fullScreenRoutes &&
+                        routeTrail.before != AuraDestination.NowPlaying.route &&
+                        (sheetCard.passing || sheetCard.owner == null)
+                    val onOwnScreen = (onPlayerScreen && currentRoute != AuraDestination.NowPlaying.route) || comingBack
+                    alpha = if (onOwnScreen) washFade else (if (sheetCard.waitingToShow || playerNotYetThere) 0.01f else sheetCard.cardAlpha) * washFade
                 }
                 .drawWithContent {
                     // No card and not the player: the cover has nothing to fill. Its own fade-out would
                     // otherwise run across the whole screen, over the page, once the card has gone. Except on
                     // the way to the lyrics, until it has faded out there.
                     val isFadingRoute = fadingRoute && washFade > 0f
-                    if (sheetCard.owner == null && currentRoute != AuraDestination.NowPlaying.route && !isFadingRoute) return@drawWithContent
+                    if (sheetCard.owner == null && !onPlayerScreen && !isFadingRoute) return@drawWithContent
                     val edge = sheetCard.cardTop
-                    if (edge <= 0f) {
+                    val comingBack = currentRoute == AuraDestination.NowPlaying.route &&
+                        routeTrail.before in AuraDestination.fullScreenRoutes &&
+                        routeTrail.before != AuraDestination.NowPlaying.route &&
+                        (sheetCard.passing || sheetCard.owner == null)
+                    if (edge <= 0f || comingBack || (onPlayerScreen && currentRoute != AuraDestination.NowPlaying.route)) {
                         drawContent()
                         return@drawWithContent
                     }
@@ -776,7 +771,7 @@ fun MainLayout() {
                     if (isSheet(initialState)) { sheetFlags.closing = false; sheetFlags.away = true }
                     when {
                         isSheet(targetState) -> AuraMotion.sheetUnderExit
-                        isLyricsOrAlbum(targetState) && isSheet(initialState) -> throughExit(toLeft = true)
+                        isLyricsOrAlbum(targetState) && isSheet(initialState) -> throughExit(toLeft = true, startMs = AuraMotion.PUSH_START_DELAY_MS)
                         isSheet(initialState) -> fadeOut(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS))
                         else -> pushExit()
                     }
@@ -785,7 +780,7 @@ fun MainLayout() {
                     if (isSheet(targetState)) { sheetFlags.opening = false; sheetFlags.away = false }
                     when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
-                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughEnter(fromLeft = true)
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> { sheetCard.passing = true; throughEnter(fromLeft = true, startMs = AuraMotion.POP_START_DELAY_MS) }
                         isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
@@ -794,7 +789,7 @@ fun MainLayout() {
                     if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
                     when {
                         isSheet(initialState) -> AuraMotion.sheetExit
-                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughExit(toLeft = false)
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughExit(toLeft = false, startMs = AuraMotion.POP_START_DELAY_MS)
                         else -> popExit()
                     }
                 },

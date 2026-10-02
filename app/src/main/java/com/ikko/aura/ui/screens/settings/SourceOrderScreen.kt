@@ -1,5 +1,8 @@
 package com.ikko.aura.ui.screens.settings
 
+import androidx.compose.foundation.layout.statusBars
+import com.ikko.aura.ui.components.topScrollPx
+import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -54,11 +57,15 @@ fun SourceOrderScreen(viewModel: SourceOrderViewModel = hiltViewModel()) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    GradientScreenScaffold {
+    val statusBarTop = with(androidx.compose.ui.platform.LocalDensity.current) { androidx.compose.foundation.layout.WindowInsets.statusBars.getTop(this).toDp() }
+    GradientScreenScaffold(
+        applyStatusBarInset = false,
+        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { listState.topScrollPx() },
+    ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp)) {

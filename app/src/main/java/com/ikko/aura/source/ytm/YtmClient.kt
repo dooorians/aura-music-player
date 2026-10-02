@@ -74,30 +74,56 @@ class YtmClient @Inject constructor(
         initialised = true
     }
 
+    /** A recent answer kept for a few minutes: typing the same thing again, or coming back to a page, costs nothing. */
+    private class Memo<V> {
+        private class Entry<V>(val at: Long, val value: V)
+        private val map = object : java.util.LinkedHashMap<String, Entry<V>>(32, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry<V>>) = size > MEMO_SIZE
+        }
+        @Synchronized fun get(key: String): V? =
+            map[key]?.takeIf { System.currentTimeMillis() - it.at < MEMO_TTL_MS }?.value
+        @Synchronized fun put(key: String, value: V): V { map[key] = Entry(System.currentTimeMillis(), value); return value }
+    }
+
+    private val songMemo = Memo<YtmPage>()
+    private val albumMemo = Memo<List<YtmAlbumRef>>()
+    private val artistMemo = Memo<List<YtmArtistRef>>()
+    private val albumPageMemo = Memo<YtmAlbum>()
+
+    /** Initialises the extractor and opens the connection, so the first real search does not pay for either. */
+    fun warmUp() {
+        if (!isEnabled()) return
+        ensureInit()
+        search("music")
+    }
+
     fun searchAlbums(query: String): List<YtmAlbumRef> {
         check(isEnabled()) { "YouTube Music is off" }
+        albumMemo.get(query.lowercase())?.let { return it }
         ensureInit()
         val extractor = ServiceList.YouTube.getSearchExtractor(query, listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ALBUMS), "")
         extractor.fetchPage()
-        return extractor.initialPage.items.filterIsInstance<PlaylistInfoItem>().mapNotNull { item ->
+        return albumMemo.put(query.lowercase(), extractor.initialPage.items.filterIsInstance<PlaylistInfoItem>().mapNotNull { item ->
             val id = PLAYLIST_ID.find(item.url)?.groupValues?.get(1) ?: return@mapNotNull null
             YtmAlbumRef(id, item.name.removePrefix("Album – ").removePrefix("Album - "), item.uploaderName.orEmpty(), YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url))
-        }
+        })
     }
 
     fun searchArtists(query: String): List<YtmArtistRef> {
         check(isEnabled()) { "YouTube Music is off" }
+        artistMemo.get(query.lowercase())?.let { return it }
         ensureInit()
         val extractor = ServiceList.YouTube.getSearchExtractor(query, listOf(YoutubeSearchQueryHandlerFactory.MUSIC_ARTISTS), "")
         extractor.fetchPage()
-        return extractor.initialPage.items.filterIsInstance<ChannelInfoItem>().map { item ->
+        return artistMemo.put(query.lowercase(), extractor.initialPage.items.filterIsInstance<ChannelInfoItem>().map { item ->
             YtmArtistRef(item.name.removeSuffix(" - Topic"), YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url))
-        }
+        })
     }
 
     /** An album's songs. Albums are short, so its first pages are all there is. */
     fun album(albumId: String): YtmAlbum {
         check(isEnabled()) { "YouTube Music is off" }
+        albumPageMemo.get(albumId)?.let { return it }
         ensureInit()
         val extractor = ServiceList.YouTube.getPlaylistExtractor("https://music.youtube.com/playlist?list=$albumId")
         extractor.fetchPage()
@@ -120,7 +146,7 @@ class YtmClient @Inject constructor(
             val id = videoIdOf(item.url) ?: return@mapNotNull null
             YtmSong(id, item.name, item.uploaderName.orEmpty().removeSuffix(" - Topic"), item.duration.coerceAtLeast(0) * 1000, cover, albumId, title)
         }
-        return YtmAlbum(YtmAlbumRef(albumId, title, artist, cover), songs)
+        return albumPageMemo.put(albumId, YtmAlbum(YtmAlbumRef(albumId, title, artist, cover), songs))
     }
 
     /** What an artist has, by name: their songs (the search's results whose artist is that name) and their albums. */
@@ -139,10 +165,11 @@ class YtmClient @Inject constructor(
     /** Songs only, never videos or clips. [YtmPage.next] opens the following page of the same search. */
     fun search(query: String): YtmPage {
         check(isEnabled()) { "YouTube Music is off" }
+        songMemo.get(query.lowercase())?.let { return it }
         ensureInit()
         val extractor = searchExtractor(query)
         extractor.fetchPage()
-        return pageOf(extractor.initialPage)
+        return songMemo.put(query.lowercase(), pageOf(extractor.initialPage))
     }
 
     fun searchMore(query: String, page: Page): YtmPage {
@@ -212,8 +239,8 @@ class YtmClient @Inject constructor(
         override fun execute(request: Request): Response {
             val connection = URL(request.url()).openConnection() as HttpURLConnection
             connection.requestMethod = request.httpMethod()
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 30_000
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 20_000
             connection.setRequestProperty("User-Agent", USER_AGENT)
             request.headers().forEach { (name, values) -> values.forEach { connection.addRequestProperty(name, it) } }
             request.dataToSend()?.let { body ->
@@ -233,6 +260,8 @@ class YtmClient @Inject constructor(
         val EXPIRE = Regex("[?&]expire=(\\d+)")
         val PLAYLIST_ID = Regex("[?&]list=([\\w-]+)")
         const val MAX_ALBUM_PAGES = 3
+        const val MEMO_SIZE = 24
+        const val MEMO_TTL_MS = 5 * 60_000L
         val VIDEO_ID = Regex("[?&]v=([\\w-]{11})")
         const val EXPIRY_MARGIN_MS = 10 * 60_000L
         const val FALLBACK_TTL_MS = 2 * 60 * 60_000L

@@ -21,23 +21,26 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.drawscope.clipRect
+import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.round
 import kotlin.math.roundToInt
 
 /**
- * Once a page is scrolled, its content goes soft where it meets the top of the screen — sharpest below the band,
- * most blurred at the edge — as iOS does under its bars.
+ * Once a page is scrolled, its content goes soft where it meets the top of the screen — sharp below the band, blurrier
+ * and blurrier towards the edge — as iOS does under its bars: a progressive blur, not a blurred copy laid over the
+ * sharp page (which left every title with a glow around it, the sharp letters still there under it).
  *
  * Cheap on purpose; the first version of this cost the GPU 6 ms a frame, a list at 60 fps on a 96 Hz screen. It put
  * the whole page in an offscreen layer and blurred the band with a two-pass shader. This one:
  *
- *  - draws the page as it is, in a plain layer (a recorded display list, not a texture), so the page itself costs
- *    nothing it did not cost before;
- *  - draws the top band of that layer a second time into a small layer of its own — the band, not the page —
- *    fades it out downward with a gradient, and blurs *that* with the platform's own blur, which is done in the
- *    hardware path and at a fraction of the resolution;
- *  - lays that blurred, fading band over the sharp page. Where it is opaque the page is soft, where it is
- *    transparent the page is sharp, and between the two it cross-fades: a progressive blur, built from one blur.
+ *  - draws the page below the band as it is, untouched: the page itself costs nothing it did not cost before;
+ *  - draws the band's content once at a quarter of its size and blurs that with the platform's own blur at
+ *    [LEVELS] radii, each in a layer of its own — a few thousand pixels each, in the hardware path;
+ *  - lays the band out as a ramp of windows: the sharp content fading out going up, each blur level fading in and then
+ *    out for the next, the strongest holding at the edge. The windows add up to one everywhere, so every row is
+ *    drawn once, at a radius that grows steadily towards the top — the sharp letters are gone where the soft ones are.
  *
  * At the top of a page, not scrolled, none of this runs and the page is drawn directly.
  *
@@ -48,7 +51,10 @@ import kotlin.math.roundToInt
  * bar and then its usual length below it.
  */
 fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifier =
-    this.then(TopBlurElement(topInset, strength))
+    if (TOP_BLUR_ENABLED) this.then(TopBlurElement(topInset, strength)) else this
+
+/** Switch for the whole effect: false draws pages plain under the status bar. */
+private const val TOP_BLUR_ENABLED = true
 
 /**
  * [topBlur] driven by how far the page has been scrolled, [scrolledPx]: none at the top, growing with the scroll to
@@ -60,11 +66,21 @@ fun Modifier.scrollTopBlur(topInset: Dp = 0.dp, scrolledPx: () -> Float): Modifi
 
 private const val STRENGTH_EPSILON = 0.001f
 
-/** The scale the band is worked at. */
-private const val DOWNSCALE = 0.25f
+/** The scale the blurred levels are worked at. */
+private const val DOWNSCALE = 0.5f
 
-/** The blur at the very top edge at full strength, in dp: enough to soften text, not enough to cost. */
-private const val TOP_BLUR_RADIUS_DP = 9f
+/** The radius of each blur level at full strength, in pixels of the downscaled band: the last is the top edge's. */
+private val LEVEL_RADII = floatArrayOf(1.0f, 2.0f, 3.0f, 4.0f, 5.0f)
+private val LEVELS = LEVEL_RADII.size
+
+/** How many stops sample the eased ramp. */
+private const val RAMP_STOPS = 16
+
+/** How far below the status bar the blur reaches, in dp: just the status bar and a margin. */
+private const val BAND_DP = 12f
+
+/** A little dark at the very top, so the clock and the battery stay readable over soft content. */
+private const val SCRIM_ALPHA = 0.10f
 
 private data class TopBlurElement(val topInset: Dp, val strength: Density.() -> Float) : ModifierNodeElement<TopBlurNode>() {
     override fun create() = TopBlurNode(topInset, strength)
@@ -78,14 +94,46 @@ private data class TopBlurElement(val topInset: Dp, val strength: Density.() -> 
 }
 
 private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) : Modifier.Node(), DrawModifierNode {
-    private var band: GraphicsLayer? = null
+    private var group: GraphicsLayer? = null
+    private var sharp: GraphicsLayer? = null
+    private var base: GraphicsLayer? = null
+    private var levels: Array<GraphicsLayer>? = null
     // The blur is made again only when its radius changes by a visible step, not on every frame of a scroll.
     private var radiusStep = Int.MIN_VALUE
 
     override fun onDetach() {
-        band?.let { requireGraphicsContext().releaseGraphicsLayer(it) }
-        band = null
+        val context = requireGraphicsContext()
+        group?.let(context::releaseGraphicsLayer)
+        sharp?.let(context::releaseGraphicsLayer)
+        base?.let(context::releaseGraphicsLayer)
+        levels?.forEach(context::releaseGraphicsLayer)
+        group = null; sharp = null; base = null; levels = null
         radiusStep = Int.MIN_VALUE
+    }
+
+    /**
+     * The alpha of window [k] (0 = the sharp content, 1..LEVELS = the blur levels) at a row of depth [depth]: 0 at the
+     * band's bottom, up to the strength's reach at its top. Window k weighs 1 - |depth - k|, floored at 0, so the weights
+     * of neighbouring windows add up to one.
+     */
+    private fun weight(k: Int, depth: Float) = (1f - abs(depth - k)).coerceIn(0f, 1f)
+
+    // The brushes are made again only when the strength or the band changes by a visible step: during most of a scroll
+    // neither does, and nothing is allocated.
+    private var rampKey = Long.MIN_VALUE
+    private val ramps = arrayOfNulls<Brush>(2 * (LEVELS + 1))
+
+    /** Window [k]'s weight over a band of [height] pixels. The depth follows a smoothstep of the row, so the blur starts
+     *  and ends gently instead of at a constant slope. */
+    private fun ramp(k: Int, small: Boolean, reach: Float, height: Float): Brush {
+        val slot = k + if (small) LEVELS + 1 else 0
+        ramps[slot]?.let { return it }
+        val stops = Array(RAMP_STOPS + 1) { i ->
+            val u = i.toFloat() / RAMP_STOPS
+            val eased = u * u * (3f - 2f * u)
+            u to Color.Black.copy(alpha = weight(k, reach * (1f - eased)))
+        }
+        return Brush.verticalGradient(colorStops = stops, startY = 0f, endY = height).also { ramps[slot] = it }
     }
 
     override fun ContentDrawScope.draw() {
@@ -94,59 +142,97 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
             drawContent()
             return
         }
-        val bandHeight = (topInset.toPx() + PageMotionSpec.FADE_TOP_LENGTH_DP.dp.toPx()).coerceAtMost(size.height)
+        val bandHeight = ceil((topInset.toPx() + BAND_DP.dp.toPx()).coerceAtMost(size.height))
         val context = requireGraphicsContext()
+        val width = ceil(size.width).toInt()
+        val height = bandHeight.toInt()
 
-        // The page is drawn straight, as it always was: recording all of it into a layer first, only to draw the layer,
-        // cost the UI thread a full re-record every frame of a scroll.
-        drawContent()
+        // How deep into the levels the strength has got at the top edge: none at the start of the scroll, all of them at
+        // full strength. A fraction in between puts the top rows between two levels, so nothing steps.
+        val reach = (round(s * LEVELS * 32f) / 32f).coerceIn(0.05f, LEVELS.toFloat())
+        val key = (reach * 32f).toLong() * 100000L + height
+        if (key != rampKey) { rampKey = key; ramps.fill(null) }
 
-        val b = band ?: context.createGraphicsLayer().also {
-            // Offscreen: the gradient below is a mask on this layer's own pixels, which it can only be if they are
-            // rendered apart from what is around them.
+        // The page below the band, as it always was.
+        clipRect(top = bandHeight) { this@draw.drawContent() }
+
+        val sharpLayer = sharp ?: context.createGraphicsLayer().also {
+            // Offscreen: the ramp is a mask on this layer's own pixels, which it can only be if they are rendered apart.
             it.compositingStrategy = CompositingStrategy.Offscreen
-            band = it
+            it.blendMode = BlendMode.Plus
+            sharp = it
         }
-        // The band is worked at a quarter of its size in each direction: sixteen times fewer pixels to draw, mask and
-        // blur, and blown back up it is already soft — a blur is the one picture that loses nothing by being small.
-        val smallW = ceil(size.width * DOWNSCALE).toInt().coerceAtLeast(1)
-        val smallH = ceil(bandHeight * DOWNSCALE).toInt().coerceAtLeast(1)
-        b.record(IntSize(smallW, smallH)) {
+        sharpLayer.record(IntSize(width, height)) {
+            this@draw.drawContent()
+            drawRect(ramp(0, false, reach, bandHeight), size = Size(width.toFloat(), bandHeight), blendMode = BlendMode.DstIn)
+        }
+
+        // The band's content once, at a quarter of its size in each direction: sixteen times fewer pixels, and a blur is
+        // the one picture that loses nothing by being small.
+        val smallW = ceil(width * DOWNSCALE).toInt().coerceAtLeast(1)
+        val smallH = ceil(height * DOWNSCALE).toInt().coerceAtLeast(1)
+        val baseLayer = base ?: context.createGraphicsLayer().also { base = it }
+        baseLayer.record(IntSize(smallW, smallH)) {
             withTransform({ scale(DOWNSCALE, DOWNSCALE, pivot = Offset.Zero) }) { this@draw.drawContent() }
-            // Eased (smoothstep), so neither end of the fade shows as a line.
-            drawRect(
-                Brush.verticalGradient(
-                    0f to Color.Black,
-                    0.25f to Color.Black.copy(alpha = 0.844f),
-                    0.5f to Color.Black.copy(alpha = 0.5f),
-                    0.75f to Color.Black.copy(alpha = 0.156f),
-                    1f to Color.Transparent,
-                    startY = 0f,
-                    endY = smallH.toFloat(),
-                ),
-                size = Size(smallW.toFloat(), smallH.toFloat()),
-                blendMode = BlendMode.DstIn,
-            )
-            // A little dark over what is left, strongest at the very top: the clock and the battery stay readable over
-            // soft content. SrcAtop, so it only tints the band's own pixels and never paints where there are none.
-            drawRect(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.34f),
-                    0.6f to Color.Transparent,
-                    startY = 0f,
-                    endY = smallH.toFloat(),
-                ),
-                size = Size(smallW.toFloat(), smallH.toFloat()),
-                blendMode = BlendMode.SrcAtop,
-            )
         }
-        // In steps of half a pixel: a radius that changed every frame would rebuild the effect every frame.
-        val step = (TOP_BLUR_RADIUS_DP.dp.toPx() * DOWNSCALE * s * 2f).roundToInt().coerceAtLeast(1)
-        if (step != radiusStep) {
-            radiusStep = step
-            val radius = step / 2f
-            b.renderEffect = BlurEffect(radius, radius, TileMode.Clamp)
+        val blurred = levels ?: Array(LEVELS) {
+            context.createGraphicsLayer().also { l ->
+                l.compositingStrategy = CompositingStrategy.Offscreen
+                l.blendMode = BlendMode.Plus
+            }
+        }.also { levels = it }
+        // In steps of half a pixel of the strongest level: a radius that changed every frame would rebuild the effects
+        // every frame.
+        val step = (LEVEL_RADII.last() * s * 2f).roundToInt().coerceAtLeast(1)
+        val remake = step != radiusStep
+        radiusStep = step
+        // The windows are ADDED, in a layer of their own that starts empty, and that layer is then laid over the page: their
+        // weights add up to one, so the sum is exactly the picture (and its opacity) at a blend of radii. Laid one over
+        // another as translucent layers they did not — two halves composite to three quarters, and the quarter that was
+        // missing let the black behind show through as dark bars across the blur.
+        val groupLayer = group ?: context.createGraphicsLayer().also {
+            it.compositingStrategy = CompositingStrategy.Offscreen
+            group = it
         }
-        withTransform({ scale(1f / DOWNSCALE, 1f / DOWNSCALE, pivot = Offset.Zero) }) { drawLayer(b) }
+        groupLayer.record(IntSize(width, height)) {
+            drawLayer(sharpLayer)
+            withTransform({ scale(1f / DOWNSCALE, 1f / DOWNSCALE, pivot = Offset.Zero) }) {
+                for (i in 0 until LEVELS) {
+                    val layer = blurred[i]
+                    layer.record(IntSize(smallW, smallH)) {
+                        drawLayer(baseLayer)
+                        drawRect(ramp(i + 1, true, reach, smallH.toFloat()), size = Size(smallW.toFloat(), smallH.toFloat()), blendMode = BlendMode.DstIn)
+                    }
+                    if (remake) {
+                        val radius = (LEVEL_RADII[i] * (step / (LEVEL_RADII.last() * 2f))).coerceAtLeast(0.5f)
+                        layer.renderEffect = BlurEffect(radius, radius, TileMode.Clamp)
+                    }
+                    drawLayer(layer)
+                }
+            }
+        }
+        drawLayer(groupLayer)
+
+        drawRect(
+            Brush.verticalGradient(0f to Color.Black.copy(alpha = SCRIM_ALPHA * s), 0.6f to Color.Transparent, startY = 0f, endY = bandHeight),
+            size = Size(size.width, bandHeight),
+        )
     }
 }
+
+/**
+ * How far a list has been scrolled, for [scrollTopBlur]: the first item's offset, and "a lot" once it is out of view.
+ * Read while drawing.
+ */
+fun androidx.compose.foundation.lazy.LazyListState.topScrollPx(): Float =
+    if (firstVisibleItemIndex > 0) 1_000_000f else firstVisibleItemScrollOffset.toFloat()
+
+fun androidx.compose.foundation.lazy.grid.LazyGridState.topScrollPx(): Float =
+    if (firstVisibleItemIndex > 0) 1_000_000f else firstVisibleItemScrollOffset.toFloat()
+
+/** Soft top edge for a list that starts below a header: blurred at the edge it is cut at, once it has scrolled. */
+fun Modifier.listTopBlur(state: androidx.compose.foundation.lazy.LazyListState): Modifier =
+    scrollTopBlur { state.topScrollPx() }
+
+fun Modifier.listTopBlur(state: androidx.compose.foundation.lazy.grid.LazyGridState): Modifier =
+    scrollTopBlur { state.topScrollPx() }
