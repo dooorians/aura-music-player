@@ -27,6 +27,13 @@ class JioSaavnClient @Inject constructor() {
     /** Opens the connection (lookup, handshake) ahead of the first real search. */
     suspend fun warmUp() { searchSongs("music") }
 
+    /** [searchSongs], but a failure (no network, an error from the server) is thrown instead of reading as "no results". */
+    suspend fun searchSongsOrThrow(query: String): List<RawSongItem> = withContext(Dispatchers.IO) {
+        val urlString = "$baseUrl?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&p=1&n=10&q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+        val body = json.decodeFromString<RawSearchResponse>(executeRequest(urlString))
+        body.results.sortedByDescending { it.isExplicit }
+    }
+
     suspend fun searchSongs(query: String): List<RawSongItem> = withContext(Dispatchers.IO) {
         runCatching {
             val urlString = "$baseUrl?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&p=1&n=10&q=${java.net.URLEncoder.encode(query, "UTF-8")}"

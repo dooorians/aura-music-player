@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.MusicRepository
+import com.ikko.aura.util.runCatchingCancellable
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.data.model.Track
@@ -123,6 +124,7 @@ class SearchViewModel @Inject constructor(
     private var nextPage: Page? = null
     private var searchedQuery = ""
     private var ytmJob: Job? = null
+    private val ytmSideJobs = mutableListOf<Job>()
 
     init {
         viewModelScope.launch {
@@ -138,7 +140,7 @@ class SearchViewModel @Inject constructor(
                     jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = true)
                     jioSaavnJob = launch {
                         try {
-                            val results = withContext(Dispatchers.IO) { jioSaavnClient.searchSongs(q) }
+                            val results = withContext(Dispatchers.IO) { jioSaavnClient.searchSongsOrThrow(q) }
                             val tracks = results.map { res ->
                                 val artistName = res.moreInfo.artistMap.primaryArtists.joinToString(", ") { it.name }.ifBlank { "Unknown Artist" }
                                 val durationMillis = res.moreInfo.duration.toLongOrNull()?.times(1000) ?: 0L
@@ -162,6 +164,8 @@ class SearchViewModel @Inject constructor(
                                 )
                             }
                             jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, songs = tracks)
+                        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, error = true)
                         }
@@ -183,7 +187,7 @@ class SearchViewModel @Inject constructor(
                         ids.forEach { id ->
                             launch {
                                 val client = remoteSources.client(id)
-                                val found = client?.let { runCatching { withContext(Dispatchers.IO) { it.search(q) } } }
+                                val found = client?.let { runCatchingCancellable { withContext(Dispatchers.IO) { it.search(q) } } }
                                 val section = if (client == null || found == null || found.isFailure) {
                                     RemoteSection(id, remoteSources.nameOf(id), loading = false, error = true)
                                 } else {
@@ -210,6 +214,8 @@ class SearchViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { (on, q) ->
                     ytmJob?.cancel()
+                    ytmSideJobs.forEach { it.cancel() }
+                    ytmSideJobs.clear()
                     nextPage = null
                     if (!on || q.length < 2) {
                         ytmSearch.value = YtmSearchState(enabled = on)
@@ -218,16 +224,17 @@ class SearchViewModel @Inject constructor(
                     searchedQuery = q
                     ytmSearch.value = YtmSearchState(enabled = true, loading = true)
                     // Albums and artists come on their own, so the songs are never held up by them.
-                    launch {
-                        val albums = runCatching { withContext(Dispatchers.IO) { ytmClient.searchAlbums(q) } }.getOrDefault(emptyList()).distinctBy { it.id }
+                    ytmSideJobs += launch {
+                        val albums = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchAlbums(q) } }.getOrDefault(emptyList()).distinctBy { it.id }
                         if (q == searchedQuery) ytmSearch.update { it.copy(albums = albums) }
                     }
-                    launch {
-                        val artists = runCatching { withContext(Dispatchers.IO) { ytmClient.searchArtists(q) } }.getOrDefault(emptyList()).distinctBy { it.name }
+                    ytmSideJobs += launch {
+                        val artists = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchArtists(q) } }.getOrDefault(emptyList()).distinctBy { it.name }
                         if (q == searchedQuery) ytmSearch.update { it.copy(artists = artists) }
                     }
                     ytmJob = launch {
-                        val page = runCatching { withContext(Dispatchers.IO) { ytmClient.search(q) } }
+                        val page = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.search(q) } }
+                        if (q != searchedQuery) return@launch // The query moved on while this was on its way.
                         nextPage = page.getOrNull()?.next
                         val songs = page.getOrNull()?.songs.orEmpty()
                         ytmSearch.update {
@@ -255,7 +262,7 @@ class SearchViewModel @Inject constructor(
         val q = searchedQuery
         ytmSearch.update { it.copy(loadingMore = true, error = false) }
         ytmJob = viewModelScope.launch {
-            val more = runCatching { withContext(Dispatchers.IO) { ytmClient.searchMore(q, page) } }
+            val more = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchMore(q, page) } }
             if (q != searchedQuery) return@launch // The query moved on while this was on its way.
             nextPage = more.getOrNull()?.next ?: if (more.isFailure) page else null
             ytmSearch.update { state ->
@@ -329,7 +336,15 @@ class SearchViewModel @Inject constructor(
             sourceId = "unified",
             name = "Meilleurs Résultats",
             loading = ytm.loading || (jiosaavn?.loading == true) || remote.any { it.loading },
-            error = ytm.error && (jiosaavn?.error == true) && remote.all { it.error },
+            // Offline, or every source refusing: said, instead of an empty list. A source that is off does not count.
+            error = run {
+                val states = buildList {
+                    if (ytm.enabled) add(ytm.error)
+                    jiosaavn?.let { add(it.error) }
+                    remote.forEach { add(it.error) }
+                }
+                states.isNotEmpty() && states.all { it }
+            },
             songs = bestSongs,
             albums = bestAlbums,
             artists = bestArtists

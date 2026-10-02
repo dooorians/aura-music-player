@@ -288,7 +288,9 @@ fun SearchPanel(
                             if (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS) {
                                 if (section.hasContent) item(key = "rs_songs_${section.sourceId}") { SectionLabel("Titres · ${section.name}") }
                                 if (section.loading) item(key = "rs_loading_${section.sourceId}") { YtmNote("Recherche…") }
-                                if (section.error) item(key = "rs_error_${section.sourceId}") { YtmNote("${section.name} ne répond pas") }
+                                if (section.error) item(key = "rs_error_${section.sourceId}") {
+                                    YtmNote(if (section.sourceId == "unified") "Aucune source ne répond. Es-tu hors ligne ?" else "${section.name} ne répond pas")
+                                }
                                 itemsIndexed(section.songs, key = { _, track -> "rs_song_${track.id}" }) { index, track ->
                                     TrackListItem(
                                         track = track,
