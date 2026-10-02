@@ -53,7 +53,14 @@ class LyricsRepository @Inject constructor(
     private val settingsStore: SettingsStore,
 ) {
 
-    suspend fun loadLyrics(track: Track): LyricsResult? {
+    /**
+     * Off the main thread as a whole: this is called from a view model's scope, which is the main thread, and the work in
+     * it is parsing (a regex pass over every line of an LRC, the word-timed background voices, the rewrite to enhanced
+     * LRC for the cache). The Room and network calls inside switch to their own dispatchers as they always did.
+     */
+    suspend fun loadLyrics(track: Track): LyricsResult? = withContext(Dispatchers.Default) { loadLyricsOffMain(track) }
+
+    private suspend fun loadLyricsOffMain(track: Track): LyricsResult? {
         readSidecar(track)?.let { lines ->
             return LyricsResult(lines.withBackgroundVocals(), "Fichier .lrc")
         }
