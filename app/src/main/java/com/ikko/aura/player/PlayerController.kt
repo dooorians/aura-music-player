@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -16,6 +18,9 @@ import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 
@@ -36,16 +41,45 @@ class PlayerController @Inject constructor(
 
     private var controller: MediaController? = null
     private val controllerReady = CompletableDeferred<MediaController>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val _connectionFailed = MutableStateFlow(false)
+
+    /** True when the service could not be reached after every retry: no player to observe or command. */
+    val connectionFailed: StateFlow<Boolean> = _connectionFailed.asStateFlow()
 
     init {
-        context.startService(Intent(context, PlaybackService::class.java))
+        connect(context, attempt = 0)
+    }
+
+    /**
+     * Connects to the service, and tries again — a second, two seconds, four, eight — when it does not answer, instead
+     * of letting the failure of `get()` take the app down. After the last try [awaitPlayer] fails and
+     * [connectionFailed] is set.
+     */
+    private fun connect(context: Context, attempt: Int) {
+        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener(
             {
-                val connected = controllerFuture.get()
-                controller = connected
-                controllerReady.complete(connected)
+                val connected = try {
+                    controllerFuture.get()
+                } catch (e: Exception) {
+                    null
+                }
+                when {
+                    connected != null -> {
+                        controller = connected
+                        controllerReady.complete(connected)
+                    }
+                    attempt < MAX_CONNECT_RETRIES ->
+                        mainHandler.postDelayed({ connect(context, attempt + 1) }, 1_000L shl attempt)
+                    else -> {
+                        _connectionFailed.value = true
+                        controllerReady.completeExceptionally(IllegalStateException("The playback service did not answer"))
+                    }
+                }
             },
             ContextCompat.getMainExecutor(context),
         )
@@ -232,5 +266,6 @@ class PlayerController @Inject constructor(
 
     companion object {
         private const val SKIP_PREVIOUS_RESTART_THRESHOLD_MS = 3_000L
+        private const val MAX_CONNECT_RETRIES = 4
     }
 }

@@ -167,11 +167,22 @@ class PlayerViewModel @Inject constructor(
         // A download queue the process was killed in the middle of picks up again.
         viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.resume() } }
         viewModelScope.launch {
-            val player = playerController.awaitPlayer()
+            // No connection after the retries (see PlayerController): nothing to observe, and not a crash.
+            val player = try {
+                playerController.awaitPlayer()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return@launch
+            }
             boundPlayer = player
-            adoptExistingQueue(player)
-            restoreSavedQueue(player)
+            // Listening and ticking start now. Rebuilding the queue may wait for the device's first scan (when it holds
+            // local files), and the screens must not wait with it.
             player.addListener(playerListener)
+            launch {
+                adoptExistingQueue(player)
+                restoreSavedQueue(player)
+            }
             // One continuous ticker for the ViewModel's lifetime rather than one restarted from
             // onIsPlayingChanged: isPlaying only flips on genuine play/pause, not on every track
             // change (seekToNextMediaItem keeps it true throughout), so an event-triggered ticker
@@ -261,7 +272,12 @@ class PlayerViewModel @Inject constructor(
     private suspend fun adoptExistingQueue(player: Player) {
         if (player.mediaItemCount == 0) return
         val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-        val byId = (musicRepository.tracks.first { it.isNotEmpty() } + ytmLibrary.known()).associateBy { it.id }
+        val byId = resolveQueueEntries(
+            ids = ids,
+            idOf = Track::id,
+            streamed = { ytmLibrary.known() },
+            local = { musicRepository.tracks.first { it.isNotEmpty() } },
+        )
         // This view model's queue mirrors the player's position for position, so an item the library does not know
         // (a file deleted since the queue was written) is taken out of the player as well, not just left out here:
         // dropped on this side only, every index after it would point at the wrong track.
@@ -294,7 +310,12 @@ class PlayerViewModel @Inject constructor(
     private suspend fun restoreSavedQueue(player: Player) {
         if (player.mediaItemCount > 0) return
         val saved = queueSnapshotStore.read() ?: return
-        val byId = (musicRepository.tracks.first { it.isNotEmpty() } + ytmLibrary.known()).associateBy { it.id }
+        val byId = resolveQueueEntries(
+            ids = saved.items.map { it.id },
+            idOf = Track::id,
+            streamed = { ytmLibrary.known() },
+            local = { musicRepository.tracks.first { it.isNotEmpty() } },
+        )
         val snapshot = saved.surviving { it in byId } ?: return
         // Something may have started playing while the library was loading (a media button, say): that is the queue
         // then, and not this one — adopted here, since the first look found the player empty.
