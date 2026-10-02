@@ -20,6 +20,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
+/**
+ * The cache row a lookup earns, if any: the lyrics when found, an empty row (a remembered miss) when every source
+ * confirmed there are none, and nothing at all when the lookup could not reach its sources.
+ */
+internal fun cacheEntryFor(trackId: String, lookup: OnlineLyrics.Lookup, nowMs: Long): LyricsCacheEntity? = when (lookup) {
+    is OnlineLyrics.Lookup.Found ->
+        LyricsCacheEntity(trackId, lookup.result.source.label, lookup.result.lines.toEnhancedLrc(), nowMs)
+    OnlineLyrics.Lookup.NotFound -> LyricsCacheEntity(trackId, "", "", nowMs)
+    OnlineLyrics.Lookup.Unreachable -> null
+}
+
 /** Where a set of lyrics came from, for the line the player shows under them. */
 data class LyricsResult(val lines: List<LyricLine>, val sourceLabel: String)
 
@@ -63,7 +74,7 @@ class LyricsRepository @Inject constructor(
 
         if (!settingsStore.onlineLyricsEnabled.first()) return null
 
-        val found = OnlineLyrics.lyrics(
+        val lookup = OnlineLyrics.lookup(
             title = track.title,
             artist = track.artist,
             // A streamed song's "album" is the source's name, which would only make the match worse.
@@ -71,17 +82,13 @@ class LyricsRepository @Inject constructor(
             durationMs = track.durationMs,
         )
 
-        runCatching {
-            cacheDao.save(
-                LyricsCacheEntity(
-                    trackId = track.id,
-                    source = found?.source?.label.orEmpty(),
-                    lrc = found?.lines?.toEnhancedLrc().orEmpty(),
-                    fetchedAtMs = System.currentTimeMillis(),
-                ),
-            )
+        // A miss is remembered only when every source answered that it has none. No network, a timeout or a server
+        // error says nothing about the lyrics: remembering it would hide them for two weeks.
+        cacheEntryFor(track.id, lookup, System.currentTimeMillis())?.let { entry ->
+            runCatching { cacheDao.save(entry) }
         }
 
+        val found = (lookup as? OnlineLyrics.Lookup.Found)?.result
         return found?.let { LyricsResult(it.lines, it.source.label) }
     }
 

@@ -50,20 +50,35 @@ object LyricsPlusSource {
         }.toMutableList()
 
         try {
+            var answered = false
             while (pending.isNotEmpty()) {
-                val (host, lines) = select {
+                val (host, answer) = select {
                     pending.forEach { (host, job) -> job.onAwait { host to it } }
                 }
                 pending.removeAll { it.first == host }
-                if (!lines.isNullOrEmpty()) {
-                    lastGood.set(host)
-                    return@coroutineScope lines
+                when (answer) {
+                    is HostAnswer.Lines -> {
+                        lastGood.set(host)
+                        return@coroutineScope answer.lines
+                    }
+                    HostAnswer.Empty -> answered = true
+                    HostAnswer.Failed -> Unit
                 }
             }
+            // No mirror had them. That is "none" only if one of them said so: all of them failing says nothing.
+            if (!answered) throw LyricsUnreachable("no LyricsPlus mirror answered")
             null
         } finally {
             pending.forEach { it.second.cancel() }
         }
+    }
+
+    private sealed interface HostAnswer {
+        class Lines(val lines: List<LyricLine>) : HostAnswer
+        /** The host answered: it has none. */
+        data object Empty : HostAnswer
+        /** The host did not give an answer (network, server error, unreadable reply). */
+        data object Failed : HostAnswer
     }
 
     private suspend fun fetch(
@@ -72,7 +87,7 @@ object LyricsPlusSource {
         artist: String,
         durationMs: Long,
         album: String?,
-    ): List<LyricLine>? = withContext(Dispatchers.IO) {
+    ): HostAnswer = withContext(Dispatchers.IO) {
         val seconds = durationMs / 1000
         val url = buildString {
             append(host).append("/v2/lyrics/get")
@@ -82,8 +97,17 @@ object LyricsPlusSource {
             if (!album.isNullOrBlank()) append("&album=").append(album.asQueryValue())
         }
 
-        val body = lyricsGet(url) ?: return@withContext null
-        runCatching { parse(JSONObject(body)) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        val body = try {
+            lyricsGet(url)
+        } catch (_: LyricsUnreachable) {
+            return@withContext HostAnswer.Failed
+        } ?: return@withContext HostAnswer.Empty
+        val lines = try {
+            parse(JSONObject(body))
+        } catch (e: org.json.JSONException) {
+            return@withContext HostAnswer.Failed
+        }
+        if (lines.isEmpty()) HostAnswer.Empty else HostAnswer.Lines(lines)
     }
 
     internal fun parse(response: JSONObject): List<LyricLine> {

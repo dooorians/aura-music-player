@@ -27,35 +27,85 @@ object OnlineLyrics {
 
     data class Result(val source: LyricsSource, val lines: List<LyricLine>)
 
+    /**
+     * What a lookup concluded. [NotFound] is the only answer that may be remembered as a miss: every source answered and
+     * none has the lyrics. [Unreachable] — no network, a timeout, a server error from a source — says nothing about the
+     * lyrics, and is never cached.
+     */
+    sealed interface Lookup {
+        data class Found(val result: Result) : Lookup
+        data object NotFound : Lookup
+        data object Unreachable : Lookup
+    }
+
+    private sealed interface Answer {
+        class Lines(val lines: List<LyricLine>) : Answer
+        data object Absent : Answer
+        data object Failed : Answer
+    }
+
     suspend fun lyrics(
         title: String,
         artist: String,
         album: String?,
         durationMs: Long,
-    ): Result? = coroutineScope {
-        if (title.isBlank() && artist.isBlank()) return@coroutineScope null
+    ): Result? = (lookup(title, artist, album, durationMs) as? Lookup.Found)?.result
 
-        val racing: List<Pair<LyricsSource, Deferred<List<LyricLine>?>>> =
+    suspend fun lookup(
+        title: String,
+        artist: String,
+        album: String?,
+        durationMs: Long,
+    ): Lookup = coroutineScope {
+        if (title.isBlank() && artist.isBlank()) return@coroutineScope Lookup.NotFound
+
+        val racing: List<Pair<LyricsSource, Deferred<Answer>>> =
             LyricsSource.entries.map { source ->
-                source to async(Dispatchers.IO) {
-                    runCatching { fetch(source, title, artist, album, durationMs) }.getOrNull()
-                }
+                source to async(Dispatchers.IO) { answerOf(source, title, artist, album, durationMs) }
             }
 
         try {
             var lineSynced: Result? = null
+            var failed = false
             for ((source, job) in racing) {
-                val lines = runCatching { job.await() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: continue
-                val finished = lines.withBackgroundVocals()
-                if (finished.any { it.isWordSynced }) return@coroutineScope Result(source, finished)
-                if (lineSynced == null) lineSynced = Result(source, finished)
+                when (val answer = job.await()) {
+                    is Answer.Lines -> {
+                        val finished = answer.lines.withBackgroundVocals()
+                        if (finished.any { it.isWordSynced }) return@coroutineScope Lookup.Found(Result(source, finished))
+                        if (lineSynced == null) lineSynced = Result(source, finished)
+                    }
+                    Answer.Absent -> Unit
+                    Answer.Failed -> failed = true
+                }
             }
-            lineSynced
+            verdict(lineSynced, failed)
         } finally {
             // Whoever lost the race is no longer worth waiting on, and coroutineScope
             // will not return while they are still running.
             racing.forEach { it.second.cancel() }
         }
+    }
+
+    /** Pure, so it can be tested: found beats everything; otherwise a failed source keeps the question open. */
+    internal fun verdict(lineSynced: Result?, anySourceFailed: Boolean): Lookup = when {
+        lineSynced != null -> Lookup.Found(lineSynced)
+        anySourceFailed -> Lookup.Unreachable
+        else -> Lookup.NotFound
+    }
+
+    private suspend fun answerOf(
+        source: LyricsSource,
+        title: String,
+        artist: String,
+        album: String?,
+        durationMs: Long,
+    ): Answer = try {
+        val lines = fetch(source, title, artist, album, durationMs)
+        if (lines.isNullOrEmpty()) Answer.Absent else Answer.Lines(lines)
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Answer.Failed
     }
 
     private suspend fun fetch(

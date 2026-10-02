@@ -22,7 +22,17 @@ private const val MAX_BODY_BYTES = 2 * 1024 * 1024
 
 private const val AGENT = "Aura/1.0 (local music player; https://github.com/ikko/aura)"
 
-/** Body of a successful GET, or null for any failure at all. */
+/**
+ * A request that got no definitive answer: no network, a timeout, a server error, an answer that is not lyrics.
+ * Not the same as the host saying it has none — that is a null from [lyricsGet] — and the difference decides whether a
+ * miss may be remembered.
+ */
+class LyricsUnreachable(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+/**
+ * Body of a successful GET; null when the host says it has no such lyrics (HTTP 404); [LyricsUnreachable] for anything
+ * else — a network error, a timeout, a 5xx, a refusal (403, 429…), an oversized or unreadable reply.
+ */
 internal fun lyricsGet(url: String): String? {
     var connection: HttpURLConnection? = null
     return try {
@@ -34,7 +44,9 @@ internal fun lyricsGet(url: String): String? {
             setRequestProperty("User-Agent", AGENT)
             setRequestProperty("Accept", "application/json, text/plain, */*")
         }
-        if (connection.responseCode !in 200..299) return null
+        val code = connection.responseCode
+        if (code == HttpURLConnection.HTTP_NOT_FOUND) return null
+        if (code !in 200..299) throw LyricsUnreachable("HTTP $code")
         // Capped rather than read whole: these are third-party hosts and a lyric
         // document is a few kilobytes, so anything at this size is a mistake or a
         // redirect into something that isn't lyrics at all.
@@ -45,14 +57,16 @@ internal fun lyricsGet(url: String): String? {
                 val read = reader.read(buffer)
                 if (read < 0) break
                 out.append(buffer, 0, read)
-                if (out.length > MAX_BODY_BYTES) return null
+                if (out.length > MAX_BODY_BYTES) throw LyricsUnreachable("reply too large")
             }
             out.toString()
         }
-    } catch (_: IOException) {
-        null
-    } catch (_: SecurityException) {
-        null
+    } catch (e: LyricsUnreachable) {
+        throw e
+    } catch (e: IOException) {
+        throw LyricsUnreachable("request failed", e)
+    } catch (e: SecurityException) {
+        throw LyricsUnreachable("request refused", e)
     } finally {
         connection?.disconnect()
     }

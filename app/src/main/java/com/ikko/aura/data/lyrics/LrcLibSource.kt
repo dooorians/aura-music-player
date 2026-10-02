@@ -26,9 +26,13 @@ object LrcLibSource {
             val cleanArtist = artist.cleanedForSearch()
             val seconds = (durationMs / 1000).toInt()
 
-            val synced = exactMatch(cleanTitle, cleanArtist, seconds)
-                ?: bestSearchHit(cleanTitle, cleanArtist, seconds)
-            synced?.let(LrcParser::parse)?.takeIf { it.isNotEmpty() }
+            // Either call failing leaves the answer open: only two definitive answers make "no lyrics".
+            var failed = false
+            val exact = try { exactMatch(cleanTitle, cleanArtist, seconds) } catch (_: LyricsUnreachable) { failed = true; null }
+            val synced = exact ?: try { bestSearchHit(cleanTitle, cleanArtist, seconds) } catch (_: LyricsUnreachable) { failed = true; null }
+            val lines = synced?.let(LrcParser::parse)?.takeIf { it.isNotEmpty() }
+            if (lines == null && failed) throw LyricsUnreachable("LRCLIB did not answer")
+            lines
         }
 
     private fun exactMatch(title: String, artist: String, seconds: Int): String? {
