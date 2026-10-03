@@ -13,21 +13,22 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Listens to the audio being played and follows its tempo, for the screens that move with the music.
+ * Listens to the audio being played and finds its hits, for the screens that move with the music.
  *
  * It sits on the audio sink (see [BeatAudioSink]), so it hears whatever the player is decoding — any format, a stream
- * as much as a file — and costs a few multiplications a sample, where an offline analysis of the whole track takes
- * minutes of decoding. What it does:
+ * as much as a file — and costs a few multiplications a sample. What it does:
  *
  *  - an onset curve at about 86 steps a second: how much louder the low end (kick, bass) and the high end (hats,
  *    snares) got since the step before, on a log scale;
- *  - every ~0.75 s, once there are ~4 s of it, the tempo: the lag at which that curve resembles itself most, leaning
- *    towards the tempi music is usually counted in (so 62 is read as 124, not the other way round);
- *  - the phase: of the beats that tempo allows, the row that lands on the most onsets;
- *  - the answer is a [BeatGrid] in the track's own time, so a seek does not undo it, and it keeps extrapolating until
- *    a better one replaces it. A new track starts again ([reset]).
+ *  - the hits: the peaks of that curve that stand out from the last second or so, in music that is actually playing
+ *    (see [findHit]), dated in the track's own time. A screen asks how long ago the last one reached the ear
+ *    ([sinceBeat]): the hits are found a little ahead of the ear, since the sink buffers, and each waits its turn.
+ *    Nothing is extrapolated: a silence, or a passage with no hit in it, gives nothing, and a change of rhythm is
+ *    followed at once instead of being corrected after seconds;
+ *  - the tempo, every ~0.75 s once there are ~4 s of the curve (the lag at which it resembles itself most), kept as a
+ *    [BeatGrid]; it is only used to tell a hit from the hats and ghost notes between two beats.
  *
- * Called from the playback thread; [grid] is read from anywhere.
+ * Called from the playback thread; [grid] and the hits are read from anywhere.
  */
 class BeatDetector {
     @Volatile
@@ -45,16 +46,29 @@ class BeatDetector {
     }
 
     /**
-     * How long ago the last beat was, at this very moment: null while the tempo is unknown or the audio has not moved
-     * for a while. Beats and the audible position share one clock, so nothing about where the player thinks it is
-     * (and no offset between the two) comes into it.
+     * How long ago the last hit reached the ear, at this very moment: null when there is none to follow (a silence, a
+     * passage without a hit, audio that has not moved for a while). Hits and the audible position share one clock, so
+     * nothing about where the player thinks it is (and no offset between the two) comes into it.
      */
     fun sinceBeat(wallSeconds: Double): Double? {
-        val g = grid ?: return null
         val heard = audibleSeconds
         if (heard.isNaN() || wallSeconds - audibleWallSeconds > STALE_SECONDS) return null
         val now = heard + (wallSeconds - audibleWallSeconds)
-        return ((now - g.firstBeat) % g.interval + g.interval) % g.interval
+        // The latest hit that has already reached the ear. Hits are found ahead of the ear (the sink buffers), so one is
+        // known before it is heard and simply waits its turn; nothing is extrapolated, so silence, or a passage with
+        // no hit in it, gives nothing.
+        val count = eventCount
+        var i = count - 1
+        val stop = max(0, count - EVENT_RING)
+        while (i >= stop) {
+            val t = eventTimes[i % EVENT_RING]
+            if (t <= now) {
+                val since = now - t
+                return if (since <= HIT_HOLD_SECONDS) since else null
+            }
+            i--
+        }
+        return null
     }
 
     private var sampleRate = 0
@@ -78,6 +92,16 @@ class BeatDetector {
     private val times = DoubleArray(RING)
     private var written = 0
     private var sinceEstimate = 0
+
+    // The hits found (onset peaks), in the track's own time: written by the playback thread, read by the screens.
+    private val eventTimes = DoubleArray(EVENT_RING)
+    @Volatile private var eventCount = 0
+    private val recentFlux = FloatArray(PEAK_WINDOW)
+    private var recentCount = 0
+    private var lastEventTime = Double.NEGATIVE_INFINITY
+    private var lastEventStrength = 0f
+    private var energyHopLow = 0.0
+    private var energyHopHigh = 0.0
 
     // The tempo being followed, in hops, and the one waiting to be confirmed.
     private var lag = 0.0
@@ -109,6 +133,9 @@ class BeatDetector {
     }
 
     private fun clearCurve() {
+        recentCount = 0
+        eventCount = 0
+        lastEventTime = Double.NEGATIVE_INFINITY
         low = 0f; previous = 0f
         accLow = 0.0; accHigh = 0.0; accCount = 0
         previousLow = 0f; previousHigh = 0f
@@ -181,10 +208,48 @@ class BeatDetector {
         times[slot] = hopStartSeconds + hopSeconds / 2.0
         written++
         sinceEstimate++
+        findHit(flux, energyLow, energyHigh, times[slot])
         if (written >= MIN_HOPS && sinceEstimate >= ESTIMATE_EVERY) {
             sinceEstimate = 0
             estimate()
         }
+    }
+
+    /**
+     * A hit: a peak of the onset curve that stands out from the last second or so, in music that is actually playing.
+     * Decided two hops late (a peak needs its neighbours), and dated at the peak itself. Hits closer together than
+     * about half a beat of the tempo being followed (0.28 s while there is none) are one, unless the later one is
+     * clearly harder.
+     */
+    private fun findHit(flux: Float, energyLow: Double, energyHigh: Double, hopTime: Double) {
+        val slot = recentCount % PEAK_WINDOW
+        recentFlux[slot] = flux
+        recentCount++
+        if (recentCount < 8) return
+        // The candidate is the hop two back; the hops around it are compared with it.
+        val cand = recentFlux[(recentCount - 3) % PEAK_WINDOW]
+        val before1 = recentFlux[(recentCount - 4) % PEAK_WINDOW]
+        val before2 = recentFlux[(recentCount - 5) % PEAK_WINDOW]
+        val after1 = recentFlux[(recentCount - 2) % PEAK_WINDOW]
+        val after2 = flux
+        if (!(cand > before1 && cand > before2 && cand >= after1 && cand >= after2)) return
+        // Silence (or a breath of noise) is not music: a hit needs the level of the last hops to be audible.
+        if (energyLow < SILENCE_ENERGY && energyHigh < SILENCE_ENERGY) return
+        val n = min(recentCount, PEAK_WINDOW)
+        var mean = 0.0
+        for (i in 0 until n) mean += recentFlux[i]
+        mean /= n
+        var variance = 0.0
+        for (i in 0 until n) variance += (recentFlux[i] - mean) * (recentFlux[i] - mean)
+        val threshold = mean + PEAK_SIGMAS * sqrt(variance / n) + MIN_HIT_FLUX
+        if (cand < threshold) return
+        val time = hopTime - 2 * hopSeconds
+        val gap = grid?.let { it.interval * 0.55 } ?: MIN_HIT_GAP
+        if (time - lastEventTime < gap && cand < lastEventStrength * 1.5f) return
+        eventTimes[eventCount % EVENT_RING] = time
+        lastEventTime = time
+        lastEventStrength = cand
+        eventCount = eventCount + 1
     }
 
     private fun estimate() {
@@ -319,5 +384,12 @@ class BeatDetector {
         const val PHASE_PULL = 0.3
         const val MIN_SIGMA = 0.02f
         const val STALE_SECONDS = 1.0
+        const val EVENT_RING = 64
+        const val PEAK_WINDOW = 96          // about 1.1 s of onset curve
+        const val PEAK_SIGMAS = 1.1
+        const val MIN_HIT_FLUX = 0.12f
+        const val MIN_HIT_GAP = 0.28
+        const val HIT_HOLD_SECONDS = 1.5
+        const val SILENCE_ENERGY = 4e-8      // about -74 dBFS of low-passed signal, or of its difference
     }
 }
