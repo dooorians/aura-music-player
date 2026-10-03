@@ -41,6 +41,7 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.util.AbsentCovers
+import com.ikko.aura.util.AlbumCovers
 import com.ikko.aura.util.SingleFlight
 import com.ikko.aura.util.reductionSteps
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,9 @@ object AlbumArtCache {
 
     /** What the palette, the theme and the blurred backdrop decode at (their own constants); see [load]. */
     private const val SOURCE_PICTURE_PX = 192
+
+    /** The size the files of an album are sampled at to find its cover: only its look is wanted. */
+    private const val SAMPLE_PX = 64
 
     /**
      * [LruCache] measures entries through [sizeOf], which defaults to 1 per entry — so without
@@ -162,7 +166,10 @@ object AlbumArtCache {
         // After the cache, not before: a file with no picture of its own still shows its album's, when another
         // track of it has put one there.
         val file = uri.toString()
-        if (file in AbsentCovers) return null
+        // A device album's cover is one choice for the whole album (see AlbumCovers), not the picture of whichever track
+        // asks first; for anything else the key is the file and what is asked for is what is decoded.
+        val candidates = AlbumCovers.candidates(cacheKey)
+        if (candidates == null && file in AbsentCovers) return null
         return flights.run(fullKey) {
             withContext(if (isRemote(uri)) networkDispatcher else decodeDispatcher) {
                 // Checked once more on the decode thread: between the miss above and getting here a
@@ -170,7 +177,7 @@ object AlbumArtCache {
                 // track change asks for four sizes of one picture within a frame or two of each other.
                 cache.get(fullKey)
                     ?: downscaledFromLarger(cacheKey, size)?.let { store(cacheKey, size, it) }
-                    ?: if (file in AbsentCovers) null else decodeAndStore(context, uri, file, cacheKey, size, reduce)
+                    ?: if (candidates == null && file in AbsentCovers) null else decodeAndStore(context, uri, file, cacheKey, size, reduce, candidates)
             }
         }
     }
@@ -182,21 +189,76 @@ object AlbumArtCache {
         cacheKey: String,
         size: Int,
         reduce: Boolean,
+        candidates: List<String>?,
     ): Bitmap? {
-        val decoded = try {
-            decode(context, uri, size)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            Decoded.FAILED
+        // The files whose picture may be this cover, best first. A file with no picture lets the next one stand in; a
+        // request that merely failed (the provider) does not: a later file answering for it would fix the cover to the
+        // wrong picture for good, so it is left to be tried again.
+        for (candidate in if (candidates == null) listOf(file) else bestFirst(context, cacheKey, candidates)) {
+            if (candidate in AbsentCovers) continue
+            val target = if (candidate == file) uri else Uri.parse(candidate)
+            val decoded = try {
+                decode(context, target, size)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Decoded.FAILED
+            }
+            // Cancelled while it was decoding: the result is for nobody and says nothing about the cover.
+            currentCoroutineContext().ensureActive()
+            decoded.bitmap?.let { return store(cacheKey, size, if (reduce) reducedTo(it, size) else it) }
+            // Only a local file that was read and has no picture; a failed request (the network, the provider) is
+            // not "no cover" and is tried again.
+            if (decoded.absent) AbsentCovers.add(candidate) else return null
         }
-        // Cancelled while it was decoding: the result is for nobody and says nothing about the cover.
-        currentCoroutineContext().ensureActive()
-        decoded.bitmap?.let { return store(cacheKey, size, if (reduce) reducedTo(it, size) else it) }
-        // Only a local file that was read and has no picture; a failed request (the network, the provider) is
-        // not "no cover" and is tried again.
-        if (decoded.absent) AbsentCovers.add(file)
         return null
+    }
+
+    /**
+     * [candidates] with the file that carries the album's own cover first. Three files are sampled (the album's first,
+     * middle and last, small and cheap) and the picture most of them share wins, the earliest on a tie; the rest follow
+     * in the album's order as the ones to fall back on. Albums of one or two files are not sampled. The choice is kept
+     * for the session (reset by each scan); it only depends on the files, so it is the same every time.
+     */
+    private suspend fun bestFirst(context: Context, cacheKey: String, candidates: List<String>): List<String> {
+        val live = candidates.filter { it !in AbsentCovers }
+        if (live.size <= 2) return live
+        // Already decided for this scan (another size of the same cover): no need to sample again.
+        AlbumCovers.chosenFor(cacheKey)?.takeIf { it in live }?.let { known -> return listOf(known) + live.filter { it != known } }
+        val sample = listOf(live.first(), live[live.size / 2], live.last()).distinct()
+        val looks = sample.map { file ->
+            val decoded = try {
+                decode(context, Uri.parse(file), SAMPLE_PX)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Decoded.FAILED
+            }
+            currentCoroutineContext().ensureActive()
+            if (decoded.absent) AbsentCovers.add(file)
+            file to decoded.bitmap?.let { look(it) }
+        }
+        val best = AlbumCovers.vote(looks) ?: return live
+        AlbumCovers.choose(cacheKey, best)
+        return listOf(best) + live.filter { it != best }
+    }
+
+    /** A 64-bit average hash of the picture (8 x 8 greys, one bit each for lighter than the mean); the bitmap is released. */
+    private fun look(bitmap: Bitmap): Long {
+        val small = runCatching { Bitmap.createScaledBitmap(bitmap, 8, 8, true) }.getOrNull()
+        if (small !== bitmap) bitmap.recycle()
+        small ?: return 0L
+        val pixels = IntArray(64)
+        small.getPixels(pixels, 0, 8, 0, 0, 8, 8)
+        small.recycle()
+        val grey = IntArray(64) { i ->
+            val c = pixels[i]
+            ((c shr 16 and 0xFF) * 299 + (c shr 8 and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+        }
+        val mean = grey.average()
+        var hash = 0L
+        for (i in 0 until 64) if (grey[i] > mean) hash = hash or (1L shl i)
+        return hash
     }
 
     /**

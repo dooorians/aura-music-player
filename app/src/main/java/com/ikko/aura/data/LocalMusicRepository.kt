@@ -100,6 +100,17 @@ class LocalMusicRepository @Inject constructor(
                     ?: track
             }
             _tracks.value = initial
+            // Which file's picture is each device album's cover: chosen here, once, for everything that draws it.
+            com.ikko.aura.util.AlbumCovers.publish(
+                initial.map {
+                    com.ikko.aura.util.AlbumCovers.Entry(
+                        albumId = it.albumId,
+                        trackNumber = it.trackNumber,
+                        mediaId = it.contentUri.lastPathSegment?.toLongOrNull() ?: Long.MAX_VALUE,
+                        uri = it.contentUri.toString(),
+                    )
+                },
+            )
             _scanned.value = true
             // Only now: a scan that failed (no permission yet, a provider error) leaves the library to be tried again.
             hasScanned = true
