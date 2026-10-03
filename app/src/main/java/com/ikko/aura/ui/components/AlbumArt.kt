@@ -42,6 +42,7 @@ import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.util.AbsentCovers
 import com.ikko.aura.util.SingleFlight
+import com.ikko.aura.util.reductionSteps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -60,6 +61,9 @@ object AlbumArtCache {
      * Used whenever a caller doesn't specify a target size (large hero art, palette extraction).
      */
     const val DEFAULT_SIZE_PX = 512
+
+    /** What the palette, the theme and the blurred backdrop decode at (their own constants); see [load]. */
+    private const val SOURCE_PICTURE_PX = 192
 
     /**
      * [LruCache] measures entries through [sizeOf], which defaults to 1 per entry — so without
@@ -134,9 +138,13 @@ object AlbumArtCache {
         uri: Uri?,
         targetSizePx: Int = DEFAULT_SIZE_PX,
         cacheKey: String? = uri?.toString(),
+        shrink: Boolean = false,
     ): Bitmap? {
         if (uri == null || cacheKey == null) return null
         val size = targetSizePx
+        // One answer per (cover, size) whoever asks, since they share a cache entry: the size the palette, the
+        // theme and the blurred backdrop decode at is never shrunk, they are tuned on the picture as it comes.
+        val reduce = shrink && size != SOURCE_PICTURE_PX
         val fullKey = key(cacheKey, size)
         cache.get(fullKey)?.let { return it }
         downscaledFromLarger(cacheKey, size)?.let { return store(cacheKey, size, it) }
@@ -151,12 +159,19 @@ object AlbumArtCache {
                 // track change asks for four sizes of one picture within a frame or two of each other.
                 cache.get(fullKey)
                     ?: downscaledFromLarger(cacheKey, size)?.let { store(cacheKey, size, it) }
-                    ?: if (file in AbsentCovers) null else decodeAndStore(context, uri, file, cacheKey, size)
+                    ?: if (file in AbsentCovers) null else decodeAndStore(context, uri, file, cacheKey, size, reduce)
             }
         }
     }
 
-    private suspend fun decodeAndStore(context: Context, uri: Uri, file: String, cacheKey: String, size: Int): Bitmap? {
+    private suspend fun decodeAndStore(
+        context: Context,
+        uri: Uri,
+        file: String,
+        cacheKey: String,
+        size: Int,
+        reduce: Boolean,
+    ): Bitmap? {
         val decoded = try {
             decode(context, uri, size)
         } catch (e: CancellationException) {
@@ -166,11 +181,33 @@ object AlbumArtCache {
         }
         // Cancelled while it was decoding: the result is for nobody and says nothing about the cover.
         currentCoroutineContext().ensureActive()
-        decoded.bitmap?.let { return store(cacheKey, size, it) }
+        decoded.bitmap?.let { return store(cacheKey, size, if (reduce) reducedTo(it, size) else it) }
         // Only a local file that was read and has no picture; a failed request (the network, the provider) is
         // not "no cover" and is tried again.
         if (decoded.absent) AbsentCovers.add(file)
         return null
+    }
+
+    /**
+     * [source] reduced so that its SHORTER side is [targetPx], on the decode thread.
+     *
+     * [android.content.ContentResolver.loadThumbnail] takes the size as a hint and hands back more: 130 px asked for
+     * came back 140 to 166, 375 came back 700, and the cache then held (and the GPU uploaded) the bigger picture
+     * for a box that cannot show it. A picture is only ever made smaller, never larger, and one that already fits
+     * is returned as it is. The ratio is kept and so is the crop, which the GPU still does when it is drawn
+     * (`ContentScale.Crop` fills the square box with the picture's shorter side, which is why that is the side
+     * brought to the target: see [reductionSteps]). The pictures made on the way, and the original once it is no
+     * longer needed, are released at once rather than left to the collector.
+     */
+    private fun reducedTo(source: Bitmap, targetPx: Int): Bitmap {
+        var current = source
+        for ((width, height) in reductionSteps(source.width, source.height, targetPx)) {
+            val smaller = runCatching { current.scale(width, height) }.getOrNull() ?: break
+            if (current !== source) current.recycle()
+            current = smaller
+        }
+        if (current !== source) source.recycle()
+        return current
     }
 
     /** What a decode found: the picture, or nothing because there is none ([absent]) or because it did not work. */
@@ -344,7 +381,7 @@ fun AlbumArt(
 
     LaunchedEffect(effectiveKey, targetSizePx) {
         if (bitmap == null) {
-            bitmap = AlbumArtCache.load(context, uri, targetSizePx, effectiveKey)
+            bitmap = AlbumArtCache.load(context, uri, targetSizePx, effectiveKey, shrink = true)
             settled = true
         }
         if (bitmap != null) reveal.animateTo(1f, tween(REVEAL_MS))
