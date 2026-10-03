@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.model.Track
 import androidx.compose.ui.graphics.Color
 import com.ikko.aura.ui.theme.LibraryTypography
-import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 
@@ -77,10 +77,10 @@ fun TrackListItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                CoverText(
                     text = subtitle,
                     style = LibraryTypography.AlbumArtist,
-                    color = LocalCoverColors.current.tint.copy(alpha = 0.72f),
+                    alpha = 0.72f,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

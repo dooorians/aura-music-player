@@ -100,6 +100,7 @@ import com.ikko.aura.viewmodel.LibraryViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
 import com.ikko.aura.viewmodel.PlaylistsViewModel
 import kotlin.math.roundToInt
+import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LocalCoverColors
 import com.ikko.aura.ui.theme.LibraryTypography
 import androidx.compose.ui.text.style.TextOverflow
@@ -379,7 +380,6 @@ private fun LibraryHeader(
     sortMenu: GlassMenuState,
     onSmartShuffle: () -> Unit,
 ) {
-    val cover = LocalCoverColors.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -390,17 +390,16 @@ private fun LibraryHeader(
     ) {
         // Two texts stacked in one box, each placed by its own baseline from the top of the header, so the
         // title's baseline is at 89 dp and the count's at 111 dp whatever their line heights.
-        Text(
+        CoverText(
             text = "Bibliothèque",
             style = LibraryTypography.PageTitle,
-            color = cover.tint,
             maxLines = 1,
             modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = TITLE_RELATIVE_BASELINE),
         )
-        Text(
+        CoverText(
             text = countText,
             style = LibraryTypography.PageCount,
-            color = cover.tint.copy(alpha = 0.66f),
+            alpha = 0.66f,
             maxLines = 1,
             modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = COUNT_RELATIVE_BASELINE),
         )
@@ -487,7 +486,6 @@ private fun AlbumGrid(
     onJumped: (Boolean) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
-    val coverTint = LocalCoverColors.current.tint
     IndexedList(
         target = rememberScrollTarget(gridState),
         onJumped = onJumped,
@@ -534,10 +532,10 @@ private fun AlbumGrid(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 9.dp),
                 )
-                Text(
+                CoverText(
                     text = album.artist,
                     style = LibraryTypography.AlbumArtist,
-                    color = coverTint.copy(alpha = 0.72f),
+                    alpha = 0.72f,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,

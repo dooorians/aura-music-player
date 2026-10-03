@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.theme.LibraryTypography
-import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.CoverText
 
 val PAGE_HEADER_HEIGHT = 56.dp
 
@@ -31,10 +31,9 @@ fun PageHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
+        CoverText(
             text = title,
             style = LibraryTypography.PageTitle,
-            color = LocalCoverColors.current.tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false)

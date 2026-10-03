@@ -1,7 +1,7 @@
 package com.ikko.aura.ui.screens.settings
 
 import androidx.compose.foundation.background
-import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LibraryTypography
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
@@ -90,10 +90,9 @@ fun SettingsScreen(
                         .padding(horizontal = PAGE_MARGIN),
                     contentAlignment = Alignment.CenterStart,
                 ) {
-                    Text(
+                    CoverText(
                         text = "Réglages",
                         style = LibraryTypography.PageTitle,
-                        color = LocalCoverColors.current.tint,
                         maxLines = 1,
                     )
                 }
@@ -278,15 +277,15 @@ private fun RowTitle(text: String) {
 
 @Composable
 private fun RowSubtitle(text: String) {
-    Text(text = text, style = LibraryTypography.AlbumArtist, color = LocalCoverColors.current.tint.copy(alpha = 0.72f))
+    CoverText(text = text, style = LibraryTypography.AlbumArtist, alpha = 0.72f)
 }
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(
+    CoverText(
         text = text.uppercase(),
         style = LibraryTypography.PageCount,
-        color = LocalCoverColors.current.tint.copy(alpha = 0.66f),
+        alpha = 0.66f,
         modifier = Modifier.padding(start = PAGE_MARGIN, end = PAGE_MARGIN, top = 14.dp, bottom = 4.dp),
     )
 }

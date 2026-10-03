@@ -48,7 +48,7 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LibraryTypography
-import com.ikko.aura.ui.theme.LocalCoverColors
+import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.HomeViewModel
 import com.ikko.aura.viewmodel.PlayerViewModel
@@ -136,7 +136,6 @@ private val SECTION_HEADER_HEIGHT = 56.dp
 
 @Composable
 private fun SectionTitle(title: String, modifier: Modifier = Modifier, onSeeAll: (() -> Unit)? = null) {
-    val cover = LocalCoverColors.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -145,10 +144,9 @@ private fun SectionTitle(title: String, modifier: Modifier = Modifier, onSeeAll:
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
+        CoverText(
             text = title,
             style = LibraryTypography.PageTitle,
-            color = cover.tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
@@ -220,7 +218,6 @@ private fun AlbumCell(album: Album, navController: NavHostController, modifier: 
 @Composable
 private fun AlbumCarousel(albums: List<Album>, navController: NavHostController) {
     if (albums.isEmpty()) return
-    val cover = LocalCoverColors.current
     LazyRow(
         contentPadding = PaddingValues(horizontal = PAGE_MARGIN),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -265,10 +262,10 @@ private fun AlbumCarousel(albums: List<Album>, navController: NavHostController)
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
+                    CoverText(
                         text = album.artist,
                         style = LibraryTypography.AlbumArtist,
-                        color = cover.tint.copy(alpha = 0.72f),
+                        alpha = 0.72f,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
