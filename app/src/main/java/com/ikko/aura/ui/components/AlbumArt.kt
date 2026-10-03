@@ -40,11 +40,16 @@ import androidx.core.graphics.scale
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.AuraShapes
+import com.ikko.aura.util.AbsentCovers
+import com.ikko.aura.util.SingleFlight
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListSet
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 object AlbumArtCache {
@@ -109,6 +114,9 @@ object AlbumArtCache {
      */
     private val decodeDispatcher = Dispatchers.IO.limitedParallelism(2)
 
+    /** One decode at a time per cover and size: the rows of one album all ask for it together. */
+    private val flights = SingleFlight<String, Bitmap>()
+
     /**
      * Synchronous cache lookup, for reading an already-decoded bitmap during composition instead
      * of waiting a frame for a coroutine to hand back something already in memory.
@@ -132,15 +140,44 @@ object AlbumArtCache {
         val fullKey = key(cacheKey, size)
         cache.get(fullKey)?.let { return it }
         downscaledFromLarger(cacheKey, size)?.let { return store(cacheKey, size, it) }
-        return withContext(decodeDispatcher) {
-            // Checked once more on the decode thread: between the miss above and getting here a
-            // concurrent request for a bigger rung of the same cover may well have landed, and a
-            // track change asks for four sizes of one picture within a frame or two of each other.
-            cache.get(fullKey)
-                ?: downscaledFromLarger(cacheKey, size)?.let { store(cacheKey, size, it) }
-                ?: runCatching { decode(context, uri, size) }
-                    .getOrNull()
-                    ?.let { store(cacheKey, size, it) }
+        // After the cache, not before: a file with no picture of its own still shows its album's, when another
+        // track of it has put one there.
+        val file = uri.toString()
+        if (file in AbsentCovers) return null
+        return flights.run(fullKey) {
+            withContext(decodeDispatcher) {
+                // Checked once more on the decode thread: between the miss above and getting here a
+                // concurrent request for a bigger rung of the same cover may well have landed, and a
+                // track change asks for four sizes of one picture within a frame or two of each other.
+                cache.get(fullKey)
+                    ?: downscaledFromLarger(cacheKey, size)?.let { store(cacheKey, size, it) }
+                    ?: if (file in AbsentCovers) null else decodeAndStore(context, uri, file, cacheKey, size)
+            }
+        }
+    }
+
+    private suspend fun decodeAndStore(context: Context, uri: Uri, file: String, cacheKey: String, size: Int): Bitmap? {
+        val decoded = try {
+            decode(context, uri, size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Decoded.FAILED
+        }
+        // Cancelled while it was decoding: the result is for nobody and says nothing about the cover.
+        currentCoroutineContext().ensureActive()
+        decoded.bitmap?.let { return store(cacheKey, size, it) }
+        // Only a local file that was read and has no picture; a failed request (the network, the provider) is
+        // not "no cover" and is tried again.
+        if (decoded.absent) AbsentCovers.add(file)
+        return null
+    }
+
+    /** What a decode found: the picture, or nothing because there is none ([absent]) or because it did not work. */
+    private class Decoded(val bitmap: Bitmap?, val absent: Boolean = false) {
+        companion object {
+            val FAILED = Decoded(null)
+            val ABSENT = Decoded(null, absent = true)
         }
     }
 
@@ -232,18 +269,21 @@ object AlbumArtCache {
      * moment the coroutine that requested it is cancelled, via [suspendCancellableCoroutine]'s
      * `invokeOnCancellation` hook — rather than just letting it finish and discarding the result.
      */
-    private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Bitmap? {
-        if (uri.scheme == "https" || uri.scheme == "http") return fetchRemote(context, uri, targetSizePx)
+    private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Decoded {
+        if (uri.scheme == "https" || uri.scheme == "http") return Decoded(fetchRemote(context, uri, targetSizePx))
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val signal = CancellationSignal()
             suspendCancellableCoroutine { continuation ->
                 continuation.invokeOnCancellation { signal.cancel() }
                 val result = try {
-                    context.contentResolver.loadThumbnail(uri, Size(targetSizePx, targetSizePx), signal)
+                    Decoded(context.contentResolver.loadThumbnail(uri, Size(targetSizePx, targetSizePx), signal))
                 } catch (e: OperationCanceledException) {
-                    null
+                    Decoded.FAILED
+                } catch (e: java.io.IOException) {
+                    // What the provider throws for a file it read and found no picture in.
+                    Decoded.ABSENT
                 } catch (e: Exception) {
-                    null
+                    Decoded.FAILED
                 }
                 if (continuation.isActive) continuation.resumeWith(Result.success(result))
             }
@@ -251,9 +291,8 @@ object AlbumArtCache {
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(context, uri)
-                retriever.embeddedPicture?.let { bytes ->
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                }
+                val bytes = retriever.embeddedPicture
+                if (bytes == null) Decoded.ABSENT else Decoded(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
             } finally {
                 retriever.release()
             }

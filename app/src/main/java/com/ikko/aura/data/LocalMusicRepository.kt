@@ -103,6 +103,8 @@ class LocalMusicRepository @Inject constructor(
             _scanned.value = true
             // Only now: a scan that failed (no permission yet, a provider error) leaves the library to be tried again.
             hasScanned = true
+            // The covers found missing are looked for again: a file may have been given one since.
+            com.ikko.aura.util.AbsentCovers.clear()
             enrichAudioProperties(initial, scan.stamps, cached)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
