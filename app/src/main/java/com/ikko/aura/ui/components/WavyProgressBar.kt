@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -98,11 +99,18 @@ fun WavyProgressBar(
     var dragFraction by remember { mutableStateOf<Float?>(null) }
 
     val safeDuration = durationMs().coerceAtLeast(1L)
+    // What the player last reported (every half second, and on play, pause and seek): the labels show it, and so
+    // does the thumb while nothing plays. While a track plays the thumb moves between two reports (see below).
     val playedFraction = dragFraction
         ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
     val displayedMs = (playedFraction * safeDuration).toLong()
 
+    val reading = remember { object { var reported = Long.MIN_VALUE; var at = 0L; var pending = Long.MIN_VALUE } }
     val waving = isPlaying && dragFraction == null
+    // Paused with no new report since the thumb last moved: it stays where the music stopped (the report can be up to
+    // half a second behind, as the player only reports while it plays), instead of stepping back to it. A seek or a new
+    // track gives a new report and the thumb goes to it.
+    val frozen = !isPlaying && dragFraction == null && positionMs() == reading.reported
     // Flattening rather than freezing: a wave that simply stops mid-crest reads as a glitch,
     // whereas easing the amplitude to zero reads as the track settling.
     val amplitudeScale = animateFloatAsState(
@@ -118,8 +126,20 @@ fun WavyProgressBar(
     val phase = remember { mutableFloatStateOf(0f) }
     // 0 at rest, 1 at the top of a beat's swell.
     val pulse = remember { mutableFloatStateOf(0f) }
+    // Where the thumb is while a track plays, in ms: the last report plus the time since it came, stepped by the same
+    // loop as the wave. The player reports twice a second and the thumb used to jump to each report; between two it now
+    // keeps moving at the pace of the music, a fraction of a pixel a step.
+    val smoothMs = remember { mutableFloatStateOf(0f) }
+    val latestPosition by rememberUpdatedState(positionMs)
     LaunchedEffect(waving) {
         if (!waving && amplitudeScale.value == 0f) return@LaunchedEffect
+        if (waving) {
+            // Resuming: where the thumb stands is kept, unless the report is somewhere else altogether.
+            val reported = latestPosition().toFloat()
+            if (kotlin.math.abs(reported - smoothMs.floatValue) > 700f) smoothMs.floatValue = reported
+            reading.reported = Long.MIN_VALUE
+            reading.pending = Long.MIN_VALUE
+        }
         val runForMs = if (waving) Long.MAX_VALUE else AMPLITUDE_SETTLE_MS.toLong()
         var last = -1L
         var elapsed = 0L
@@ -140,6 +160,26 @@ fun WavyProgressBar(
                         owed = 0L
                         val since = if (waving) sinceBeat() else null
                         pulse.floatValue = if (since == null) 0f else beatSwell(since.toFloat())
+                        if (waving) {
+                            val reported = latestPosition()
+                            if (reported != reading.reported) { reading.reported = reported; reading.at = now }
+                            val target = (reported + (now - reading.at)).toFloat()
+                            val current = smoothMs.floatValue
+                            // Never backwards for a report that merely arrived a little late. A real jump (a seek, a new
+                            // track) is followed once the report has held for a second step: right after a seek the player
+                            // can still answer with the old position for a moment, and following that too made the thumb
+                            // go to the new place, back, and to the new place again.
+                            val jump = kotlin.math.abs(target - current) > 250f
+                            if (!jump) {
+                                reading.pending = Long.MIN_VALUE
+                                smoothMs.floatValue = if (target < current) current else target
+                            } else if (reading.pending == reported) {
+                                reading.pending = Long.MIN_VALUE
+                                smoothMs.floatValue = target
+                            } else {
+                                reading.pending = reported
+                            }
+                        }
                     }
                 }
                 last = now
@@ -212,7 +252,17 @@ fun WavyProgressBar(
             val start = thumbW / 2f
             val end = size.width - thumbW / 2f
             val usable = (end - start).coerceAtLeast(1f)
-            val thumbX = start + usable * playedFraction
+            // Read only while a track plays: a paused bar is not redrawn for it.
+            // A stepped value that is far from the report is stale (a seek, a pause, a new track, in the frame before the
+            // loop catches up): the report is believed then, so the thumb never shows an old place for a frame.
+            val shownFraction = if (waving || frozen) {
+                val stepped = smoothMs.floatValue
+                val reportedMs = playedFraction * safeDuration
+                if (kotlin.math.abs(stepped - reportedMs) > 700f) playedFraction else (stepped / safeDuration.toFloat()).coerceIn(0f, 1f)
+            } else {
+                playedFraction
+            }
+            val thumbX = start + usable * shownFraction
 
             // As in the reference: what has been played is a short flat dash at first, and the wave rises out of it as the
             // played part grows — a third of a wavelength is still flat, a wavelength and a half is the full wave. No dot,
