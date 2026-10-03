@@ -1,3 +1,5 @@
+import com.android.build.api.variant.BuildConfigField
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -26,6 +28,10 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        // False and empty everywhere but in the QA variant (see androidComponents below), where Réglages shows the text.
+        // A constant `false` lets the compiler drop the whole branch that reads them: the other builds do not contain it.
+        buildConfigField("boolean", "IS_QA", "false")
+        buildConfigField("String", "QA_INFO", "\"\"")
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -102,6 +108,24 @@ android {
             "/META-INF/LICENSE*",
             "/META-INF/NOTICE*"
         )
+    }
+}
+
+// The QA variant says what it is on Réglages: "Version de test • QA • <short HEAD>", with a "+" after the hash when tracked
+// files differ from that commit (a build made from uncommitted changes must not pass for the commit). Read through
+// providers.exec so Gradle runs git again on each build and a new commit is never served from the configuration cache.
+androidComponents {
+    onVariants(selector().withBuildType("qa")) { variant ->
+        fun git(vararg args: String) = providers.exec {
+            commandLine("git", *args)
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { it.trim() }
+        val info = git("rev-parse", "--short", "HEAD").zip(git("status", "--porcelain", "--untracked-files=no")) { head, changes ->
+            val hash = head.ifEmpty { "inconnu" }
+            "Version de test \u2022 QA \u2022 $hash${if (changes.isNotEmpty()) "+" else ""}"
+        }
+        variant.buildConfigFields?.put("IS_QA", BuildConfigField("boolean", "true", "this is the QA build"))
+        variant.buildConfigFields?.put("QA_INFO", info.map { BuildConfigField("String", "\"$it\"", "what the QA build is") })
     }
 }
 

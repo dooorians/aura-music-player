@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LibraryTypography
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -259,6 +260,17 @@ fun SettingsScreen(
             }
             item {
                 SettingsInfoRow(title = "Appareil", value = "iKKO MindOne Pro")
+            }
+            // Only the QA variant has something to say here (see QA_INFO in build.gradle.kts): the other builds show nothing.
+            if (BuildConfig.IS_QA) {
+                item {
+                    CoverText(
+                        text = BuildConfig.QA_INFO,
+                        style = LibraryTypography.PageCount.copy(textAlign = TextAlign.Center),
+                        alpha = 0.66f,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_MARGIN, vertical = 20.dp),
+                    )
+                }
             }
         }
     }

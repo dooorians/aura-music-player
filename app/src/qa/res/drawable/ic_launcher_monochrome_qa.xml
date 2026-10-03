@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer: Aura's own, with the badge as a solid pill and the letters cut out of it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher_monochrome" />
+    <item android:drawable="@drawable/ic_qa_badge_mono" />
+</layer-list>
