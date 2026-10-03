@@ -667,8 +667,8 @@ private fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumContro
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text("Supprimer les téléchargements ?") },
-            text = { Text("Les fichiers de cet album seront effacés de l'appareil. Les titres restent dans la bibliothèque et se lisent en flux.") },
+            title = { Text("Supprimer l'album téléchargé ?") },
+            text = { Text("Les fichiers de cet album seront effacés de l'appareil et ses titres retirés de la bibliothèque.") },
             confirmButton = { TextButton(onClick = { confirmRemove = false; controls.onRemoveAlbumDownloads() }) { Text("Supprimer") } },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Annuler") } },
         )

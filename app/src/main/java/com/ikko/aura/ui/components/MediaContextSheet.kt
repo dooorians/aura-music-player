@@ -103,16 +103,20 @@ fun MediaContextSheet(
             if (streamed) {
                 if (streamedHasAlbum) ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }
                 ContextAction(CupertinoIcons.Person, "Voir l'artiste") { onOpenArtist(); onDismiss() }
+                val downloaded = download?.state == DownloadState.DONE
                 when (download?.state) {
+                    // A downloaded song is a file of the library: one action takes both away.
                     DownloadState.DONE ->
-                        ContextAction(CupertinoIcons.Delete, "Supprimer le téléchargement") { onRemoveDownload(); onDismiss() }
+                        ContextAction(CupertinoIcons.Delete, "Supprimer le titre et son téléchargement", tint = AuraColors.AccentPink) { onRemoveDownload(); onDismiss() }
                     DownloadState.QUEUED, DownloadState.DOWNLOADING -> Unit
                     else -> ContextAction(CupertinoIcons.ArrowDownCircle, "Télécharger") { onDownload(); onDismiss() }
                 }
-                if (keptInLibrary) {
-                    ContextAction(CupertinoIcons.Delete, "Retirer de la bibliothèque", tint = AuraColors.AccentPink) { onToggleKeep(); onDismiss() }
-                } else {
-                    ContextAction(CupertinoIcons.Add, "Ajouter à la bibliothèque") { onToggleKeep(); onDismiss() }
+                if (!downloaded) {
+                    if (keptInLibrary) {
+                        ContextAction(CupertinoIcons.Delete, "Retirer de la bibliothèque", tint = AuraColors.AccentPink) { onToggleKeep(); onDismiss() }
+                    } else {
+                        ContextAction(CupertinoIcons.Add, "Ajouter à la bibliothèque") { onToggleKeep(); onDismiss() }
+                    }
                 }
                 return@Column
             }

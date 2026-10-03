@@ -376,9 +376,11 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.enqueue(tracks) } }
     }
 
-    fun removeDownloads(tracks: List<Track>) {
-        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.remove(tracks.map { it.id }) } }
-    }
+    /**
+     * Deleting a downloaded song deletes it: its file goes and so does its place in the library. A song that only
+     * lost its file stayed in the titles (as a stream) while its album, which lists downloads, disappeared.
+     */
+    fun removeDownloads(tracks: List<Track>) = unkeepStreamed(tracks)
 
     fun playQueue(tracks: List<Track>, startIndex: Int) {
         rememberStreamed(tracks)
