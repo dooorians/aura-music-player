@@ -26,14 +26,9 @@ data class EqualizerSettings(
 class SettingsStore @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) {
-    private val batterySaverKey = booleanPreferencesKey("battery_saver")
     private val onlineLyricsKey = booleanPreferencesKey("online_lyrics")
     private val automixKey = booleanPreferencesKey("automix")
     private val ytmKey = booleanPreferencesKey("ytm_enabled")
-
-    val batterySaverEnabled = context.settingsDataStore.data.map { prefs ->
-        prefs[batterySaverKey] ?: false
-    }
 
     /**
      * Whether a track with no `.lrc` beside it may be looked up online. On by default —
@@ -64,10 +59,6 @@ class SettingsStore @Inject constructor(
 
     suspend fun setAutomixEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[automixKey] = enabled }
-    }
-
-    suspend fun setBatterySaverEnabled(enabled: Boolean) {
-        context.settingsDataStore.edit { it[batterySaverKey] = enabled }
     }
 
     private val eqEnabledKey = booleanPreferencesKey("eq_enabled")

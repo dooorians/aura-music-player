@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class SettingsUiState(
-    val batterySaverEnabled: Boolean = false,
     val isScanning: Boolean = false,
     val onlineLyricsEnabled: Boolean = true,
     val automixEnabled: Boolean = false,
@@ -50,7 +49,6 @@ class SettingsViewModel @Inject constructor(
     // intersection of everything passed in, which Kotlin warns about and will reject outright in a
     // future release. `Any?` is what the array is actually read as two lines below anyway.
     val uiState: StateFlow<SettingsUiState> = combine<Any?, SettingsUiState>(
-        settingsStore.batterySaverEnabled,
         musicRepository.isScanning,
         settingsStore.onlineLyricsEnabled,
         settingsStore.automixEnabled,
@@ -58,21 +56,16 @@ class SettingsViewModel @Inject constructor(
         settingsStore.ytmEnabled,
     ) { values ->
         SettingsUiState(
-            batterySaverEnabled = values[0] as Boolean,
-            isScanning = values[1] as Boolean,
-            onlineLyricsEnabled = values[2] as Boolean,
-            automixEnabled = values[3] as Boolean,
-            sleepMinutesLeft = values[4] as Int?,
-            ytmEnabled = values[5] as Boolean,
+            isScanning = values[0] as Boolean,
+            onlineLyricsEnabled = values[1] as Boolean,
+            automixEnabled = values[2] as Boolean,
+            sleepMinutesLeft = values[3] as Int?,
+            ytmEnabled = values[4] as Boolean,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     private companion object {
         const val SLEEP_TICK_MS = 20_000L
-    }
-
-    fun setBatterySaverEnabled(enabled: Boolean) {
-        viewModelScope.launch { settingsStore.setBatterySaverEnabled(enabled) }
     }
 
     fun setOnlineLyricsEnabled(enabled: Boolean) {

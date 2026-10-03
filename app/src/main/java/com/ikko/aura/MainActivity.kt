@@ -7,9 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ikko.aura.ui.theme.AuraTheme
 import com.ikko.aura.viewmodel.SettingsViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -34,9 +32,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AuraApp() {
-    val settingsViewModel: SettingsViewModel = hiltViewModel()
-    val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    AuraTheme(batterySaver = settings.batterySaverEnabled) {
+    // Still created here, as before: building it brings the playback connection up (SleepTimer -> PlayerController).
+    // Moving that is a startup change of its own, not part of this one.
+    hiltViewModel<SettingsViewModel>()
+    AuraTheme {
         MainLayout()
     }
 }

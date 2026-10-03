@@ -11,7 +11,12 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-val LocalAuraBatterySaver = staticCompositionLocalOf { false }
+/**
+ * The app's one look for glass and backgrounds: flat tinted glass with an edge (no blur, lens, saturation, highlight, shadow
+ * or backdrop recording) and an aurora and cover wash held still. It was the "battery saver" setting; it is now the
+ * permanent design, so this is always true and nothing provides another value.
+ */
+val LocalAuraBatterySaver = staticCompositionLocalOf { true }
 
 /**
  * The theme the background is lit with when a page has colours of its own (the album page, which is
@@ -55,17 +60,12 @@ private val AuraDarkColorScheme = darkColorScheme(
 
 @Composable
 fun AuraTheme(
-    batterySaver: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    CompositionLocalProvider(
-        LocalAuraBatterySaver provides batterySaver,
-    ) {
-        MaterialTheme(
-            colorScheme = AuraDarkColorScheme,
-            typography = AuraTypography,
-            shapes = AuraMaterialShapes,
-            content = content,
-        )
-    }
+    MaterialTheme(
+        colorScheme = AuraDarkColorScheme,
+        typography = AuraTypography,
+        shapes = AuraMaterialShapes,
+        content = content,
+    )
 }

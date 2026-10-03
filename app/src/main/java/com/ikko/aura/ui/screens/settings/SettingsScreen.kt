@@ -109,16 +109,6 @@ fun SettingsScreen(
                 )
             }
 
-            item { SectionLabel("Performance") }
-            item {
-                SettingsSwitchRow(
-                    title = "Économiseur de batterie",
-                    subtitle = "Désactive les animations de fond pour économiser l'énergie",
-                    checked = uiState.batterySaverEnabled,
-                    onCheckedChange = settingsViewModel::setBatterySaverEnabled,
-                )
-            }
-
             item { SectionLabel("Automix") }
             item {
                 SettingsSwitchRow(
