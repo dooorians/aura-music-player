@@ -118,6 +118,17 @@ object AlbumArtCache {
      */
     private val decodeDispatcher = Dispatchers.IO.limitedParallelism(2)
 
+    /**
+     * The same two slots again, for the web only. A cover on the web can take as long as its timeouts (10 s to connect,
+     * 15 s to read), and two of them slow held both [decodeDispatcher] slots: every local cover on the screen, the
+     * pill's included, stayed empty until one answered (8 s with two slow ones, 15 s with two that did not answer).
+     * Like [decodeDispatcher] this is a view of the shared IO pool, not a pool of its own: no thread is kept for it,
+     * at most two are borrowed while a cover is being fetched.
+     */
+    private val networkDispatcher = Dispatchers.IO.limitedParallelism(2)
+
+    private fun isRemote(uri: Uri) = uri.scheme == "https" || uri.scheme == "http"
+
     /** One decode at a time per cover and size: the rows of one album all ask for it together. */
     private val flights = SingleFlight<String, Bitmap>()
 
@@ -153,7 +164,7 @@ object AlbumArtCache {
         val file = uri.toString()
         if (file in AbsentCovers) return null
         return flights.run(fullKey) {
-            withContext(decodeDispatcher) {
+            withContext(if (isRemote(uri)) networkDispatcher else decodeDispatcher) {
                 // Checked once more on the decode thread: between the miss above and getting here a
                 // concurrent request for a bigger rung of the same cover may well have landed, and a
                 // track change asks for four sizes of one picture within a frame or two of each other.
@@ -259,7 +270,24 @@ object AlbumArtCache {
      * A cover on the web (a streaming source's), sampled down to the size it will be drawn at. Kept on disk, so a list
      * scrolled again does not fetch every picture again; the folder is trimmed to [WEB_COVER_BUDGET_BYTES].
      */
-    private fun fetchRemote(context: Context, uri: Uri, targetSizePx: Int): Bitmap? {
+    private suspend fun fetchRemote(context: Context, uri: Uri, targetSizePx: Int): Bitmap? =
+        suspendCancellableCoroutine { continuation ->
+            // The request is blocking, so it is the connection that is closed when the cover is no longer wanted (its
+            // row left the screen): the read then fails at once and the slot is free, instead of held until the
+            // server answers or the timeout runs out.
+            val open = java.util.concurrent.atomic.AtomicReference<java.net.HttpURLConnection?>()
+            continuation.invokeOnCancellation { open.get()?.disconnect() }
+            val result = runCatching { fetchRemoteBlocking(context, uri, targetSizePx, open) { continuation.isCancelled } }
+            if (continuation.isActive) continuation.resumeWith(result)
+        }
+
+    private fun fetchRemoteBlocking(
+        context: Context,
+        uri: Uri,
+        targetSizePx: Int,
+        open: java.util.concurrent.atomic.AtomicReference<java.net.HttpURLConnection?>,
+        cancelled: () -> Boolean,
+    ): Bitmap? {
         val dir = java.io.File(context.cacheDir, "web_covers").apply { mkdirs() }
         val file = java.io.File(dir, java.security.MessageDigest.getInstance("SHA-1").digest(uri.toString().toByteArray()).joinToString("") { "%02x".format(it) })
         val bytes = if (file.exists() && file.length() > 0) {
@@ -267,6 +295,12 @@ object AlbumArtCache {
             file.readBytes()
         } else {
             val connection = java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection
+            open.set(connection)
+            // Cancelled before the connection was published: the callback had nothing to close.
+            if (cancelled()) {
+                connection.disconnect()
+                throw java.io.IOException("cancelled")
+            }
             try {
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 15_000
@@ -307,7 +341,7 @@ object AlbumArtCache {
      * `invokeOnCancellation` hook — rather than just letting it finish and discarding the result.
      */
     private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Decoded {
-        if (uri.scheme == "https" || uri.scheme == "http") return Decoded(fetchRemote(context, uri, targetSizePx))
+        if (isRemote(uri)) return Decoded(fetchRemote(context, uri, targetSizePx))
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val signal = CancellationSignal()
             suspendCancellableCoroutine { continuation ->
