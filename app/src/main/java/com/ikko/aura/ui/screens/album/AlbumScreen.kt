@@ -61,6 +61,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -113,6 +115,9 @@ internal val PAGE_PADDING = 15.dp
 internal val ART_SIZE = 89.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
 internal val ACTION_HEIGHT = 42.dp
+
+/** The white capsule is drawn right to its edge while the dark buttons have a rim inside theirs: 2 dp less for the same height. */
+private val PLAY_HEIGHT = 40.dp
 
 /** The play capsule's width: about three round buttons' worth. */
 private val PLAY_WIDTH = 144.dp
@@ -463,6 +468,7 @@ private fun AlbumHeader(
     hasDownload: Boolean = false,
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
 
     // As the design: the cover on the left, the title / artist (in the accent) / count beside it, then one row of actions.
     Column(
@@ -502,7 +508,7 @@ private fun AlbumHeader(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}",
+                    text = meta.ifEmpty { "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}" },
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp,
                     lineHeight = 15.sp,
@@ -578,14 +584,30 @@ internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier
     // A solid white capsule, as tall as the round buttons beside it.
     Row(
         modifier = modifier
-            .height(ACTION_HEIGHT)
+            .height(PLAY_HEIGHT)
+            // Offscreen, so that the icon below can cut a hole through the white and show what is behind.
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
             .clip(CircleShape)
             .background(Color.White)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+        Icon(
+            CupertinoIcons.Play,
+            contentDescription = null,
+            tint = Color.Black,
+            modifier = Modifier
+                .size(16.dp)
+                .drawWithContent {
+                    drawIntoCanvas { canvas ->
+                        val paint = androidx.compose.ui.graphics.Paint().apply { blendMode = androidx.compose.ui.graphics.BlendMode.DstOut }
+                        canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
+                        drawContent()
+                        canvas.restore()
+                    }
+                },
+        )
         Spacer(Modifier.width(7.dp))
         Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black, maxLines = 1)
     }
