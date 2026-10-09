@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -439,6 +440,9 @@ internal fun StatusBarScrim(solid: Color, listState: LazyListState) {
 
 private const val SCRIM_RAMP_PX = 260f
 
+/** Everything in the header that is not the cover, in dp: the margins, the three lines of text, the action row. */
+private const val HEADER_REST_DP = 168
+
 /**
  * The header starts where the other pages' titles do — Home's "Favoris", the library's "Bibliothèque",
  * "Réglages": 21 dp under the status bar (8 dp of margin, then a 56 dp title row centring a 30 sp line). At 10 dp
@@ -465,32 +469,20 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + 8.dp, bottom = 12.dp),
     ) {
-        // The cover and its text are one group, centred on the page, the text level with the middle of the cover. The text
-        // column is as wide as its widest line (measured here: left to itself it took all the room left, and the group
-        // sat off-centre).
-        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-        val titleStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 28.sp)
-        val artistStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-        val metaStyle = MaterialTheme.typography.bodySmall
-        val density = LocalDensity.current
-        val textMax = LocalConfiguration.current.screenWidthDp.dp - PAGE_PADDING * 2 - ART_SIZE - 18.dp
-        val textWidth = remember(uiState.title, uiState.artist, meta, textMax) {
-            val maxPx = with(density) { textMax.roundToPx() }
-            val widest = listOf(uiState.title.trim() to titleStyle, uiState.artist.trim() to artistStyle, meta.trim() to metaStyle)
-                .filter { it.first.isNotEmpty() }
-                .maxOf { (t, st) -> measurer.measure(t, st, maxLines = if (st === titleStyle) 2 else 1, constraints = androidx.compose.ui.unit.Constraints(maxWidth = maxPx)).size.width }
-            with(density) { widest.toDp() }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        // As on the reference: a large cover on the page's middle line, the title under it, then the artist and the details,
+        // all centred.
+        // Sized so that, at rest, everything down to the action buttons is above the mini player (about 363 dp from the top).
+        // The cover takes what is left: the header's other parts are a fixed height (HEADER_REST_DP), the mini player and
+        // a small margin are kept clear, and the cover is whatever remains, within sensible bounds. Sized to the screen.
+        val screen = LocalConfiguration.current
+        val coverSize = (screen.screenHeightDp.dp - LocalPlayerPillHeight.current - statusTop - HEADER_REST_DP.dp)
+            .coerceIn(110.dp, (screen.screenWidthDp.dp - PAGE_PADDING * 2 - 24.dp).coerceAtMost(340.dp))
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier.shadow(
-                    elevation = 16.dp,
+                    elevation = 20.dp,
                     shape = ART_SHAPE,
                     ambientColor = Color.Black.copy(alpha = 0.45f),
                     spotColor = Color.Black.copy(alpha = 0.55f),
@@ -501,47 +493,48 @@ private fun AlbumHeader(
                     contentDescription = uiState.title,
                     shape = ART_SHAPE,
                     modifier = Modifier
-                        .size(ART_SIZE)
+                        .size(coverSize)
                         .border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
-                    targetSizeDp = ART_SIZE,
+                    targetSizeDp = coverSize,
                     cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
                 )
             }
-            Spacer(Modifier.width(18.dp))
-            Column(modifier = Modifier.widthIn(max = textMax).width(textWidth).padding(top = 2.dp)) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = uiState.title.trim(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                fontSize = 24.sp,
+                lineHeight = 28.sp,
+                color = AuraColors.TextPrimary,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = uiState.artist.trim(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = accentSoft.value,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (meta.isNotEmpty()) {
+                Spacer(Modifier.height(3.dp))
                 Text(
-                    text = uiState.title.trim(),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 24.sp,
-                    lineHeight = 28.sp,
-                    color = AuraColors.TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    text = uiState.artist.trim(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = accentSoft.value,
+                    text = meta.trim(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AuraColors.TextSecondary.copy(alpha = 0.78f),
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (meta.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = meta,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AuraColors.TextSecondary.copy(alpha = 0.78f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(14.dp))
 
         // "Lire tout" is exactly at the middle of the page; the round buttons are laid out either side of it:
         // shuffle on its left, the menu on its right (the download of an external album is in it; favourites are in the album's long-press menu).

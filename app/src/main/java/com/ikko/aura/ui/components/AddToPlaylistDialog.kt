@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -21,12 +22,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,7 +51,6 @@ import com.ikko.aura.viewmodel.PlaylistsViewModel
  * "Ajouter à la playlist": a tall sheet with a close button and the title on top, a search field, the playlists last
  * used, then all of them; a round + at the bottom makes a new one holding the songs.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddToPlaylistDialog(
     trackIds: List<String>,
@@ -77,16 +75,21 @@ fun AddToPlaylistDialog(
         onDismiss()
     }
 
-    ModalBottomSheet(
+    // A dialog of its own rather than a bottom sheet: the sheet's drag took the list's upward scroll for its own and
+    // moved the whole panel. This one has nothing to drag; it closes with the X, the back gesture or a tap outside.
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-        contentColor = AuraColors.TextPrimary,
-        shape = AuraMenu.SheetShape,
-        scrimColor = Color.Black.copy(alpha = 0.45f),
-        dragHandle = null,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(Modifier.fillMaxHeight(0.92f)) {
+      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+      Box(
+        Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.92f)
+            .clip(AuraMenu.SheetShape)
+            .background(AuraMenu.tint().copy(alpha = 0.97f)),
+      ) {
+        Box(Modifier.fillMaxHeight()) {
             Column(Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -128,12 +131,14 @@ fun AddToPlaylistDialog(
                     items(shown, key = { "a${it.id}" }) { PlaylistRow(it) { add(it) } }
                 }
             }
-            Box(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 24.dp)) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 24.dp)) {
                 AuraIconButton(onClick = { creating = true }, tone = ButtonTone.Primary, size = 56.dp) {
                     Icon(CupertinoIcons.Add, contentDescription = "Nouvelle playlist", modifier = Modifier.size(24.dp))
                 }
             }
         }
+      }
+      }
     }
 
     if (creating) {
