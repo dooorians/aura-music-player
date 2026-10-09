@@ -415,7 +415,7 @@ private fun LibraryHeader(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 // The discs' centre sits level with the middle of the title's capitals.
-                .padding(top = TITLE_RELATIVE_BASELINE - 9.dp - HEADER_BUTTON / 2),
+                .padding(top = TITLE_RELATIVE_BASELINE - 10.6.dp - HEADER_BUTTON / 2),
             horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
             verticalAlignment = Alignment.CenterVertically,
         ) {

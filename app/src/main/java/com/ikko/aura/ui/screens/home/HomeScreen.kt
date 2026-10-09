@@ -144,10 +144,11 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(top = statusBar + 8.dp),
+                    .padding(top = statusBar + 10.5.dp),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = margin),
+                    // The library's own margin, so the two pages' titles and corner buttons sit on the same lines.
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -163,7 +164,7 @@ fun HomeScreen(
                     ProfileAvatar(
                         imageUri = profileImageUri,
                         contentDescription = "Ouvrir les réglages du profil",
-                        modifier = Modifier.size(36.dp).clickable {
+                        modifier = Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable {
                             navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true }
                         },
                     )
