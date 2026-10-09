@@ -109,10 +109,10 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-internal val PAGE_PADDING = 12.dp
-internal val ART_SIZE = 96.dp
+internal val PAGE_PADDING = 15.dp
+internal val ART_SIZE = 89.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
-internal val ACTION_HEIGHT = 48.dp
+internal val ACTION_HEIGHT = 42.dp
 
 /** The play capsule's width: about three round buttons' worth. */
 private val PLAY_WIDTH = 144.dp
@@ -268,7 +268,6 @@ fun AlbumPageContent(
                             number = index + 1,
                             track = track,
                             albumArtist = uiState.artist,
-                            inset = 12.dp,
                             isCurrent = nowPlaying.first == track.id,
                             isPlaying = nowPlaying.second,
                             accent = accent,
@@ -464,134 +463,87 @@ private fun AlbumHeader(
     hasDownload: Boolean = false,
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
 
+    // As the design: the cover on the left, the title / artist (in the accent) / count beside it, then one row of actions.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 14.dp),
     ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Box(
-                modifier = Modifier.shadow(
-                    elevation = 16.dp,
-                    shape = ART_SHAPE,
-                    ambientColor = Color.Black.copy(alpha = 0.45f),
-                    spotColor = Color.Black.copy(alpha = 0.55f),
-                ),
-            ) {
-                AlbumArt(
-                    uri = uiState.tracks.firstOrNull()?.artworkUri,
-                    contentDescription = uiState.title,
-                    shape = ART_SHAPE,
-                    modifier = Modifier
-                        .size(ART_SIZE)
-                        .border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
-                    targetSizeDp = ART_SIZE,
-                    cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
-                )
-            }
-            Spacer(Modifier.width(18.dp))
-            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AlbumArt(
+                uri = uiState.tracks.firstOrNull()?.artworkUri,
+                contentDescription = uiState.title,
+                shape = ART_SHAPE,
+                modifier = Modifier.size(ART_SIZE),
+                targetSizeDp = ART_SIZE,
+                cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
+            )
+            Spacer(Modifier.width(15.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = uiState.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
+                    text = uiState.title.trim(),
+                    fontWeight = FontWeight.ExtraBold,
                     fontSize = 24.sp,
                     lineHeight = 28.sp,
                     color = AuraColors.TextPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = uiState.artist,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    text = uiState.artist.trim(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    lineHeight = 18.sp,
                     color = accentSoft.value,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (meta.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = meta,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AuraColors.TextSecondary.copy(alpha = 0.78f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 1,
+                )
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(15.dp))
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LegacyPlayAllButton(onClick = onPlayAll, tint = null)
-            LegacyShuffleButton(onClick = onShuffle)
-            Spacer(Modifier.weight(1f))
-            LegacyCircleAction(onClick = onFavorite) {
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+            PlayAllButton(onClick = onPlayAll, label = "Lire tout", modifier = Modifier.weight(1.15f))
+            AuraButton(
+                onClick = onShuffle,
+                modifier = Modifier.weight(1f),
+                shape = CircleShape,
+                minHeight = ACTION_HEIGHT,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(text = "Mélanger", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            }
+            CircleAction(onClick = onFavorite) {
                 FillableIcon(
                     outline = CupertinoIcons.Star,
                     filled = CupertinoIcons.StarFilled,
                     active = uiState.isFavorite,
                     contentDescription = "Favori",
                     tint = Color.White,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(18.dp),
                 )
             }
             Box {
-                LegacyCircleAction(onClick = onMore) {
-                    Icon(
-                        CupertinoIcons.MoreVertical,
-                        contentDescription = "Plus d'options",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
+                CircleAction(onClick = onMore) {
+                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
                 moreMenu()
             }
         }
-    }
-}
-
-private val LEGACY_ACTION_HEIGHT = 44.dp
-
-@Composable
-private fun LegacyPlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
-    AuraButton(
-        onClick = onClick,
-        minHeight = LEGACY_ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        tint = tint,
-    ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(text = "Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-    }
-}
-
-@Composable
-private fun LegacyShuffleButton(onClick: () -> Unit) {
-    AuraButton(
-        onClick = onClick,
-        minHeight = LEGACY_ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 16.dp),
-    ) {
-        Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(text = "Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-    }
-}
-
-@Composable
-private fun LegacyCircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
-    AuraIconButton(onClick = onClick, size = LEGACY_ACTION_HEIGHT) {
-        content()
     }
 }
 
@@ -622,21 +574,20 @@ internal fun ActionRow(
 }
 
 @Composable
-internal fun PlayAllButton(onClick: () -> Unit) {
+internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier: Modifier = Modifier) {
     // A solid white capsule, as tall as the round buttons beside it.
     Row(
-        modifier = Modifier
+        modifier = modifier
             .height(ACTION_HEIGHT)
-            .width(PLAY_WIDTH)
             .clip(CircleShape)
             .background(Color.White)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, tint = Color(0xFF2A2318), modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(text = "Lire", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2A2318), maxLines = 1)
+        Icon(CupertinoIcons.Play, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black, maxLines = 1)
     }
 }
 
@@ -705,12 +656,12 @@ internal fun AlbumTrackRow(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = inset, vertical = 14.dp),
+            .padding(horizontal = inset, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
             leading()
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(11.dp))
         } else Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
             if (isCurrent) {
                 PlayingBars(color = currentTint, animate = isPlaying)
@@ -725,9 +676,9 @@ internal fun AlbumTrackRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = shownTitle,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.Bold,
                 color = if (isCurrent) currentTint else AuraColors.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -746,7 +697,7 @@ internal fun AlbumTrackRow(
         Spacer(Modifier.width(10.dp))
         Text(
             text = formatTrackDuration(track.durationMs),
-            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS),
+            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS, fontSize = 12.sp),
             color = if (isCurrent) AuraColors.TextSecondary else AuraColors.TextTertiary,
             maxLines = 1,
         )

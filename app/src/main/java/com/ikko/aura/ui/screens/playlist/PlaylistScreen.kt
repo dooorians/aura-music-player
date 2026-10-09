@@ -25,7 +25,6 @@ import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.screens.album.AlbumTrackRow
 import com.ikko.aura.ui.screens.album.ART_SHAPE
 import com.ikko.aura.ui.screens.album.ART_SIZE
-import com.ikko.aura.ui.screens.album.ActionRow
 import com.ikko.aura.ui.screens.album.CircleAction
 import com.ikko.aura.ui.screens.album.HEADER_TOP_BELOW_STATUS
 import com.ikko.aura.ui.screens.album.PAGE_PADDING
@@ -154,7 +153,7 @@ fun PlaylistScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
+                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 14.dp),
                     ) {
                         Row(verticalAlignment = Alignment.Top) {
                             Box(
@@ -189,19 +188,13 @@ fun PlaylistScreen(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                Spacer(Modifier.height(5.dp))
+                                Spacer(Modifier.height(4.dp))
                                 Text(
-                                    text = if (isFavorites) "Tes favoris" else "Playlist",
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = (if (isFavorites) "Tes favoris" else "Playlist") + " · " + meta.replace(" · ", " · "),
                                     fontWeight = FontWeight.SemiBold,
-                                    color = AuraColors.TextSecondary,
-                                    maxLines = 1,
-                                )
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    text = meta,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = AuraColors.TextSecondary.copy(alpha = 0.78f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 16.sp,
+                                    color = Color.White.copy(alpha = 0.72f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -214,11 +207,17 @@ fun PlaylistScreen(
                                 onCancel = { renaming = false },
                             )
                         }
-                        Spacer(Modifier.height(22.dp))
-                        if (current.tracks.isNotEmpty()) ActionRow(
-                            left = { ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) }) },
-                            center = { PlayAllButton(onClick = { playerViewModel.playQueue(current.tracks, 0) }) },
-                            right = {
+                        Spacer(Modifier.height(15.dp))
+                        if (current.tracks.isNotEmpty()) Row(
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) })
+                            PlayAllButton(
+                                onClick = { playerViewModel.playQueue(current.tracks, 0) },
+                                label = "Lire",
+                                modifier = Modifier.weight(1f),
+                            )
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box {
                                 CircleAction(onClick = { menuExpanded = true }) {
@@ -244,8 +243,7 @@ fun PlaylistScreen(
                                     )
                                 }
                             }
-                            },
-                        )
+                        }
                     }
                 }
                 if (current.tracks.isEmpty() && current.unavailable.isEmpty()) {
