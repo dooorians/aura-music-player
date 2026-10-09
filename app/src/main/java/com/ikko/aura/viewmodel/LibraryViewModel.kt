@@ -74,7 +74,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     suspend fun smartShuffle(): List<Track> {
-        val tracks = uiState.value.tracks
+        // Only what has a file: a song of another source whose download was deleted is not shuffled in.
+        val tracks = ytmLibrary.withFiles(uiState.value.tracks)
         if (tracks.isEmpty()) return emptyList()
         val analyses = analysisReader.analysesFor(tracks.map { it.id })
         return withContext(Dispatchers.Default) {

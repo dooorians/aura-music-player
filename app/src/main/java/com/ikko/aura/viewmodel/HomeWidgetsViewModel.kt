@@ -102,7 +102,7 @@ class HomeWidgetsViewModel @Inject constructor(
         favoritesStore.favoriteAlbumIds,
         recentlyPlayedTracker.playCounts,
         recentlyPlayedTracker.recentTrackIds,
-        ytmLibrary.observeKnown(),
+        ytmLibrary.observeDoneKeys(),
         ytmLibrary.observeKept(),
         playlistRepository.playlists,
         settingsStore.homeCardOrder,
@@ -114,15 +114,18 @@ class HomeWidgetsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST") val favoriteIds = values[3] as Set<Long>
         @Suppress("UNCHECKED_CAST") val plays = values[4] as List<AlbumPlayEntity>
         @Suppress("UNCHECKED_CAST") val recentTrackIds = values[5] as List<String>
-        @Suppress("UNCHECKED_CAST") val streamed = values[6] as List<Track>
+        @Suppress("UNCHECKED_CAST") val ytmDownloads = values[6] as List<String>
         @Suppress("UNCHECKED_CAST") val kept = values[7] as List<Track>
         @Suppress("UNCHECKED_CAST") val playlists = values[8] as List<PlaylistSummary>
         @Suppress("UNCHECKED_CAST") val order = values[9] as List<String>
         @Suppress("UNCHECKED_CAST") val hidden = values[10] as Set<String>
 
         // Streamed songs count as the library's own once played or kept, as on the old Home.
-        val allTracks = (tracks + streamed + kept).distinctBy { it.id }
-        val allAlbums = (albums + YtmLibrary.albumsOf((streamed + kept).distinctBy { it.id })).distinctBy { it.id }
+        // Streamed songs count only as kept ones (not everything ever played from a source), and only the downloaded among
+        // them: one whose download was deleted is not a file any more, and its album used to linger in the recents.
+        val downloadedKeys = ytmDownloads.toHashSet()
+        val allTracks = (tracks + kept.filter { it.id in downloadedKeys }).distinctBy { it.id }
+        val allAlbums = (albums + YtmLibrary.albumsOf(kept.filter { it.id in downloadedKeys })).distinctBy { it.id }
         val byId = allTracks.associateBy { it.id }
         val data = HomeSourceData(
             allTracks = allTracks,

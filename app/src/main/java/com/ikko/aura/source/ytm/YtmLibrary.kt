@@ -77,6 +77,18 @@ class YtmLibrary @Inject constructor(
 
     suspend fun known(): List<Track> = observeKnown().first()
 
+    /** The keys of the songs that are files of the device (downloaded). */
+    fun observeDoneKeys(): Flow<List<String>> = downloads.observeDoneKeys()
+
+    /**
+     * What can be played without a network, from these songs: the device's own files and the downloaded ones. A song of
+     * another source that was kept but whose file is gone is a stream, and is left out.
+     */
+    suspend fun withFiles(tracks: List<Track>): List<Track> {
+        val done = downloads.observeDoneKeys().first().toHashSet()
+        return tracks.filter { !isStreamed(it) || it.id in done }
+    }
+
     /**
      * The albums of the songs that are downloaded, each with only its downloaded songs: what the library's Albums tab
      * lists beside the device's own. A song that is only streamed does not make an album there.
