@@ -108,7 +108,10 @@ import kotlinx.coroutines.flow.map
 internal val PAGE_PADDING = 12.dp
 internal val ART_SIZE = 96.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
-internal val ACTION_HEIGHT = 44.dp
+internal val ACTION_HEIGHT = 48.dp
+
+/** The play capsule's width: about three round buttons' worth. */
+private val PLAY_WIDTH = 144.dp
 private val ROW_RADIUS = 20.dp
 
 /** How far the playing row's highlight reaches past the page's margin on each side. */
@@ -523,16 +526,16 @@ internal fun ActionRow(
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
             content = left,
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
         center()
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
         Row(
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.Start),
             verticalAlignment = Alignment.CenterVertically,
             content = right,
         )
@@ -541,15 +544,20 @@ internal fun ActionRow(
 
 @Composable
 internal fun PlayAllButton(onClick: () -> Unit) {
-    AuraButton(
-        onClick = onClick,
-        tone = ButtonTone.Primary,
-        minHeight = ACTION_HEIGHT + 4.dp,
-        contentPadding = PaddingValues(horizontal = 26.dp),
+    // A solid white capsule, as tall as the round buttons beside it.
+    Row(
+        modifier = Modifier
+            .height(ACTION_HEIGHT)
+            .width(PLAY_WIDTH)
+            .clip(CircleShape)
+            .background(Color.White)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(19.dp))
+        Icon(CupertinoIcons.Play, contentDescription = null, tint = Color(0xFF2A2318), modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text = "Lire tout", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(text = "Lire", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2A2318), maxLines = 1)
     }
 }
 
@@ -562,9 +570,15 @@ internal fun ShuffleButton(onClick: () -> Unit) {
 
 @Composable
 internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
-    AuraIconButton(onClick = onClick, size = ACTION_HEIGHT) {
-        content()
-    }
+    // The same height as the play capsule; a light, translucent disc.
+    Box(
+        modifier = Modifier
+            .size(ACTION_HEIGHT)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.14f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
