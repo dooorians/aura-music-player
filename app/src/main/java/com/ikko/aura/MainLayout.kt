@@ -151,8 +151,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 /** The pill comes back as the closing card reaches its place (the card takes 320 ms to get there). */
-private const val PILL_RETURN_DELAY_MS = 210L
-private const val PILL_FADE_IN_MS = 110
+private const val PILL_RETURN_DELAY_MS = 40L
+private const val PILL_FADE_IN_MS = 60
 private const val PILL_FADE_OUT_MS = 30
 
 /** Routes presented as a sheet over the page, fading in and out, rather than pushed in from the side. */
