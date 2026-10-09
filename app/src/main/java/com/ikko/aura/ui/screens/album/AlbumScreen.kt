@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.AlertDialog
@@ -267,6 +268,7 @@ fun AlbumPageContent(
                             number = index + 1,
                             track = track,
                             albumArtist = uiState.artist,
+                            inset = 12.dp,
                             isCurrent = nowPlaying.first == track.id,
                             isPlaying = nowPlaying.second,
                             accent = accent,
@@ -469,27 +471,7 @@ private fun AlbumHeader(
             .fillMaxWidth()
             .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
     ) {
-        // The cover and its text are one group, centred on the page, the text level with the middle of the cover. The text
-        // column is as wide as its widest line (measured here: left to itself it took all the room left, and the group
-        // sat off-centre).
-        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-        val titleStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 28.sp)
-        val artistStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-        val metaStyle = MaterialTheme.typography.bodySmall
-        val density = LocalDensity.current
-        val textMax = LocalConfiguration.current.screenWidthDp.dp - PAGE_PADDING * 2 - ART_SIZE - 18.dp
-        val textWidth = remember(uiState.title, uiState.artist, meta, textMax) {
-            val maxPx = with(density) { textMax.roundToPx() }
-            val widest = listOf(uiState.title.trim() to titleStyle, uiState.artist.trim() to artistStyle, meta.trim() to metaStyle)
-                .filter { it.first.isNotEmpty() }
-                .maxOf { (t, st) -> measurer.measure(t, st, maxLines = if (st === titleStyle) 2 else 1, constraints = androidx.compose.ui.unit.Constraints(maxWidth = maxPx)).size.width }
-            with(density) { widest.toDp() }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(verticalAlignment = Alignment.Top) {
             Box(
                 modifier = Modifier.shadow(
                     elevation = 16.dp,
@@ -510,9 +492,9 @@ private fun AlbumHeader(
                 )
             }
             Spacer(Modifier.width(18.dp))
-            Column(modifier = Modifier.widthIn(max = textMax).width(textWidth).padding(top = 2.dp)) {
+            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
                 Text(
-                    text = uiState.title.trim(),
+                    text = uiState.title,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     fontSize = 24.sp,
@@ -523,7 +505,7 @@ private fun AlbumHeader(
                 )
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    text = uiState.artist.trim(),
+                    text = uiState.artist,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = accentSoft.value,
@@ -543,24 +525,73 @@ private fun AlbumHeader(
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
 
-        // "Lire tout" is exactly at the middle of the page; the round buttons are laid out either side of it:
-        // shuffle on its left, the menu on its right (the download of an external album is in it; favourites are in the album's long-press menu).
-        ActionRow(
-            left = {
-                ShuffleButton(onClick = onShuffle)
-            },
-            center = { PlayAllButton(onClick = onPlayAll) },
-            right = {
-                Box {
-                    CircleAction(onClick = onMore) {
-                        Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    moreMenu()
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegacyPlayAllButton(onClick = onPlayAll, tint = null)
+            LegacyShuffleButton(onClick = onShuffle)
+            Spacer(Modifier.weight(1f))
+            LegacyCircleAction(onClick = onFavorite) {
+                FillableIcon(
+                    outline = CupertinoIcons.Star,
+                    filled = CupertinoIcons.StarFilled,
+                    active = uiState.isFavorite,
+                    contentDescription = "Favori",
+                    tint = Color.White,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Box {
+                LegacyCircleAction(onClick = onMore) {
+                    Icon(
+                        CupertinoIcons.MoreVertical,
+                        contentDescription = "Plus d'options",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
-            },
-        )
+                moreMenu()
+            }
+        }
+    }
+}
+
+private val LEGACY_ACTION_HEIGHT = 44.dp
+
+@Composable
+private fun LegacyPlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
+    AuraButton(
+        onClick = onClick,
+        minHeight = LEGACY_ACTION_HEIGHT,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        tint = tint,
+    ) {
+        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(text = "Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+@Composable
+private fun LegacyShuffleButton(onClick: () -> Unit) {
+    AuraButton(
+        onClick = onClick,
+        minHeight = LEGACY_ACTION_HEIGHT,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+    ) {
+        Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(text = "Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+@Composable
+private fun LegacyCircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
+    AuraIconButton(onClick = onClick, size = LEGACY_ACTION_HEIGHT) {
+        content()
     }
 }
 
@@ -638,6 +669,8 @@ internal fun AlbumTrackRow(
     trailing: (@Composable () -> Unit)? = null,
     /** Replaces the track number: a playlist shows each song's cover there instead. */
     leading: (@Composable () -> Unit)? = null,
+    /** An album page keeps its rows inset 12 dp inside the page margin (the highlight then fills the margin); 0 aligns them on it. */
+    inset: Dp = 0.dp,
 ) {
     // "Wild And Alone (feat. PinkPantheress)" is the title and its credit run together; the page
     // sets them apart, the credit small beneath the title.
@@ -657,7 +690,7 @@ internal fun AlbumTrackRow(
             .padding(horizontal = PAGE_PADDING)
             .then(
                 if (isCurrent) Modifier.drawWithCache {
-                    val outset = HIGHLIGHT_OUTSET.toPx()
+                    val outset = if (inset.value > 0f) 0f else HIGHLIGHT_OUTSET.toPx()
                     val radius = ROW_RADIUS.toPx()
                     onDrawBehind {
                         drawRoundRect(
@@ -672,7 +705,7 @@ internal fun AlbumTrackRow(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(vertical = 14.dp),
+            .padding(horizontal = inset, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
