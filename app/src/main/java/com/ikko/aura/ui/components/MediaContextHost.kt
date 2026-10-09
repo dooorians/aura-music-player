@@ -74,6 +74,8 @@ fun MediaContextHost(
     val keptStreamed by playerViewModel.keptStreamedIds.collectAsState()
     val downloads by playerViewModel.downloadStates.collectAsState()
     val scope = rememberCoroutineScope()
+    val albumsVm: com.ikko.aura.viewmodel.AlbumTracksViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val favoriteAlbums by albumsVm.favoriteAlbumIds.collectAsState()
 
     content(controller)
 
@@ -129,6 +131,8 @@ fun MediaContextHost(
                 navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
             },
             streamedAlbum = (shown as? LibraryContextTarget.AlbumTarget)?.album?.remoteId != null,
+            albumFavorite = (shown as? LibraryContextTarget.AlbumTarget)?.takeIf { it.album.remoteId == null }?.let { it.album.id in favoriteAlbums },
+            onToggleAlbumFavorite = { (shown as? LibraryContextTarget.AlbumTarget)?.let { albumsVm.toggleFavorite(it.album.id) } },
             onDelete = {
                 val doomed = shown.tracks()
                 if (doomed.isEmpty()) return@MediaContextSheet

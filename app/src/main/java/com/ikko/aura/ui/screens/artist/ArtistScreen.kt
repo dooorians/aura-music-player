@@ -78,6 +78,7 @@ fun ArtistPageContent(
         applyStatusBarInset = false,
         modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { listState.topScrollPx() },
     ) {
+      val tracksOf = com.ikko.aura.viewmodel.rememberAlbumTracks()
       MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         LazyColumn(
             state = listState,
@@ -146,7 +147,7 @@ fun ArtistPageContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(uiState.albums, key = { it.id }) { album ->
-                            ArtistAlbumCard(album = album, navController = navController)
+                            ArtistAlbumCard(album = album, navController = navController, onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) })
                         }
                     }
                 }
@@ -182,11 +183,12 @@ fun ArtistPageContent(
 }
 
 @Composable
-private fun ArtistAlbumCard(album: Album, navController: NavHostController) {
+private fun ArtistAlbumCard(album: Album, navController: NavHostController, onLongClick: () -> Unit) {
     Column(modifier = Modifier.width(140.dp)) {
         SquircleCard(
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             onClick = { navController.navigate(album.route()) },
+            onLongClick = onLongClick,
         ) {
             AlbumArt(uri = album.artworkUri, contentDescription = album.title, modifier = Modifier.fillMaxWidth().aspectRatio(1f), targetSizeDp = 140.dp, cacheKey = album.id.toString())
         }

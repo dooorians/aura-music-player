@@ -2,6 +2,9 @@ package com.ikko.aura.ui.screens.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import com.ikko.aura.viewmodel.rememberAlbumTracks
+import com.ikko.aura.ui.components.LibraryContextTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,6 +81,7 @@ private const val CARD_HEIGHT_PX = 620f
  *
  * The colours of the cards move with the row, as it is swiped, and are still the rest of the time.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     navController: NavHostController,
@@ -102,6 +106,8 @@ fun HomeScreen(
         else playerViewModel.playQueue(card.content.tracks, card.content.startIndex)
     }
 
+    val tracksOf = rememberAlbumTracks()
+    com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
@@ -180,7 +186,10 @@ fun HomeScreen(
                                 contentDescription = album.title,
                                 modifier = Modifier
                                     .size(unit * 320f)
-                                    .clickable { navController.navigate(album.route()) },
+                                    .combinedClickable(
+                                        onClick = { navController.navigate(album.route()) },
+                                        onLongClick = { menu.show(LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) },
+                                    ),
                                 shape = AuraShapes.AlbumCover,
                                 targetSizeDp = unit * 320f,
                                 cacheKey = album.id.toString(),
@@ -191,5 +200,6 @@ fun HomeScreen(
                 Spacer(Modifier.height(LocalPlayerPillHeight.current + 24.dp))
             }
         }
+    }
     }
 }

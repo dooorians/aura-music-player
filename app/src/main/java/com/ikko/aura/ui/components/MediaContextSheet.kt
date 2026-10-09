@@ -72,6 +72,9 @@ fun MediaContextSheet(
     download: DownloadEntry? = null,
     onDownload: () -> Unit = {},
     onRemoveDownload: () -> Unit = {},
+    /** For an album of the library: whether it is a favourite, and the way to change that. Null hides the line. */
+    albumFavorite: Boolean? = null,
+    onToggleAlbumFavorite: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -99,6 +102,12 @@ fun MediaContextSheet(
             ContextAction(CupertinoIcons.Play, "Lire ensuite") { onPlayNext(); onDismiss() }
             ContextAction(CupertinoIcons.Queue, "Ajouter à la file d'attente") { onAddToQueue(); onDismiss() }
             ContextAction(CupertinoIcons.PlaylistAdd, "Ajouter à une playlist") { onAddToPlaylist() }
+            if (albumFavorite != null) {
+                ContextAction(
+                    if (albumFavorite) CupertinoIcons.StarFilled else CupertinoIcons.Star,
+                    if (albumFavorite) "Retirer des favoris" else "Ajouter aux favoris",
+                ) { onToggleAlbumFavorite(); onDismiss() }
+            }
 
             if (streamed) {
                 if (streamedHasAlbum) ContextAction(CupertinoIcons.Album, "Voir l'album") { onOpenAlbum(); onDismiss() }

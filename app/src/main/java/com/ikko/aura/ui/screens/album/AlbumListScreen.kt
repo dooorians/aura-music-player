@@ -37,10 +37,13 @@ import com.ikko.aura.viewmodel.AlbumListViewModel
 fun AlbumListScreen(
     mode: String,
     navController: NavHostController,
+    playerViewModel: com.ikko.aura.viewmodel.PlayerViewModel,
     albumListViewModel: AlbumListViewModel = hiltViewModel(),
 ) {
     val uiState by albumListViewModel.uiState.collectAsStateWithLifecycle()
 
+    val tracksOf = com.ikko.aura.viewmodel.rememberAlbumTracks()
+    com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
     GradientScreenScaffold {
         PageHeader(title = uiState.title)
 
@@ -69,6 +72,7 @@ fun AlbumListScreen(
                                 .fillMaxWidth()
                                 .aspectRatio(1f),
                             onClick = { navController.navigate(album.route()) },
+                            onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) },
                         ) {
                             AlbumArt(
                                 uri = album.artworkUri,
@@ -97,5 +101,6 @@ fun AlbumListScreen(
                 }
             }
         }
+    }
     }
 }

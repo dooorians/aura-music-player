@@ -91,6 +91,7 @@ fun SearchPanel(
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    val tracksOf = com.ikko.aura.viewmodel.rememberAlbumTracks()
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         Column(modifier = modifier.fillMaxSize()) {
             LiquidGlassPanel(
@@ -234,7 +235,11 @@ fun SearchPanel(
                                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 ) {
                                     items(uiState.albums, key = { "album_${it.id}" }) { album ->
-                                        AlbumResultCard(album, modifier = Modifier.animateItem()) {
+                                        AlbumResultCard(
+                                            album,
+                                            modifier = Modifier.animateItem(),
+                                            onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) },
+                                        ) {
                                             onNavigate()
                                             navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString()))
                                         }
@@ -472,11 +477,12 @@ private fun ArtistResultRow(artist: Artist, modifier: Modifier = Modifier, onCli
 }
 
 @Composable
-private fun AlbumResultCard(album: Album, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun AlbumResultCard(album: Album, modifier: Modifier = Modifier, onLongClick: () -> Unit = {}, onClick: () -> Unit) {
     Column(modifier = modifier.width(120.dp)) {
         SquircleCard(
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             onClick = onClick,
+            onLongClick = onLongClick,
         ) {
             AlbumArt(uri = album.artworkUri, contentDescription = album.title, modifier = Modifier.fillMaxSize(), targetSizeDp = 120.dp, cacheKey = album.id.toString())
         }

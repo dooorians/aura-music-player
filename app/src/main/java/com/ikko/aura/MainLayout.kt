@@ -1055,6 +1055,7 @@ fun MainLayout() {
                         AlbumListScreen(
                             mode = backStack.arguments?.getString("mode").orEmpty(),
                             navController = navController,
+                            playerViewModel = playerViewModel,
                         )
                     }
                 }
