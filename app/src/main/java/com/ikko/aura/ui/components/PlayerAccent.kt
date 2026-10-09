@@ -19,14 +19,18 @@ import kotlin.math.abs
  * light on a dark backdrop, dark on a light one. A cover with nothing but one hue gets a tint of it, pale or deep.
  */
 @Composable
-fun rememberPlayerAccent(onDarkGlass: Boolean = false): Color {
+fun rememberPlayerAccent(onDarkGlass: Boolean = true): Color {
     val mesh = LocalNowPlayingMesh.current
     val target = remember(mesh, onDarkGlass) { playerAccentFor(mesh, onDarkGlass) }
     val animated by animateColorAsState(target, tween(200), label = "player-accent")
     return animated
 }
 
-/** [onDarkGlass]: the control sits on the mini player's dark glass, whatever the page, so the colour is always the pale one. */
+/**
+ * [onDarkGlass]: the control sits on a dark surface whatever the cover — the mini player's glass, and the foot of the player,
+ * where the cover has melted into a dark flat colour — so the colour is always the pale one. (Judged from the cover's
+ * swatches, a pale cover made the controls dark on that dark foot, and nothing could be read.)
+ */
 internal fun playerAccentFor(mesh: List<Color>, onDarkGlass: Boolean = false): Color {
     if (mesh.isEmpty()) return Color.White
     val hsl = mesh.map { c -> FloatArray(3).also { ColorUtils.colorToHSL(c.toArgb(), it) } }
