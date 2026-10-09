@@ -30,15 +30,26 @@ import com.ikko.aura.ui.theme.LocalCoverColors
 object AuraMenu {
     private val BaseTint = Color(0xFF080C1C)
     private const val COVER_SHARE = 0.18f
-    private const val OPACITY = 0.97f
+    private const val OPACITY = 0.96f
 
-    val Shape: Shape = AuraShapes.SquircleMedium
+    // The design's menus: a 22 dp panel, rows 42 dp tall with 18 dp corners, on the colour of the page darkened.
+    val Shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
     val SheetShape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     @Composable
     fun tint(): Color {
         val accent = LocalCoverColors.current.accent
-        return remember(accent) { Color(ColorUtils.blendARGB(BaseTint.toArgb(), accent.toArgb(), COVER_SHARE)) }
+        // Which hue is the page's: the accent, at a third of its brightness — a dark panel of that colour, as drawn.
+        return remember(accent) {
+            val c = accent.toArgb()
+            Color(
+                android.graphics.Color.rgb(
+                    (android.graphics.Color.red(c) * 0.3f).toInt(),
+                    (android.graphics.Color.green(c) * 0.3f).toInt(),
+                    (android.graphics.Color.blue(c) * 0.3f).toInt(),
+                ),
+            )
+        }
     }
 
     /** The body of the surface: the tint, a touch darker towards the bottom. */
@@ -49,7 +60,7 @@ object AuraMenu {
     }
 
     val rim: Brush
-        get() = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.30f), Color.White.copy(alpha = 0.07f)))
+        get() = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.14f)))
 
     val rimStroke: BorderStroke get() = BorderStroke(1.dp, rim)
 }

@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LibraryTypography
@@ -184,8 +185,8 @@ private data class MorphClip(
 fun GlassMenu(
     state: GlassMenuState,
     modifier: Modifier = Modifier,
-    width: Dp = 204.dp,
-    cornerRadius: Dp = 28.dp,
+    width: Dp = 240.dp,
+    cornerRadius: Dp = 22.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!state.visible) return
@@ -212,9 +213,9 @@ fun GlassMenu(
     Layout(
         content = {
             // Its own node, with no content: the glass redraws when the surface moves, never because of a row.
-            Spacer(Modifier.graphicsLayer { }.liquidGlassMorphing(shape = glassShape, refraction = refraction, tintAlpha = 0.5f))
+            Spacer(Modifier.graphicsLayer { }.liquidGlassMorphing(shape = glassShape, refraction = refraction, tintAlpha = 0.72f))
             // The rows, at their final size. A touch on the panel that no row takes is not a touch outside it.
-            Column(Modifier.padding(vertical = 8.dp).pointerInput(Unit) { detectTapGestures { } }) { content() }
+            Column(Modifier.padding(vertical = 6.dp).pointerInput(Unit) { detectTapGestures { } }) { content() }
         },
         modifier = modifier
             .fillMaxSize()
@@ -282,21 +283,32 @@ fun GlassMenuItem(
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val accent = com.ikko.aura.ui.components.rememberPlayerAccent()
+    // As drawn: the chosen row is on a faint lit bed, in the accent and heavier, with its check at the end; the others
+    // are plain, and a finger lights the row.
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (pressed) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+            .padding(horizontal = 5.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                when {
+                    pressed -> Color.White.copy(alpha = 0.16f)
+                    selected -> Color.White.copy(alpha = 0.10f)
+                    else -> Color.Transparent
+                },
+            )
             .clickable(interactionSource = source, indication = null, onClick = onClick)
-            .height(46.dp)
-            .padding(horizontal = 14.dp),
+            .height(42.dp)
+            .padding(horizontal = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
-            style = LibraryTypography.AlbumTitle,
-            color = Color.White.copy(alpha = if (selected) 1f else 0.78f),
+            fontSize = 15.sp,
+            lineHeight = 18.sp,
+            fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.ExtraBold else androidx.compose.ui.text.font.FontWeight.Bold,
+            color = if (selected) accent else Color.White,
             modifier = Modifier.weight(1f),
             maxLines = 1,
         )
@@ -305,7 +317,7 @@ fun GlassMenuItem(
                 CupertinoIcons.Check,
                 contentDescription = "Tri actuel",
                 modifier = Modifier.size(18.dp),
-                tint = Color.White,
+                tint = accent,
             )
         }
     }

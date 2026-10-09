@@ -331,11 +331,11 @@ private fun AlbumMoreMenu(
         tonalElevation = 0.dp,
     ) {
         MoreItem(if (isFavorite) CupertinoIcons.StarFilled else CupertinoIcons.Star, if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris") { onDismiss(); onFavorite() }
-        HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
         MoreItem(CupertinoIcons.PlaylistAdd, "Ajouter à la playlist") { onDismiss(); onAddToPlaylist() }
         MoreItem(CupertinoIcons.Queue, "Lire ensuite") { onDismiss(); onPlayNext() }
         if (streamed != null) {
-            HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
             if (downloadedAll) {
                 MoreItem(CupertinoIcons.Close, "Supprimer le téléchargement") { onDismiss(); confirmRemoveDownloads = true }
             } else {
@@ -344,11 +344,11 @@ private fun AlbumMoreMenu(
             MoreItem(
                 if (streamed.kept) CupertinoIcons.Delete else CupertinoIcons.Add,
                 if (streamed.kept) "Supprimer de la bibliothèque" else "Ajouter à la bibliothèque",
-                tint = if (streamed.kept) AuraColors.AccentPink else null,
+                tint = if (streamed.kept) DANGER else null,
             ) { onDismiss(); streamed.onToggleKeep() }
         } else {
-            HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
-            MoreItem(CupertinoIcons.Delete, "Supprimer de la bibliothèque", tint = AuraColors.AccentPink) { onDismiss(); onDeleteFromLibrary() }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
+            MoreItem(CupertinoIcons.Delete, "Supprimer de la bibliothèque", tint = DANGER) { onDismiss(); onDeleteFromLibrary() }
         }
     }
     if (confirmRemoveDownloads && streamed != null) {
@@ -362,12 +362,19 @@ private fun AlbumMoreMenu(
     }
 }
 
+/** The delete rows' colour in the design's menus. */
+private val DANGER = Color(0xFFFF8AA8)
+
 @Composable
 private fun MoreItem(icon: ImageVector, label: String, tint: Color? = null, onClick: () -> Unit) {
+    // As drawn: 42 dp rows with 18 dp corners, an 18 dp icon, the label in bold 15 sp; the delete row in a soft red.
+    val ink = tint ?: Color.White
     DropdownMenuItem(
-        text = { Text(label, color = tint ?: AuraColors.TextPrimary, maxLines = 2) },
-        leadingIcon = { Icon(icon, contentDescription = null, tint = tint ?: AuraColors.TextPrimary, modifier = Modifier.size(20.dp)) },
+        text = { Text(label, color = ink, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) },
         onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 13.dp),
+        modifier = Modifier.padding(horizontal = 5.dp).height(42.dp).clip(RoundedCornerShape(18.dp)),
     )
 }
 
