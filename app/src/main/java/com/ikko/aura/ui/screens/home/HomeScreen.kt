@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,7 @@ import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.keepsDragInRow
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.nowPlayingWash
 import com.ikko.aura.ui.components.ProfileAvatar
 import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LibraryTypography
@@ -101,24 +103,11 @@ fun HomeScreen(
         else playerViewModel.playQueue(card.content.tracks, card.content.startIndex)
     }
 
-    val cover = com.ikko.aura.ui.theme.LocalCoverColors.current
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
                 .fillMaxSize()
-                // The colour of the record that is playing, laid over the top of the page and fading to black down it, as
-                // on YouTube Music. [CoverColors.accent] is read here, in draw, so a change of record fades without recomposing.
-                .drawBehind {
-                    val hsl = FloatArray(3)
-                    androidx.core.graphics.ColorUtils.colorToHSL(cover.accent.toArgb(), hsl)
-                    val wash = Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], 0.55f, 0.28f)))
-                    drawRect(
-                        Brush.verticalGradient(
-                            0f to wash.copy(alpha = 0.95f), 0.35f to wash.copy(alpha = 0.55f), 0.7f to wash.copy(alpha = 0.18f), 1f to Color.Transparent,
-                            startY = 0f, endY = 760f * unit.toPx(),
-                        ),
-                    )
-                },
+                .nowPlayingWash()
         ) {
             Column(
                 modifier = Modifier

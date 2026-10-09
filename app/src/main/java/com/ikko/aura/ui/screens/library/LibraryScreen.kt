@@ -92,6 +92,7 @@ import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.collapsingHeight
 import com.ikko.aura.ui.components.rememberCollapseOffset
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.nowPlayingWash
 import com.ikko.aura.ui.components.SquircleCard
 import com.ikko.aura.ui.components.TrackListItem
 import com.ikko.aura.ui.theme.AuraColors
@@ -255,7 +256,7 @@ fun LibraryScreen(
         applyStatusBarInset = false,
         // On the whole page, not only the list: the header folds up under the status bar too, and has to melt into
         // it the same way rather than slide under it sharp. Grows as the header collapses (see scrollTopBlur).
-        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { -headerOffsetPx },
+        modifier = Modifier.nowPlayingWash().scrollTopBlur(topInset = statusBarTop) { -headerOffsetPx },
     ) {
         Box(
             modifier = Modifier
