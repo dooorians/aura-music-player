@@ -306,11 +306,15 @@ fun FloatingPlayerPill(
                                 if (elapsed < minSinkMs) {
                                     kotlinx.coroutines.delay(minSinkMs - elapsed)
                                 }
+                                // A hair of rebound at the end. The spring's default stopping threshold (0.01 of scale) is bigger than
+                                // the whole press (0.045) and its rebound, so it was declared done at ~1.01 and snapped the
+                                // rest — the hard stop. A threshold of 0.0004 lets it run its last tenth of a percent.
                                 scale.animateTo(
                                     targetValue = 1f,
                                     animationSpec = spring(
-                                        dampingRatio = 0.58f, // Apple .bouncy: soft organic overshoot
-                                        stiffness = 135f,
+                                        dampingRatio = 0.52f,
+                                        stiffness = 150f,
+                                        visibilityThreshold = 0.0004f,
                                     ),
                                 )
                             }
@@ -324,6 +328,7 @@ fun FloatingPlayerPill(
                                     animationSpec = spring(
                                         dampingRatio = 0.82f,
                                         stiffness = 160f,
+                                        visibilityThreshold = 0.0004f,
                                     ),
                                 )
                             }
