@@ -103,8 +103,8 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-internal val PAGE_PADDING = 16.dp
-internal val ART_SIZE = 112.dp
+internal val PAGE_PADDING = 12.dp
+internal val ART_SIZE = 96.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
 internal val ACTION_HEIGHT = 44.dp
 private val ROW_SHAPE = RoundedCornerShape(20.dp)
@@ -206,7 +206,7 @@ fun AlbumPageContent(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 28.dp),
+                    contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     item(key = "header") {
@@ -398,7 +398,7 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 28.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Box(
@@ -420,8 +420,8 @@ private fun AlbumHeader(
                     cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
                 )
             }
-            Spacer(Modifier.width(20.dp))
-            Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
+            Spacer(Modifier.width(18.dp))
+            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
                 Text(
                     text = uiState.title,
                     style = MaterialTheme.typography.headlineMedium,
@@ -455,10 +455,10 @@ private fun AlbumHeader(
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PlayAllButton(onClick = onPlayAll, tint = null)
@@ -559,10 +559,10 @@ internal fun AlbumTrackRow(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .padding(horizontal = 12.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.width(32.dp), contentAlignment = Alignment.CenterStart) {
+        Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
             if (isCurrent) {
                 PlayingBars(color = currentTint, animate = isPlaying)
             } else {
