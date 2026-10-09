@@ -419,17 +419,21 @@ private fun LibraryHeader(
             horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Two round buttons of their own, in the app's standard frosted style.
-            AuraIconButton(onClick = onSmartShuffle, size = HEADER_BUTTON) {
-                Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(24.dp))
+            // Each in a capsule of its own (they used to share one): the same glass buttons as before.
+            AuraIconGroup(light = 80f) {
+                AuraGroupIcon(onClick = onSmartShuffle, size = HEADER_BUTTON) {
+                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(24.dp))
+                }
             }
-            // The menu grows out of this button: it tells the menu where it is, and empties while the menu is out.
-            AuraIconButton(
-                onClick = sortMenu::open,
-                modifier = Modifier.glassMenuAnchor(sortMenu),
-                size = HEADER_BUTTON,
-            ) {
-                Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(24.dp))
+            AuraIconGroup(light = 80f) {
+                // The menu grows out of this button: it tells the menu where it is, and empties while the menu is out.
+                AuraGroupIcon(
+                    onClick = sortMenu::open,
+                    modifier = Modifier.glassMenuAnchor(sortMenu),
+                    size = HEADER_BUTTON,
+                ) {
+                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(24.dp))
+                }
             }
         }
     }
