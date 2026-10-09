@@ -1191,8 +1191,6 @@ fun MainLayout() {
                 // Whether the pill has the page-switch button beside it. Kept as it was for as long as the player is opening, open
                 // or closing: the route changes the moment the pill is tapped, and without this the button went and the pill
                 // grew to its full width under the rising card — the old mini player, back for the length of the opening.
-                val pageSwitchLatch = remember { booleanArrayOf(isTabsRoute) }
-                if (!playerComing && sheetCard.owner == null) pageSwitchLatch[0] = isTabsRoute
                 // The pill belongs to the pages and to the player's own card. On the lyrics, the queue and the equalizer it
                 // does not exist: the player leaving for one of them keeps the card (and so `owner`) until its exit
                 // transition is over — about a second — with the card's edge put back at the pill, and the rules below for
@@ -1213,7 +1211,13 @@ fun MainLayout() {
                         playerViewModel = playerViewModel,
                         backdrop = pillBackdrop,
                         enabled = pillInteractive,
-                        showPageSwitch = pageSwitchLatch[0],
+                        // On every page the pill shows: it must not change shape from one page to the next.
+                        showPageSwitch = true,
+                        onPageSwitch = {
+                            if (navController.currentBackStackEntry?.destination?.route != AuraDestination.Tabs.route) {
+                                navController.popBackStack(AuraDestination.Tabs.route, inclusive = false)
+                            }
+                        },
                         // The finger is still on the pill: start building the player now. It opens exactly as it does for
                         // a tap (the same navigation, the same hidden warm-up under the pill); it is just earlier.
                         onPrewarm = {
@@ -1348,6 +1352,7 @@ private fun PlayerPillHost(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     showPageSwitch: Boolean = false,
+    onPageSwitch: () -> Unit = {},
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
@@ -1371,7 +1376,7 @@ private fun PlayerPillHost(
             modifier = Modifier.weight(1f),
             enabled = enabled,
         )
-        if (showPageSwitch) PageSwitchPill()
+        if (showPageSwitch) PageSwitchPill(beforeSwitch = onPageSwitch)
         }
     }
 }

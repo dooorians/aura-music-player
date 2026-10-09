@@ -31,7 +31,7 @@ import com.ikko.aura.ui.theme.CupertinoIcons
  * (the house on the library, the list on Home). Same glass and height as the mini player so the two read as a pair.
  */
 @Composable
-fun PageSwitchPill(modifier: Modifier = Modifier) {
+fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {}) {
     val motion = LocalPageMotion.current ?: return
     val scope = rememberCoroutineScope()
     val onHome = motion.p < 0.5f
@@ -71,7 +71,11 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
                         tryAwaitRelease()
                         scope.launch { pressed.animateTo(1f, spring(dampingRatio = 0.58f, stiffness = 135f)) }
                     },
-                    onTap = { motion.goTo(scope, if (onHome) 1 else 0) },
+                    onTap = {
+                        // From a page that is not Home or Bibliothèque, the button first goes back to them.
+                        beforeSwitch()
+                        motion.goTo(scope, if (onHome) 1 else 0)
+                    },
                 )
             },
     ) {
