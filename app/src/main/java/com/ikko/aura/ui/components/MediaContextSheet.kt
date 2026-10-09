@@ -158,7 +158,7 @@ private fun Header(target: LibraryContextTarget) {
         AlbumArt(
             uri = artworkUri,
             contentDescription = title,
-            shape = AuraShapes.SquircleSmall,
+            shape = AuraShapes.AlbumCover,
             modifier = Modifier.size(46.dp),
             targetSizeDp = 46.dp,
             cacheKey = cacheKey,

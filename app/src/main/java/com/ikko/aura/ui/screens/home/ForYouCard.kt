@@ -97,9 +97,6 @@ private val Looks: Map<CardAmbience, Look> = mapOf(
 /** Film grain, drawn over the card as Overlay at this strength: it breaks the bands of a smooth gradient. */
 private const val GRAIN_ALPHA = 0.14f
 
-/** How far the patches wander, as a fraction of the card's width, at full motion. */
-private const val DRIFT = 0.035f
-
 private val grainBitmap: Bitmap by lazy {
     val rnd = Random(7)
     val px = IntArray(128 * 128) { val v = rnd.nextInt(256); (0xFF shl 24) or (v shl 16) or (v shl 8) or v }
@@ -107,15 +104,10 @@ private val grainBitmap: Bitmap by lazy {
 }
 
 /**
- * The card's colours, drawn in one pass: base gradient, the drifting patches, the fold of light, the grain.
- * [phase] is the point in a slow loop (0..1) the patches are at; every wander is a whole number of turns of it, so the
- * loop joins up. [motion] 0 is still.
+ * The card's colours: base gradient, the blurred patches, the fold of light, the veil, the grain. Still: the patches and
+ * the fold are drawn and blurred once per size, on layers, and only drawn again from them.
  */
-private fun DrawScope.drawAmbience(look: Look, layers: Array<GraphicsLayer>, rec: LongArray, seed: Int, phase: Float, motion: Float) {
-    val blobLayer = layers[0]
-    val blobMove = layers[1]
-    val sheenLayer = layers[2]
-    val sheenMove = layers[3]
+private fun DrawScope.drawAmbience(look: Look, blobLayer: GraphicsLayer, sheenLayer: GraphicsLayer, rec: LongArray) {
     val w = size.width
     val h = size.height
     val centre = Offset(w / 2f, h / 2f)
@@ -157,22 +149,7 @@ private fun DrawScope.drawAmbience(look: Look, layers: Array<GraphicsLayer>, rec
         }
     }
     if (fresh) blobLayer.renderEffect = BlurEffect(sigma, sigma, TileMode.Decal)
-    // The drift: the whole blurred field moves a little, slowly, and the light moves on its own beat. Only this is redrawn
-    // as the phase turns; the patches themselves were drawn and blurred once.
-    val turn = 2f * PI.toFloat() * phase
-    val k = 1 + seed % 2
-    if (fresh) {
-        // The blurred field is wrapped in a layer of its own, kept as a texture: moving that layer only moves the texture,
-        // where moving the blurred layer itself would blur it again every frame.
-        blobMove.compositingStrategy = androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
-        blobMove.record(this, layoutDirection, IntSize(w.toInt() + 2 * m, h.toInt() + 2 * m)) { drawLayer(blobLayer) }
-    }
-    blobMove.translationX = w * DRIFT * motion * sin(turn * k)
-    blobMove.translationY = w * DRIFT * motion * cos(turn * (k + 1))
-    blobMove.rotationZ = 3f * motion * sin(turn * 2f)
-    blobMove.scaleX = 1f + 0.04f * motion * sin(turn * 3f)
-    blobMove.scaleY = blobMove.scaleX
-    translate(-m.toFloat(), -m.toFloat()) { drawLayer(blobMove) }
+    translate(-m.toFloat(), -m.toFloat()) { drawLayer(blobLayer) }
 
     // The fold of light: an ellipse with a linear gradient, blurred less than the patches, laid on in Screen.
     val s = look.sheen
@@ -199,17 +176,11 @@ private fun DrawScope.drawAmbience(look: Look, layers: Array<GraphicsLayer>, rec
     }
     if (fresh) {
         sheenLayer.renderEffect = BlurEffect(ss, ss, TileMode.Decal)
-        sheenMove.compositingStrategy = androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
-        sheenMove.alpha = s.alpha
-        sheenMove.blendMode = BlendMode.Screen
-        sheenMove.record(this, layoutDirection, IntSize(w.toInt() + 2 * sm, h.toInt() + 2 * sm)) { drawLayer(sheenLayer) }
+        sheenLayer.alpha = s.alpha
+        sheenLayer.blendMode = BlendMode.Screen
         rec[0] = key
     }
-    val sturn = 2f * PI.toFloat() * (phase + 0.17f * seed)
-    sheenMove.translationX = w * 0.05f * motion * sin(sturn * 2f)
-    sheenMove.translationY = w * 0.04f * motion * cos(sturn)
-    sheenMove.rotationZ = 5f * motion * sin(sturn * 3f)
-    translate(-sm.toFloat(), -sm.toFloat()) { drawLayer(sheenMove) }
+    translate(-sm.toFloat(), -sm.toFloat()) { drawLayer(sheenLayer) }
 
     drawRect(
         Brush.verticalGradient(
@@ -226,12 +197,15 @@ private fun DrawScope.drawAmbience(look: Look, layers: Array<GraphicsLayer>, rec
     )
 }
 
+/** The cards' corner radius: a fixed 20 dp, whatever the card's width. */
+private val CARD_RADIUS = 20.dp
+
 /** The patches' blur, as a fraction of the card's width (the design's is 7 %; a little more here). */
 private const val BLOB_BLUR = 0.10f
 
 /**
  * One "Pour toi" card. [unit] is the size of one pixel of the 1080-px-wide design, in dp, so a card and its type scale
- * with the screen. [phase] is the shared point of the slow loop the colours drift on (read only while drawing).
+ * with the screen.
  */
 @Composable
 fun ForYouCardView(
@@ -239,15 +213,13 @@ fun ForYouCardView(
     width: Dp,
     height: Dp,
     unit: Dp,
-    phase: () -> Float,
-    motion: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val look = Looks.getValue(card.ambience)
-    val layers = arrayOf(rememberGraphicsLayer(), rememberGraphicsLayer(), rememberGraphicsLayer(), rememberGraphicsLayer())
+    val blobLayer = rememberGraphicsLayer()
+    val sheenLayer = rememberGraphicsLayer()
     val rec = remember { LongArray(1) }
-    val seed = card.ambience.ordinal * 31 + 7
     val density = LocalDensity.current
     fun sp(px: Float) = with(density) { (px * unit.value).dp.toSp() }
     val w = width.value / unit.value   // the card's width in design pixels
@@ -257,10 +229,10 @@ fun ForYouCardView(
     Box(
         modifier = modifier
             .size(width, height)
-            .clip(RoundedCornerShape(width * 0.081f))
+            .clip(RoundedCornerShape(CARD_RADIUS))
             // Its own layer, drawn offscreen: Screen and Overlay blend with the card's colours, never with the page.
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-            .drawBehind { drawAmbience(look, layers, rec, seed, phase(), motion) }
+            .drawBehind { drawAmbience(look, blobLayer, sheenLayer, rec) }
             .clickable(role = Role.Button, onClick = onClick),
     ) {
         // The title is centred on the card itself, not on what is left between the logo and the text below it, so it

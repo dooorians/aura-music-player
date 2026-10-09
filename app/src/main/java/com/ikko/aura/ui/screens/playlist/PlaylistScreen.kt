@@ -246,7 +246,7 @@ private fun PlaylistTrackRow(track: Track, onClick: () -> Unit, onRemove: () -> 
         AlbumArt(
             uri = track.artworkUri,
             contentDescription = track.title,
-            shape = AuraShapes.SquircleSmall,
+            shape = AuraShapes.AlbumCover,
             modifier = Modifier.size(48.dp),
             targetSizeDp = 48.dp,
             cacheKey = track.albumId.toString(),

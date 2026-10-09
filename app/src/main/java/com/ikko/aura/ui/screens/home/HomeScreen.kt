@@ -25,10 +25,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.navigation.compose.currentBackStackEntryAsState
-import com.ikko.aura.ui.components.LocalPageMotion
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.navigation.NavHostController
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.keepsDragInRow
 import com.ikko.aura.ui.components.AlbumArt
@@ -73,7 +70,6 @@ private const val DESIGN_WIDTH_PX = 1080f
 private const val CARD_HEIGHT_PX = 620f
 
 /** 1 is the design's own drift, 0 holds the colours still. */
-private const val MOTION = 1f
 
 /**
  * The Home: "Pour toi", a row of big cards each dressed in its own mood of drifting colour, then the albums played lately.
@@ -96,25 +92,6 @@ fun HomeScreen(
 
     // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
     val rowState = rememberLazyListState()
-    // The slow drift of the cards' colours: a point on a 40-second loop, turned only while the Home is what is on screen
-    // (every frame it turns is a frame the whole window redraws), and every other frame.
-    val phaseState = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    val onTabs = navController.currentBackStackEntryAsState().value?.destination?.route == AuraDestination.Tabs.route
-    val pageMotion = LocalPageMotion.current
-    val homeShown = onTabs && (pageMotion?.p ?: 0f) < 0.5f
-    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(homeShown) {
-        if (!homeShown) return@LaunchedEffect
-        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
-            var frame = 0
-            while (true) {
-                withFrameNanos { t ->
-                    if (frame++ % 2 == 0) phaseState.floatValue = ((t / 1_000_000_000.0) / 40.0 % 1.0).toFloat()
-                }
-            }
-        }
-    }
-    val phase: () -> Float = { phaseState.floatValue }
 
     fun open(card: com.ikko.aura.viewmodel.ForYouCard) {
         val route = card.content.openRoute
@@ -173,8 +150,6 @@ fun HomeScreen(
                             width = unit * 620f,
                             height = unit * CARD_HEIGHT_PX,
                             unit = unit,
-                            phase = phase,
-                            motion = MOTION,
                             onClick = { open(card) },
                         )
                     }
@@ -211,7 +186,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .size(unit * 320f)
                                     .clickable { navController.navigate(album.route()) },
-                                shape = RoundedCornerShape(unit * 60f),
+                                shape = AuraShapes.AlbumCover,
                                 targetSizeDp = unit * 320f,
                                 cacheKey = album.id.toString(),
                             )

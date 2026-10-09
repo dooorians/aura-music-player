@@ -5,11 +5,11 @@ import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
 object AuraShapes {
-    /** Apple Music style album cover rounded corners (library grid thumbnails). */
+    /** The album cover's corners, the library's: the same everywhere an album's cover is drawn (Home, lists, pages, sheets). */
     val AlbumCover = RoundedCornerShape(8.dp)
 
     /** Apple Music style album cover rounded corners for album detail pages. */
-    val AlbumCoverDetail = RoundedCornerShape(10.dp)
+    val AlbumCoverDetail = AlbumCover
 
     val SquircleSmall = RoundedCornerShape(16.dp)
     val SquircleMedium = RoundedCornerShape(24.dp)

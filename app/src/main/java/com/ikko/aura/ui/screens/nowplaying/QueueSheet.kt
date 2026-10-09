@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
+import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.screens.queue.QueueList
@@ -302,7 +303,7 @@ private fun CompactPlayer(uiState: PlayerUiState, viewModel: PlayerViewModel) {
         AlbumArt(
             uri = track?.artworkUri,
             contentDescription = track?.album,
-            shape = RoundedCornerShape(10.dp),
+            shape = AuraShapes.AlbumCover,
             targetSizeDp = 48.dp,
             cacheKey = track?.albumId?.toString(),
             modifier = Modifier.size(48.dp),
