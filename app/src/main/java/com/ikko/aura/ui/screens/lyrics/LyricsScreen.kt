@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.lyrics
 
+import com.ikko.aura.ui.components.rememberPlayerAccent
 import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -245,8 +246,8 @@ private fun LyricsPanel(
                             line = line,
                             positionProvider = { clock.longValue },
                             style = activeStyle,
-                            litColor = Color.White,
-                            dimColor = Color.White.copy(alpha = 0.40f),
+                            litColor = rememberPlayerAccent(),
+                            dimColor = rememberPlayerAccent().copy(alpha = 0.40f),
                             textAlign = TextAlign.Start,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -254,7 +255,7 @@ private fun LyricsPanel(
                         Text(
                             text = line.background?.let { "${line.text} ${it.text}" } ?: line.text,
                             style = if (isActive) activeStyle else inactiveStyle,
-                            color = Color.White,
+                            color = rememberPlayerAccent(),
                             textAlign = TextAlign.Start,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -265,7 +266,7 @@ private fun LyricsPanel(
                         Text(
                             text = backing.text,
                             style = (if (isActive) activeStyle else inactiveStyle).copy(fontSize = 17.sp, lineHeight = 22.sp),
-                            color = Color.White.copy(alpha = 0.75f),
+                            color = rememberPlayerAccent().copy(alpha = 0.75f),
                             textAlign = TextAlign.Start,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -286,6 +287,7 @@ private fun GapDots(
     focus: Animatable<Float, *>,
     onClick: () -> Unit,
 ) {
+    val dotColor = rememberPlayerAccent()
     Box(
         contentAlignment = Alignment.CenterStart,
         modifier = Modifier
@@ -314,7 +316,7 @@ private fun GapDots(
                     repeat(GAP_DOTS) { dot ->
                         val lit = (through * GAP_DOTS - dot).coerceIn(0f, 1f)
                         drawCircle(
-                            color = Color.White.copy(alpha = GAP_DOT_REST + (1f - GAP_DOT_REST) * lit),
+                            color = dotColor.copy(alpha = GAP_DOT_REST + (1f - GAP_DOT_REST) * lit),
                             radius = radius,
                             center = Offset(radius + dot * stride, size.height / 2f),
                         )

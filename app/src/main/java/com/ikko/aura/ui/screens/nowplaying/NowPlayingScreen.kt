@@ -700,8 +700,8 @@ private fun LyricStrip(
                     positionProvider = { clock.longValue },
                     style = MaterialTheme.typography.titleMedium,
                     // BitChord's: unsung words at 55% white, sung ones plain white, the sung part simply filling in.
-                    litColor = Color.White,
-                    dimColor = Color.White.copy(alpha = 0.55f),
+                    litColor = rememberPlayerAccent(),
+                    dimColor = rememberPlayerAccent().copy(alpha = 0.55f),
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     plain = true,

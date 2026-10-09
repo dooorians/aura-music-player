@@ -35,8 +35,6 @@ import java.util.Locale
 
 private val IDLE_HEIGHT = 7.dp
 private val ACTIVE_HEIGHT = 12.dp
-private val ACTIVE_COLOR = Color.White.copy(alpha = 0.92f)
-private val INACTIVE_COLOR = Color.White.copy(alpha = 0.26f)
 
 /**
  * BitChord-style capsule scrubber: a thin rounded track that thickens under the finger.
@@ -51,6 +49,7 @@ fun WavyProgressBar(
     modifier: Modifier = Modifier,
     edgeInset: Dp = 0.dp,
 ) {
+    val accent = rememberPlayerAccent()
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val safeDuration = durationMs().coerceAtLeast(1L)
@@ -111,14 +110,14 @@ fun WavyProgressBar(
             ) {
                 val radius = CornerRadius(size.height / 2f)
                 drawRoundRect(
-                    color = INACTIVE_COLOR,
+                    color = accent.copy(alpha = 0.26f),
                     size = size,
                     cornerRadius = radius,
                 )
                 val filled = size.width * value
                 if (filled > 0f) {
                     drawRoundRect(
-                        color = ACTIVE_COLOR,
+                        color = accent.copy(alpha = 0.92f),
                         size = Size(filled.coerceAtLeast(size.height).coerceAtMost(size.width), size.height),
                         cornerRadius = radius,
                     )
@@ -136,14 +135,14 @@ fun WavyProgressBar(
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
                 ),
-                color = AuraColors.TextSecondary,
+                color = accent.copy(alpha = 0.7f),
             )
             Text(
                 text = "-${formatDuration((safeDuration - displayedMs).coerceAtLeast(0L))}",
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
                 ),
-                color = AuraColors.TextSecondary,
+                color = accent.copy(alpha = 0.7f),
             )
         }
     }

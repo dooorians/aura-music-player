@@ -22,7 +22,7 @@ import kotlin.math.abs
 fun rememberPlayerAccent(): Color {
     val mesh = LocalNowPlayingMesh.current
     val target = remember(mesh) { playerAccentFor(mesh) }
-    val animated by animateColorAsState(target, tween(350), label = "player-accent")
+    val animated by animateColorAsState(target, tween(200), label = "player-accent")
     return animated
 }
 

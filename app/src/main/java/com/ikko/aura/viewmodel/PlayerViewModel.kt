@@ -762,7 +762,7 @@ class PlayerViewModel @Inject constructor(
          * encode and the notification rebuild that follows on the same frames as the backdrop
          * swap, which is the most expensive frame the player has.
          */
-        private const val PALETTE_DEBOUNCE_MS = 520L
+        private const val PALETTE_DEBOUNCE_MS = 120L
     }
 }
 
