@@ -107,6 +107,7 @@ fun HomeScreen(
     val rowState = rememberLazyListState()
     val day = remember { java.time.LocalDate.now().toEpochDay() }
     // A card held down is carried along the row and dropped where it is wanted: the order shown while it moves, saved on drop.
+    var organizing by remember { androidx.compose.runtime.mutableStateOf(false) }
     var dragOrder by remember { androidx.compose.runtime.mutableStateOf<List<String>?>(null) }
     var draggedId by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var dragOffset by remember { androidx.compose.runtime.mutableStateOf(0f) }
@@ -123,6 +124,17 @@ fun HomeScreen(
 
     val tracksOf = rememberAlbumTracks()
     com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
+    if (organizing) {
+        HomeOrganizer(
+            slots = state.layout,
+            onMove = { id, delta ->
+                dragOrder = null
+                viewModel.moveCard(id, delta)
+            },
+            onHidden = viewModel::setCardHidden,
+            onDismiss = { organizing = false },
+        )
+    }
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
@@ -139,7 +151,15 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CoverText(text = "Pour toi", style = LibraryTypography.PageTitle, maxLines = 1, modifier = Modifier.weight(1f))
+                    // Held down, the title opens the organiser: the cards' order, and which ones show.
+                    CoverText(
+                        text = "Pour toi",
+                        style = LibraryTypography.PageTitle,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .weight(1f)
+                            .combinedClickable(onClick = {}, onLongClick = { organizing = true }),
+                    )
                     ProfileAvatar(
                         imageUri = profileImageUri,
                         contentDescription = "Ouvrir les réglages du profil",

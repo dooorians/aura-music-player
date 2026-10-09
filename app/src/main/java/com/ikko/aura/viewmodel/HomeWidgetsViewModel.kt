@@ -74,6 +74,22 @@ class HomeWidgetsViewModel @Inject constructor(
     val profileImageUri: StateFlow<String?> = settingsStore.profileImageUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Moves a card one place up (-1) or down (+1) in the organiser. */
+    fun moveCard(id: String, delta: Int) {
+        val ids = uiState.value.layout.map { it.id }.toMutableList()
+        val from = ids.indexOf(id)
+        val to = (from + delta).coerceIn(0, ids.lastIndex)
+        if (from < 0 || from == to) return
+        ids.add(to, ids.removeAt(from))
+        viewModelScope.launch { settingsStore.setHomeCardOrder(ids) }
+    }
+
+    fun setCardHidden(id: String, hidden: Boolean) {
+        val now = uiState.value.layout.filter { it.hidden }.map { it.id }.toMutableSet()
+        if (hidden) now += id else now -= id
+        viewModelScope.launch { settingsStore.setHomeCardHidden(now) }
+    }
+
     /** Saves the order the listener dropped the cards in. */
     fun setCardOrder(ids: List<String>) {
         viewModelScope.launch { settingsStore.setHomeCardOrder(ids) }
