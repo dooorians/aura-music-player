@@ -4,6 +4,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.abs
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -53,6 +56,8 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
                 scaleY = pressed.value * (1f - PageMotionSpec.PLAYER_STRETCH_Y * w)
             }
             .clip(shape)
+            // As on the mini player: cleared first, so the glass is drawn over the bare window and not over the page.
+            .drawBehind { drawRect(Color.Transparent, blendMode = BlendMode.Clear) }
             .sheen(
                 position = { val p = motion.p; 1.3f - 1.7f * (p - kotlin.math.floor(p)).coerceIn(-0.2f, 1.2f) },
                 strength = { if (motion.reduceMotion || !motion.inTransit) 0f else 1f },
@@ -68,6 +73,8 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
                 )
             },
     ) {
+        // The lit rim of the mini player's glass.
+        Spacer(Modifier.matchParentSize().clip(shape).pillEdge(shape))
         Icon(
             imageVector = if (onHome) CupertinoIcons.Library else CupertinoIcons.House,
             contentDescription = if (onHome) "Bibliothèque" else "Accueil",
