@@ -90,6 +90,8 @@ fun Modifier.liquidGlass(
     blurRadiusDp: Float = BLUR_RADIUS_DP,
     dropShadow: Boolean = true,
     edge: Boolean = true,
+    /** 1 for a surface of the usual size; less for a small one, where the full lens would bend the whole of it. */
+    lensScale: Float = 1f,
 ): Modifier {
     if (LocalAuraBatterySaver.current) {
         return background(tint.copy(alpha = 0.55f), shape).let {
@@ -101,8 +103,8 @@ fun Modifier.liquidGlass(
     // Pre-multiplied by the resolution scale: the effects run on the downscaled recording, so a
     // radius in screen pixels would come out three times too wide once it is upscaled back.
     val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP * lensScale).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP * lensScale).dp.toPx() } * GLASS_RESOLUTION_SCALE
 
     return drawBackdrop(
         backdrop = backdrop,
@@ -110,12 +112,14 @@ fun Modifier.liquidGlass(
         effects = {
             colorControls(saturation = 1f + 0.5f * VIBRANCY)
             blur(blurPx)
-            lens(
-                refractionHeight = lensHeightPx,
-                refractionAmount = lensAmountPx,
-                depthEffect = false,
-                chromaticAberration = false,
-            )
+            if (lensScale > 0f) {
+                lens(
+                    refractionHeight = lensHeightPx,
+                    refractionAmount = lensAmountPx,
+                    depthEffect = false,
+                    chromaticAberration = false,
+                )
+            }
         },
         highlight = if (edge) ({ Highlight.Default }) else null,
         shadow = if (dropShadow) ({ Shadow.Default }) else null,
@@ -152,6 +156,7 @@ fun LiquidGlassPanel(
     blurRadiusDp: Float = BLUR_RADIUS_DP,
     dropShadow: Boolean = true,
     edge: Boolean = true,
+    lensScale: Float = 1f,
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -168,7 +173,7 @@ fun LiquidGlassPanel(
                 // rendered glass is kept and reused until the backdrop behind it actually
                 // changes.
                 .graphicsLayer { }
-                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge),
+                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge, lensScale),
         )
         content()
     }

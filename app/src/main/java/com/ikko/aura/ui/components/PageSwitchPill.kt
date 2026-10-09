@@ -44,6 +44,7 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
         blurRadiusDp = 16f,
         dropShadow = false,
         edge = false,
+        lensScale = 0f,
         contentAlignment = Alignment.Center,
         modifier = modifier
             .width(56.dp)
