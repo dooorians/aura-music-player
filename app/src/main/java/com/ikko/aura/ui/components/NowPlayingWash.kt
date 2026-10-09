@@ -23,39 +23,53 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * The colours of the record that is playing, laid over the top of a page and fading to black down it, as on YouTube
- * Music: not one tint but the cover's swatches, a dark base and three soft patches. The same on Home and Bibliothèque.
- * The colours are read in draw, so a change of record fades (350 ms, see [washColors]) without recomposing the page.
+ * The colours of the record that is playing, laid over the top of a page, as on YouTube Music — measured on its screenshots:
+ * dark (about a fifth of full lightness), two different colours, one on the left and one on the right, blended on a slant
+ * rather than a tint laid evenly across; and falling away slowly down the page, easing out to black over the upper
+ * 60 % of it. The same on Home and Bibliothèque. The colours are read in draw, so a change of record fades (350 ms,
+ * see [washColors]) without recomposing the page.
  */
 @Composable
 fun Modifier.nowPlayingWash(): Modifier {
     val wash = washColors()
     return drawBehind {
         val w = size.width
-        val h = w * 0.70f
+        val h = size.height * 0.62f
         val c = wash.map { it.value }
-        // Drawn on a layer of its own and faded out downwards as a whole: the patches reach past the wash's height, and
-        // cut there they left a hard edge across the page.
+        // On a layer of its own so the fall-off can be laid over the colours as a whole.
         drawIntoCanvas { canvas ->
             canvas.saveLayer(Rect(0f, 0f, w, h), Paint())
+            // Left and right: two colours on a slant, so neither side is the other's mirror.
             drawRect(
-                Brush.verticalGradient(
-                    0f to c[3].copy(alpha = 0.90f), 0.45f to c[3].copy(alpha = 0.40f), 1f to Color.Transparent,
-                    startY = 0f, endY = h,
-                ),
-            )
-            fun patch(color: Color, x: Float, y: Float, r: Float, a: Float) = drawRect(
-                Brush.radialGradient(
-                    0f to color.copy(alpha = a), 0.55f to color.copy(alpha = a * 0.45f), 1f to Color.Transparent,
-                    center = Offset(x * w, y * h), radius = r * w,
+                Brush.linearGradient(
+                    0f to c[0], 0.55f to c[0].mix(c[1], 0.5f), 1f to c[1],
+                    start = Offset(0f, h * 0.05f), end = Offset(w, h * 0.30f),
                 ),
                 size = Size(w, h),
             )
-            patch(c[0], 0.10f, 0.06f, 0.95f, 0.85f)
-            patch(c[1], 0.95f, 0.16f, 0.80f, 0.75f)
-            patch(c[2], 0.55f, 0.40f, 1.05f, 0.45f)
+            // A softer, lighter patch off to one side and a darker one lower down: the uneven light of a real surface.
             drawRect(
-                Brush.verticalGradient(0f to Color.Black, 0.5f to Color.Black.copy(alpha = 0.55f), 1f to Color.Transparent, startY = 0f, endY = h),
+                Brush.radialGradient(
+                    0f to c[2].copy(alpha = 0.55f), 1f to Color.Transparent,
+                    center = Offset(w * 0.22f, h * 0.30f), radius = w * 0.55f,
+                ),
+                size = Size(w, h),
+            )
+            drawRect(
+                Brush.radialGradient(
+                    0f to Color.Black.copy(alpha = 0.35f), 1f to Color.Transparent,
+                    center = Offset(w * 0.80f, h * 0.55f), radius = w * 0.5f,
+                ),
+                size = Size(w, h),
+            )
+            // The fall-off: slow, easing out, nothing left by the bottom of the wash.
+            drawRect(
+                Brush.verticalGradient(
+                    0f to Color.Black, 0.12f to Color.Black.copy(alpha = 0.88f), 0.30f to Color.Black.copy(alpha = 0.62f),
+                    0.50f to Color.Black.copy(alpha = 0.34f), 0.70f to Color.Black.copy(alpha = 0.13f),
+                    0.88f to Color.Black.copy(alpha = 0.03f), 1f to Color.Transparent,
+                    startY = 0f, endY = h,
+                ),
                 size = Size(w, h),
                 blendMode = BlendMode.DstIn,
             )
@@ -63,6 +77,8 @@ fun Modifier.nowPlayingWash(): Modifier {
         }
     }
 }
+
+private fun Color.mix(other: Color, t: Float) = androidx.compose.ui.graphics.lerp(this, other, t)
 
 /**
  * The four colours of the wash: the swatches of the record that is playing, darkened so that white type holds on them,
@@ -72,10 +88,16 @@ fun Modifier.nowPlayingWash(): Modifier {
 private fun washColors(): List<androidx.compose.animation.core.Animatable<Color, AnimationVector4D>> {
     val mesh = LocalNowPlayingMesh.current
     val targets = remember(mesh) {
-        List(4) { i ->
-            val hsl = FloatArray(3)
-            ColorUtils.colorToHSL(mesh[i % mesh.size].toArgb(), hsl)
-            Color(ColorUtils.HSLToColor(floatArrayOf(hsl[0], hsl[1].coerceAtMost(0.75f), hsl[2].coerceIn(0.20f, 0.40f))))
+        fun hslOf(color: Color) = FloatArray(3).also { ColorUtils.colorToHSL(color.toArgb(), it) }
+        fun hueGap(a: Float, b: Float) = kotlin.math.abs(a - b).let { if (it > 180f) 360f - it else it }
+        // Left is the first swatch, right the one whose hue is furthest from it: two colours that really differ.
+        val first = mesh[0]
+        val rest = mesh.drop(1)
+        val right = rest.maxByOrNull { hueGap(hslOf(first)[0], hslOf(it)[0]) } ?: first
+        val third = (rest - right).firstOrNull() ?: right
+        listOf(first, right, third, right).map { color ->
+            val hsl = hslOf(color)
+            Color(ColorUtils.HSLToColor(floatArrayOf(hsl[0], hsl[1].coerceIn(0.35f, 0.80f), hsl[2].coerceIn(0.16f, 0.22f))))
         }
     }
     val animated = remember { targets.map { Animatable(it) } }
