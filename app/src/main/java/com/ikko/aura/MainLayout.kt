@@ -1350,7 +1350,6 @@ private fun PlayerPillHost(
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-        if (showPageSwitch) PageSwitchPill()
         FloatingPlayerPill(
             track = track,
             queueIndex = uiState.queueIndex,
@@ -1364,6 +1363,7 @@ private fun PlayerPillHost(
             modifier = Modifier.weight(1f),
             enabled = enabled,
         )
+        if (showPageSwitch) PageSwitchPill()
         }
     }
 }
