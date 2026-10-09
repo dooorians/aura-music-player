@@ -107,7 +107,10 @@ internal val PAGE_PADDING = 12.dp
 internal val ART_SIZE = 96.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
 internal val ACTION_HEIGHT = 44.dp
-private val ROW_SHAPE = RoundedCornerShape(20.dp)
+private val ROW_RADIUS = 20.dp
+
+/** How far the playing row's highlight reaches past the page's margin on each side. */
+private val HIGHLIGHT_OUTSET = 8.dp
 
 @Composable
 fun AlbumScreen(
@@ -535,6 +538,8 @@ internal fun AlbumTrackRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     trailing: (@Composable () -> Unit)? = null,
+    /** Replaces the track number: a playlist shows each song's cover there instead. */
+    leading: (@Composable () -> Unit)? = null,
 ) {
     // "Wild And Alone (feat. PinkPantheress)" is the title and its credit run together; the page
     // sets them apart, the credit small beneath the title.
@@ -549,20 +554,33 @@ internal fun AlbumTrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // The row's content sits on the page's margin, the same line as the cover, the title and the buttons above;
+            // the highlight of the playing row reaches out past it instead.
             .padding(horizontal = PAGE_PADDING)
-            .clip(ROW_SHAPE)
             .then(
                 if (isCurrent) Modifier.drawWithCache {
-                    onDrawBehind { drawRect(accent.value.copy(alpha = 0.16f)) }
+                    val outset = HIGHLIGHT_OUTSET.toPx()
+                    val radius = ROW_RADIUS.toPx()
+                    onDrawBehind {
+                        drawRoundRect(
+                            color = accent.value.copy(alpha = 0.16f),
+                            topLeft = Offset(-outset, 0f),
+                            size = Size(size.width + 2 * outset, size.height),
+                            cornerRadius = CornerRadius(radius),
+                        )
+                    }
                 } else {
                     Modifier
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 12.dp, vertical = 14.dp),
+            .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(14.dp))
+        } else Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
             if (isCurrent) {
                 PlayingBars(color = currentTint, animate = isPlaying)
             } else {

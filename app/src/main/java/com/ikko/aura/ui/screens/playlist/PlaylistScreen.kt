@@ -255,7 +255,7 @@ fun PlaylistScreen(
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
                             style = MaterialTheme.typography.bodyLarge,
                             color = AuraColors.TextSecondary,
-                            modifier = Modifier.padding(horizontal = PAGE_PADDING + 12.dp, vertical = 24.dp),
+                            modifier = Modifier.padding(horizontal = PAGE_PADDING, vertical = 24.dp),
                         )
                     }
                 }
@@ -269,6 +269,16 @@ fun PlaylistScreen(
                         accent = accent,
                         onClick = { playerViewModel.playQueue(current.tracks, index) },
                         onLongClick = { menu.show(track) },
+                        leading = {
+                            AlbumArt(
+                                uri = track.artworkUri,
+                                contentDescription = null,
+                                shape = AuraShapes.AlbumCover,
+                                modifier = Modifier.size(48.dp),
+                                targetSizeDp = 48.dp,
+                                cacheKey = track.albumId.toString(),
+                            )
+                        },
                         trailing = {
                             IconButton(onClick = { playlistDetailViewModel.removeTrack(track.id) }, modifier = Modifier.size(32.dp)) {
                                 Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary, modifier = Modifier.size(18.dp))
@@ -319,10 +329,10 @@ private fun RenameField(initialName: String, onConfirm: (String) -> Unit, onCanc
 @Composable
 private fun UnavailableTrackRow(entry: UnavailableEntry, onRemove: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING + 12.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.width(30.dp))
+        Spacer(Modifier.width(62.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
