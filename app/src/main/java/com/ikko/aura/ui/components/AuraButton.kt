@@ -30,6 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
@@ -247,10 +250,27 @@ private fun TileSurface(
             .glassPressLayer(press)
             .clip(shape)
             .drawBehind {
-                drawRect(fill)
-                if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+                if (tone == ButtonTone.Primary) {
+                    drawRect(fill)
+                    if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+                } else {
+                    // The design's frosted button: white from 22 % at the top to 10 % at the bottom over the page, a 0.6 dp
+                    // rim at 24 %, and a 0.8 dp light line along the top edge at 28 %.
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = 0.22f),
+                            1f to Color.White.copy(alpha = 0.10f),
+                        ),
+                    )
+                    if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+                    val outline = shape.createOutline(size, layoutDirection, this)
+                    drawOutline(outline, Color.White.copy(alpha = 0.24f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
+                    clipRect(bottom = 4.dp.toPx()) {
+                        drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx()))
+                    }
+                }
             }
-            .glassEdge(shape)
+            .then(if (tone == ButtonTone.Primary) Modifier.glassEdge(shape) else Modifier)
             .glassPressGlow(press)
             .semantics { role = Role.Button }
             .glassPressInput(press, onClick),
