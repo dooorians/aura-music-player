@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -100,16 +101,21 @@ fun HomeScreen(
         else playerViewModel.playQueue(card.content.tracks, card.content.startIndex)
     }
 
+    val cover = com.ikko.aura.ui.theme.LocalCoverColors.current
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
                 .fillMaxSize()
-                // The violet wash the design lays over the top of the page.
+                // The colour of the record that is playing, laid over the top of the page and fading to black down it, as
+                // on YouTube Music. [CoverColors.accent] is read here, in draw, so a change of record fades without recomposing.
                 .drawBehind {
+                    val hsl = FloatArray(3)
+                    androidx.core.graphics.ColorUtils.colorToHSL(cover.accent.toArgb(), hsl)
+                    val wash = Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], 0.55f, 0.28f)))
                     drawRect(
                         Brush.verticalGradient(
-                            0f to Color(0x61_5828BE), 0.5f to Color(0x1F_5828BE), 1f to Color.Transparent,
-                            startY = 0f, endY = 520f * unit.toPx(),
+                            0f to wash.copy(alpha = 0.95f), 0.35f to wash.copy(alpha = 0.55f), 0.7f to wash.copy(alpha = 0.18f), 1f to Color.Transparent,
+                            startY = 0f, endY = 760f * unit.toPx(),
                         ),
                     )
                 },
