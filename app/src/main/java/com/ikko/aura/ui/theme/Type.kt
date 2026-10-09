@@ -59,8 +59,8 @@ val AuraTypography = Typography(
  */
 object LibraryTypography {
     val PageTitle = TextStyle(
-        fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, lineHeight = 30.sp,
-        letterSpacing = (-0.2).sp,
+        fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = 30.sp, lineHeight = 34.sp,
+        letterSpacing = (-0.3).sp,
     )
     val PageCount = TextStyle(
         fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, lineHeight = 16.sp,

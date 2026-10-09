@@ -148,7 +148,7 @@ private val PAGE_MARGIN = 12.dp
 // The baseline is placed exactly at 45.dp relative to the status bar, which perfectly aligns
 // with Home's "Favoris" and Settings' "Réglages" (which are centered in a 56dp box starting at 8dp).
 private val TITLE_RELATIVE_BASELINE = 45.dp
-private val COUNT_RELATIVE_BASELINE = 67.dp
+private val COUNT_RELATIVE_BASELINE = 69.dp
 private val HEADER_RELATIVE_HEIGHT = 88.dp
 private val HEADER_BUTTON = 48.dp
 private val STRIP_RELATIVE_TOP = 78.dp
@@ -460,7 +460,8 @@ private fun TrackList(
             state = gridState,
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = PAGE_MARGIN, end = INDEX_GUTTER, top = 8.dp, bottom = listBottomPadding() + 12.dp),
+            contentPadding = PaddingValues(// Rows carry 4 dp of their own: taken off, the covers sit on the title's line.
+            start = PAGE_MARGIN - 4.dp, end = INDEX_GUTTER, top = 8.dp, bottom = listBottomPadding() + 12.dp),
             horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else 8.dp),
             verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else 0.dp),
         ) {

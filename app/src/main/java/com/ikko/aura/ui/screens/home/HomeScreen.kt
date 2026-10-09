@@ -100,7 +100,8 @@ fun HomeScreen(
     val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val screenDp = LocalConfiguration.current.screenWidthDp
     val unit = (screenDp / DESIGN_WIDTH_PX).dp
-    val margin = unit * 50f
+    // The library's margin, so the two pages' content sits on the same vertical lines.
+    val margin = 12.dp
     val gap = unit * 25f
 
     // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
@@ -148,7 +149,7 @@ fun HomeScreen(
             ) {
                 Row(
                     // The library's own margin, so the two pages' titles and corner buttons sit on the same lines.
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = margin),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
