@@ -1,6 +1,10 @@
 package com.ikko.aura.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Shader
 import androidx.compose.animation.Animatable
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.animation.core.AnimationVector4D
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -64,6 +68,13 @@ fun Modifier.nowPlayingWash(): Modifier {
                 ),
                 size = Size(w, layerH),
             )
+            // Dither: a fine noise laid in before the fall-off, so that a panel that shows fewer shades breaks the dark
+            // gradient into grain instead of into bands with visible edges.
+            drawRect(
+                brush = ShaderBrush(BitmapShader(ditherBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)),
+                size = Size(w, layerH),
+                alpha = 0.022f,
+            )
             // The fall-off: slow, easing out, nothing left by the bottom of the wash.
             drawRect(
                 Brush.verticalGradient(
@@ -78,6 +89,12 @@ fun Modifier.nowPlayingWash(): Modifier {
             canvas.restore()
         }
     }
+}
+
+private val ditherBitmap: Bitmap by lazy {
+    val rnd = kotlin.random.Random(11)
+    val px = IntArray(64 * 64) { val v = rnd.nextInt(256); (0xFF shl 24) or (v shl 16) or (v shl 8) or v }
+    Bitmap.createBitmap(px, 64, 64, Bitmap.Config.ARGB_8888)
 }
 
 private fun Color.mix(other: Color, t: Float) = androidx.compose.ui.graphics.lerp(this, other, t)
