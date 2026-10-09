@@ -38,14 +38,16 @@ fun Modifier.nowPlayingWash(): Modifier {
         val c = wash.map { it.value }
         // On a layer of its own so the fall-off can be laid over the colours as a whole.
         drawIntoCanvas { canvas ->
-            canvas.saveLayer(Rect(0f, 0f, w, h), Paint())
+            // A little taller than the fall-off: the layer's own edge must lie where nothing is left to cut.
+            val layerH = h * 1.12f
+            canvas.saveLayer(Rect(0f, 0f, w, layerH), Paint())
             // Left and right: two colours on a slant, so neither side is the other's mirror.
             drawRect(
                 Brush.linearGradient(
                     0f to c[0], 0.55f to c[0].mix(c[1], 0.5f), 1f to c[1],
                     start = Offset(0f, h * 0.05f), end = Offset(w, h * 0.30f),
                 ),
-                size = Size(w, h),
+                size = Size(w, layerH),
             )
             // A softer, lighter patch off to one side and a darker one lower down: the uneven light of a real surface.
             drawRect(
@@ -53,24 +55,24 @@ fun Modifier.nowPlayingWash(): Modifier {
                     0f to c[2].copy(alpha = 0.55f), 1f to Color.Transparent,
                     center = Offset(w * 0.22f, h * 0.30f), radius = w * 0.55f,
                 ),
-                size = Size(w, h),
+                size = Size(w, layerH),
             )
             drawRect(
                 Brush.radialGradient(
                     0f to Color.Black.copy(alpha = 0.35f), 1f to Color.Transparent,
                     center = Offset(w * 0.80f, h * 0.55f), radius = w * 0.5f,
                 ),
-                size = Size(w, h),
+                size = Size(w, layerH),
             )
             // The fall-off: slow, easing out, nothing left by the bottom of the wash.
             drawRect(
                 Brush.verticalGradient(
                     0f to Color.Black, 0.12f to Color.Black.copy(alpha = 0.88f), 0.30f to Color.Black.copy(alpha = 0.62f),
                     0.50f to Color.Black.copy(alpha = 0.34f), 0.70f to Color.Black.copy(alpha = 0.13f),
-                    0.88f to Color.Black.copy(alpha = 0.03f), 1f to Color.Transparent,
+                    0.88f to Color.Black.copy(alpha = 0.012f), 1f to Color.Transparent,
                     startY = 0f, endY = h,
                 ),
-                size = Size(w, h),
+                size = Size(w, layerH),
                 blendMode = BlendMode.DstIn,
             )
             canvas.restore()
