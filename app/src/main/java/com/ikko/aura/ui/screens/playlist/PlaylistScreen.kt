@@ -164,21 +164,8 @@ fun PlaylistScreen(
                                     spotColor = Color.Black.copy(alpha = 0.55f),
                                 ),
                             ) {
-                                if (ambience != null) {
-                                    // The card's picture, while it is drawn, a flat square of its colour.
-                                    Box(
-                                        Modifier.size(ART_SIZE).clip(ART_SHAPE).border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
-                                    ) {
-                                        cardArt?.let {
-                                            androidx.compose.foundation.Image(
-                                                bitmap = it.asImageBitmap(),
-                                                contentDescription = current.name,
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize(),
-                                            )
-                                        }
-                                    }
-                                } else {
+                                // A weekly playlist has no cover: its colours are the page's, and that is all of it.
+                                if (ambience == null) {
                                     AlbumArt(
                                         uri = current.tracks.firstOrNull()?.artworkUri,
                                         contentDescription = current.name,
@@ -189,7 +176,7 @@ fun PlaylistScreen(
                                     )
                                 }
                             }
-                            Spacer(Modifier.width(18.dp))
+                            if (ambience == null) Spacer(Modifier.width(18.dp))
                             Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
                                 Text(
                                     text = current.name,
