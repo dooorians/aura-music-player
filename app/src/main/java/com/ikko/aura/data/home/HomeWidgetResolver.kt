@@ -30,8 +30,6 @@ data class WidgetContent(
     val hint: String? = null,
     val hue: Float,
     val isCarousel: Boolean = false,
-    /** Path of the GIF a [WidgetKind.GIF] widget plays; the card then draws nothing else. */
-    val gif: String? = null,
 ) {
     val isEmpty: Boolean get() = tracks.isEmpty()
 }
@@ -176,12 +174,6 @@ object HomeWidgetResolver {
                     )
                 }
             }
-
-            WidgetKind.GIF -> WidgetContent(
-                title = "GIF", subtitle = null, artwork = emptyList(), tracks = emptyList(), hue = hue,
-                hint = if (widget.arg?.let { java.io.File(it).exists() } == true) null else "GIF introuvable",
-                gif = widget.arg?.takeIf { java.io.File(it).exists() },
-            )
 
             WidgetKind.PLAYLIST -> {
                 val id = widget.arg?.toLongOrNull()
