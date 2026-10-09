@@ -35,6 +35,7 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
     val motion = LocalPageMotion.current ?: return
     val scope = rememberCoroutineScope()
     val onHome = motion.p < 0.5f
+    val accent = rememberPlayerAccent(onDarkGlass = true)
     val pressed = remember { Animatable(1f) }
     val shape = RoundedCornerShape(16.dp)
     LiquidGlassPanel(
@@ -79,7 +80,7 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
         Icon(
             imageVector = if (onHome) CupertinoIcons.Library else CupertinoIcons.House,
             contentDescription = if (onHome) "Bibliothèque" else "Accueil",
-            tint = Color.White,
+            tint = accent,
             modifier = Modifier.size(24.dp).align(Alignment.Center),
         )
     }

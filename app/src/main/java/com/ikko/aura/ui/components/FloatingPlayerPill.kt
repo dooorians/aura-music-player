@@ -162,6 +162,7 @@ fun FloatingPlayerPill(
 
     val motion = LocalPageMotion.current
     val cover = LocalCoverColors.current
+    val accent = rememberPlayerAccent(onDarkGlass = true)
     LiquidGlassPanel(
         shape = PillShape,
         tint = PillGlassTint,
@@ -380,7 +381,7 @@ fun FloatingPlayerPill(
                 Text(
                     text = shown.title,
                     style = LibraryTypography.PlayerTitle,
-                    color = Color.White,
+                    color = accent,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
@@ -389,7 +390,7 @@ fun FloatingPlayerPill(
                 Text(
                     text = shown.artist,
                     style = LibraryTypography.PlayerArtist,
-                    color = cover.tint.copy(alpha = 0.72f),
+                    color = accent.copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
@@ -410,7 +411,7 @@ fun FloatingPlayerPill(
             Icon(
                 imageVector = if (playing) CupertinoIcons.Pause else CupertinoIcons.Play,
                 contentDescription = if (playing) "Pause" else "Lecture",
-                tint = Color.White,
+                tint = accent,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -418,7 +419,7 @@ fun FloatingPlayerPill(
         Icon(
             imageVector = CupertinoIcons.SkipNext,
             contentDescription = "Titre suivant",
-            tint = Color.White,
+            tint = accent,
             modifier = Modifier.size(GLYPH_SIZE),
         )
     }

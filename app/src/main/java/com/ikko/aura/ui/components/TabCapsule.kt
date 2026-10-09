@@ -361,12 +361,13 @@ fun TabCapsule(
                     Modifier.fillMaxSize().padding(TAB_PAD),
                     horizontalArrangement = Arrangement.spacedBy(TAB_GAP),
                 ) {
+                    val accent = rememberPlayerAccent(onDarkGlass = true)
                     for (slot in 0 until SLOTS) {
                         val isSearch = slot == SEARCH_SLOT
                         val view = slot - 1
                         val active = !isSearch && slot == displaySlot
                         val tint by androidx.compose.animation.animateColorAsState(
-                            targetValue = if (active) Color.White else Color.White.copy(alpha = 0.72f),
+                            targetValue = if (active) accent else accent.copy(alpha = 0.72f),
                             animationSpec = androidx.compose.animation.core.tween(160),
                             label = "tab-tint",
                         )

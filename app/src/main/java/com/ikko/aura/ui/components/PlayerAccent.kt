@@ -19,14 +19,15 @@ import kotlin.math.abs
  * light on a dark backdrop, dark on a light one. A cover with nothing but one hue gets a tint of it, pale or deep.
  */
 @Composable
-fun rememberPlayerAccent(): Color {
+fun rememberPlayerAccent(onDarkGlass: Boolean = false): Color {
     val mesh = LocalNowPlayingMesh.current
-    val target = remember(mesh) { playerAccentFor(mesh) }
+    val target = remember(mesh, onDarkGlass) { playerAccentFor(mesh, onDarkGlass) }
     val animated by animateColorAsState(target, tween(200), label = "player-accent")
     return animated
 }
 
-internal fun playerAccentFor(mesh: List<Color>): Color {
+/** [onDarkGlass]: the control sits on the mini player's dark glass, whatever the page, so the colour is always the pale one. */
+internal fun playerAccentFor(mesh: List<Color>, onDarkGlass: Boolean = false): Color {
     if (mesh.isEmpty()) return Color.White
     val hsl = mesh.map { c -> FloatArray(3).also { ColorUtils.colorToHSL(c.toArgb(), it) } }
     // The backdrop's hue: the circular mean of the swatches, weighted by saturation.
@@ -37,7 +38,7 @@ internal fun playerAccentFor(mesh: List<Color>): Color {
     }
     val bgHue = ((Math.toDegrees(Math.atan2(y, x)) + 360) % 360).toFloat()
     val bgLum = (mesh.map { it.luminance() }.average()).toFloat()
-    val bgIsLight = bgLum > 0.38f
+    val bgIsLight = !onDarkGlass && bgLum > 0.38f
 
     fun gap(h: Float): Float = abs(h - bgHue).let { if (it > 180f) 360f - it else it }
     val best = hsl.maxByOrNull { gap(it[0]) * (0.3f + it[1]) }
