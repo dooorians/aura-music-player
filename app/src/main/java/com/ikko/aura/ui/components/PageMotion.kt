@@ -306,7 +306,11 @@ fun PagedContainer(
             }
         }
     }
-    val scrollableState = rememberScrollableState { delta -> state.dragBy(-delta / state.widthPx); delta }
+    val scrollableState = rememberScrollableState { delta ->
+        // A zero delta is a child's drag passing by (a row of covers), not the pager's: it must not start a drag.
+        if (delta != 0f) state.dragBy(-delta / state.widthPx)
+        delta
+    }
     // A no-op: `connection.onPreFling` below already turns a release's velocity into a settle, and it
     // sees this scrollable's own fling too, since `.nestedScroll(connection)` wraps it on this same
     // Box. A real `performFling` here raced `onPreFling` for the same velocity and lost — `onPreFling`
@@ -323,8 +327,9 @@ fun PagedContainer(
     LaunchedEffect(scrollableState) {
         snapshotFlow { scrollableState.isScrollInProgress }.collectLatest { inProgress ->
             if (inProgress) {
+                // Only halts a settle; `dragging` is set by dragBy once the pager really moves. Setting it here
+                // made `inTransit` true while a row of covers was still taking the drag, and onPreScroll stole it.
                 state.stop()
-                state.dragging = true
             }
         }
     }
