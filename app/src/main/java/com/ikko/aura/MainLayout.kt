@@ -1207,6 +1207,7 @@ fun MainLayout() {
                         enabled = pillInteractive,
                         // On every page the pill shows: it must not change shape from one page to the next.
                         showPageSwitch = true,
+                        settleKey = currentRoute,
                         onPageSwitch = {
                             if (navController.currentBackStackEntry?.destination?.route != AuraDestination.Tabs.route) {
                                 navController.popBackStack(AuraDestination.Tabs.route, inclusive = false)
@@ -1347,6 +1348,7 @@ private fun PlayerPillHost(
     enabled: Boolean = true,
     showPageSwitch: Boolean = false,
     onPageSwitch: () -> Unit = {},
+    settleKey: Any? = null,
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
@@ -1367,6 +1369,7 @@ private fun PlayerPillHost(
             onOpen = onOpenNowPlaying,
             onPrewarm = onPrewarm,
             onPrewarmCancel = onPrewarmCancel,
+            settleKey = settleKey,
             modifier = Modifier.weight(1f),
             enabled = enabled,
         )
