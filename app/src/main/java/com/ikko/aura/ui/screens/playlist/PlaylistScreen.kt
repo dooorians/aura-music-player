@@ -64,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.ikko.aura.ui.components.rememberPlayerAccent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -221,7 +222,7 @@ fun PlaylistScreen(
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box {
                                 CircleAction(onClick = { menuExpanded = true }) {
-                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
+                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
                                 }
                                 DropdownMenu(
                                     expanded = menuExpanded,

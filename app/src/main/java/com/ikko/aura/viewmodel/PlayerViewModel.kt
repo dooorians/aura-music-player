@@ -193,10 +193,11 @@ class PlayerViewModel @Inject constructor(
             // a transient buffering blip right at the first play() call) leaves position frozen
             // for the rest of the session with no further event to recover it.
             while (isActive) {
-                if (player.isPlaying) {
-                    _positionMs.value = player.currentPosition.coerceAtLeast(0L)
-                    _durationMs.value = player.duration.coerceAtLeast(0L)
-                }
+                // Also while paused: after a skip made on pause the new track's length and start are read at once. They used
+                // to be read only while playing, so the bar kept the previous track's duration, and a touch on it
+                // asked for a moment of the wrong length (past the end of a shorter track).
+                _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+                _durationMs.value = player.duration.coerceAtLeast(0L)
                 reconcileCurrentItem(player)
                 // Paused, nothing moves: rather than waking twice a second for the whole time the app is
                 // open, it sleeps until the player says something changed (play, pause, a new item, a
@@ -446,8 +447,12 @@ class PlayerViewModel @Inject constructor(
     fun skipNext() = playerController.skipNext()
     fun skipPrevious() = playerController.skipPrevious()
     fun seekTo(positionMs: Long) {
-        playerController.seekTo(positionMs)
-        _positionMs.value = positionMs
+        // Against the player's own length for the track now loaded, not the one last copied into the UI state.
+        val length = boundPlayer?.duration?.takeIf { it > 0L && it != androidx.media3.common.C.TIME_UNSET }
+        val target = if (length != null) positionMs.coerceIn(0L, length - 1L) else positionMs.coerceAtLeast(0L)
+        playerController.seekTo(target)
+        _positionMs.value = target
+        if (length != null) _durationMs.value = length
     }
 
     /**

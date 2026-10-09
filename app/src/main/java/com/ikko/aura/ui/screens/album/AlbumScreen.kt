@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.ikko.aura.ui.components.rememberPlayerAccent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
@@ -540,13 +541,13 @@ private fun AlbumHeader(
                     filled = CupertinoIcons.StarFilled,
                     active = uiState.isFavorite,
                     contentDescription = "Favori",
-                    tint = Color.White,
+                    tint = rememberPlayerAccent(),
                     modifier = Modifier.size(18.dp),
                 )
             }
             Box {
                 CircleAction(onClick = onMore) {
-                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(18.dp))
+                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(18.dp))
                 }
                 moreMenu()
             }
@@ -617,7 +618,7 @@ internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier
 @Composable
 internal fun ShuffleButton(onClick: () -> Unit) {
     CircleAction(onClick = onClick) {
-        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = Color.White, modifier = Modifier.size(20.dp))
+        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
     }
 }
 
@@ -775,8 +776,8 @@ internal fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumContr
                     trackColor = Color.White.copy(alpha = 0.2f),
                 )
             }
-            whole -> Icon(CupertinoIcons.Check, contentDescription = "Téléchargé", tint = Color.White, modifier = Modifier.size(20.dp))
-            else -> Icon(CupertinoIcons.ArrowDownCircle, contentDescription = "Télécharger l'album", tint = Color.White, modifier = Modifier.size(22.dp))
+            whole -> Icon(CupertinoIcons.Check, contentDescription = "Téléchargé", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
+            else -> Icon(CupertinoIcons.ArrowDownCircle, contentDescription = "Télécharger l'album", tint = rememberPlayerAccent(), modifier = Modifier.size(22.dp))
         }
     }
     if (confirmRemove) {

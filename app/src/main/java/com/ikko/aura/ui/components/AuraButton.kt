@@ -237,7 +237,9 @@ private fun TileSurface(
     val press = rememberGlassPress()
 
     val fill = if (tone == ButtonTone.Primary) PrimaryFill else NeutralFill
-    val contentColor = if (tone == ButtonTone.Primary) PrimaryContent else Color.White
+    // The neutral buttons take the cover's accent, like the player's own controls; the primary tone keeps its dark glyph.
+    val accent = rememberPlayerAccent()
+    val contentColor = if (tone == ButtonTone.Primary) PrimaryContent else accent
 
     Box(
         modifier = modifier
