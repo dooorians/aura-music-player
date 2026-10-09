@@ -101,9 +101,17 @@ class PlayerController @Inject constructor(
      */
     private val player: Player? get() = controller
 
+    var isShuffleActive: Boolean = false
+        private set
+
+    fun setShuffleActive(active: Boolean) {
+        isShuffleActive = active
+    }
+
     fun playQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long = 0L) {
         if (tracks.isEmpty()) return
         val player = player ?: return
+        player.shuffleModeEnabled = false
         player.setMediaItems(tracks.map(::toMediaItem), startIndex, startPositionMs)
         player.prepare()
         player.play()
@@ -115,7 +123,8 @@ class PlayerController @Inject constructor(
     fun restoreQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long, shuffle: Boolean, repeatMode: Int) {
         if (tracks.isEmpty()) return
         val player = player ?: return
-        player.shuffleModeEnabled = shuffle
+        isShuffleActive = shuffle
+        player.shuffleModeEnabled = false
         player.repeatMode = repeatMode
         player.setMediaItems(tracks.map(::toMediaItem), startIndex, startPositionMs)
         player.prepare()
@@ -152,7 +161,33 @@ class PlayerController @Inject constructor(
     }
 
     fun setShuffleEnabled(enabled: Boolean) {
-        player?.shuffleModeEnabled = enabled
+        isShuffleActive = enabled
+        player?.shuffleModeEnabled = false
+    }
+
+    /**
+     * Reorders upcoming media items in ExoPlayer's timeline to match [targetIds], starting from
+     * [startIndex] (typically `currentMediaItemIndex + 1`).
+     *
+     * The items before [startIndex] (including the currently playing item) are never moved or interrupted.
+     */
+    fun reorderUpcoming(startIndex: Int, targetIds: List<String>) {
+        val player = player ?: return
+        if (startIndex !in 0 until player.mediaItemCount) return
+        val currentIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toMutableList()
+        val limit = targetIds.size.coerceAtMost(currentIds.size)
+        for (i in startIndex until limit) {
+            val targetId = targetIds[i]
+            val currSubIdx = currentIds.subList(i, currentIds.size).indexOf(targetId)
+            if (currSubIdx != -1) {
+                val actualIdx = i + currSubIdx
+                if (actualIdx != i) {
+                    player.moveMediaItem(actualIdx, i)
+                    val item = currentIds.removeAt(actualIdx)
+                    currentIds.add(i, item)
+                }
+            }
+        }
     }
 
     fun setRepeatMode(@Player.RepeatMode mode: Int) {
@@ -231,6 +266,18 @@ class PlayerController @Inject constructor(
      * user has since skipped to.
      */
     suspend fun updateItemArtwork(mediaId: String, bitmap: Bitmap) {
+        // Once per item. Replacing the playing item is not free: the player announces a playlist change, the view model
+        // reads a "new" current track, reads its palette, and lands back here. With repeat-one on, the two items the loop
+        // bounced between (after the queue was restored on a launch) kept replacing each other's artwork for ever — the
+        // position bar, the lyrics and the names flickered twice a second. An item that already carries its cover has
+        // nothing to be replaced with.
+        player?.let { p ->
+            val i = p.currentMediaItemIndex
+            if (i in 0 until p.mediaItemCount) {
+                val item = p.getMediaItemAt(i)
+                if (item.mediaId == mediaId && item.mediaMetadata.artworkData != null) return
+            }
+        }
         // JPEG encoding a cover is tens of milliseconds and used to run on the caller's thread —
         // which was the main one, so every track change spent that budget inside a frame. Only
         // the Media3 call afterwards has to be on the main thread.

@@ -6,6 +6,8 @@ import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.SettingsStore
 import com.ikko.aura.player.SleepTimer
 import com.ikko.aura.source.ytm.StreamCache
+import com.ikko.aura.data.AlbumLayoutMode
+import com.ikko.aura.data.TrackLayoutMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +25,8 @@ data class SettingsUiState(
     val ytmEnabled: Boolean = false,
     /** Minutes left on the sleep timer, or null when none is running. */
     val sleepMinutesLeft: Int? = null,
+    val albumLayoutMode: AlbumLayoutMode = AlbumLayoutMode.GRID_3,
+    val trackLayoutMode: TrackLayoutMode = TrackLayoutMode.GRID_2,
 )
 
 @HiltViewModel
@@ -54,6 +58,8 @@ class SettingsViewModel @Inject constructor(
         settingsStore.automixEnabled,
         sleepMinutes,
         settingsStore.ytmEnabled,
+        settingsStore.albumLayoutMode,
+        settingsStore.trackLayoutMode,
     ) { values ->
         SettingsUiState(
             isScanning = values[0] as Boolean,
@@ -61,8 +67,17 @@ class SettingsViewModel @Inject constructor(
             automixEnabled = values[2] as Boolean,
             sleepMinutesLeft = values[3] as Int?,
             ytmEnabled = values[4] as Boolean,
+            albumLayoutMode = values[5] as AlbumLayoutMode,
+            trackLayoutMode = values[6] as TrackLayoutMode,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
+
+    val profileImageUri: StateFlow<String?> = settingsStore.profileImageUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val profileFirstName: StateFlow<String> = settingsStore.profileFirstName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+    val amoledBackgroundEnabled: StateFlow<Boolean> = settingsStore.amoledBackgroundEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private companion object {
         const val SLEEP_TICK_MS = 20_000L
@@ -78,6 +93,26 @@ class SettingsViewModel @Inject constructor(
 
     fun setAutomixEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsStore.setAutomixEnabled(enabled) }
+    }
+
+    fun setAlbumLayoutMode(mode: AlbumLayoutMode) {
+        viewModelScope.launch { settingsStore.setAlbumLayoutMode(mode) }
+    }
+
+    fun setTrackLayoutMode(mode: TrackLayoutMode) {
+        viewModelScope.launch { settingsStore.setTrackLayoutMode(mode) }
+    }
+
+    fun setProfileImageUri(uri: String?) {
+        viewModelScope.launch { settingsStore.setProfileImageUri(uri) }
+    }
+
+    fun setProfileFirstName(name: String) {
+        viewModelScope.launch { settingsStore.setProfileFirstName(name) }
+    }
+
+    fun setAmoledBackgroundEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setAmoledBackgroundEnabled(enabled) }
     }
 
     fun startSleepTimer(minutes: Int) = sleepTimer.start(minutes * 60_000L)

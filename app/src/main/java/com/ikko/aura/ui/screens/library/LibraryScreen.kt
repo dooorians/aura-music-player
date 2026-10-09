@@ -21,8 +21,10 @@ import com.ikko.aura.ui.components.LocalIndexStripShift
 import com.ikko.aura.ui.components.ScrollTarget
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import com.ikko.aura.data.AlbumLayoutMode
+import com.ikko.aura.data.TrackLayoutMode
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -74,6 +78,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -91,7 +96,6 @@ import com.ikko.aura.ui.components.SquircleCard
 import com.ikko.aura.ui.components.TrackListItem
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
-import com.ikko.aura.ui.theme.LocalSearchOpener
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.viewmodel.LibraryFilter
@@ -108,14 +112,14 @@ import androidx.compose.foundation.layout.paddingFromBaseline
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.WindowInsets
 import com.ikko.aura.ui.components.libraryTabIndex
+import com.ikko.aura.ui.components.rememberCapsuleScrollConnection
+import com.ikko.aura.ui.components.TabCapsuleState
+import com.ikko.aura.ui.components.LocalTabCapsule
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import com.ikko.aura.ui.components.LocalPageMotion
-import com.ikko.aura.ui.components.rememberCapsuleScrollConnection
-import com.ikko.aura.ui.components.TabCapsuleState
-import com.ikko.aura.ui.components.LocalTabCapsule
 import com.ikko.aura.ui.components.PageMotionSpec
 import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.ui.draw.drawWithContent
@@ -140,13 +144,13 @@ import androidx.compose.foundation.layout.width
  * The library's measurements, from the top of the screen (status bar included): the title's baseline sits
  * 89 dp down, the count's 111, and the first row of covers starts at 129. One margin, 21 dp, at both sides.
  */
-private val PAGE_MARGIN = 21.dp
+private val PAGE_MARGIN = 12.dp
 // The baseline is placed exactly at 45.dp relative to the status bar, which perfectly aligns
 // with Home's "Favoris" and Settings' "Réglages" (which are centered in a 56dp box starting at 8dp).
 private val TITLE_RELATIVE_BASELINE = 45.dp
 private val COUNT_RELATIVE_BASELINE = 67.dp
 private val HEADER_RELATIVE_HEIGHT = 88.dp
-private val HEADER_BUTTON = 40.dp
+private val HEADER_BUTTON = 48.dp
 private val STRIP_RELATIVE_TOP = 78.dp
 private val HEADER_BUTTON_GAP = 10.dp
 
@@ -273,7 +277,7 @@ fun LibraryScreen(
                         scope.launch {
                             val queue = libraryViewModel.smartShuffle()
                             if (queue.isNotEmpty()) {
-                                playerViewModel.playQueue(queue, 0)
+                                playerViewModel.playQueue(queue, 0, shuffle = true)
                             }
                         }
                     },
@@ -285,8 +289,10 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .nestedScroll(headerScrollConnection)
-                .nestedScroll(capsuleScroll),
+                // The capsule's, outermost: it hears every scroll before the header takes its share, so a scroll that only
+                // moves the header still counts.
+                .nestedScroll(capsuleScroll)
+                .nestedScroll(headerScrollConnection),
         ) {
             // The four filters are peers, exactly like the top tabs, so they animate with the
             // same vocabulary — switching them used to swap content instantly with nothing at all.
@@ -316,6 +322,7 @@ fun LibraryScreen(
                     LibraryFilter.TRACKS -> TrackList(
                         tracks = uiState.tracks,
                         sort = uiState.sort,
+                        layoutMode = uiState.trackLayoutMode,
                         onTrackClick = { index ->
                             playerViewModel.playQueue(uiState.tracks, index)
                         },
@@ -325,6 +332,7 @@ fun LibraryScreen(
                     LibraryFilter.ALBUMS -> AlbumGrid(
                         albums = uiState.albums,
                         sort = uiState.sort,
+                        layoutMode = uiState.albumLayoutMode,
                         navController = navController,
                         onAlbumLongPress = { album ->
                             context.show(
@@ -411,22 +419,14 @@ private fun LibraryHeader(
             horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Search, shuffle and sort share one capsule: a press swells it and lights the pressed button (see GlassPress.kt)
-            val openSearch = LocalSearchOpener.current
+            // Shuffle and sort share one capsule: a press swells it and lights the pressed button (see GlassPress.kt)
             AuraIconGroup(light = 80f) {
-                AuraGroupIcon(
-                    onClick = openSearch,
-                    size = HEADER_BUTTON,
-                    side = -1f,
-                ) {
-                    Icon(CupertinoIcons.Search, contentDescription = "Rechercher", modifier = Modifier.size(20.dp))
-                }
                 AuraGroupIcon(
                     onClick = onSmartShuffle,
                     size = HEADER_BUTTON,
-                    side = 0f,
+                    side = -1f,
                 ) {
-                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(20.dp))
+                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(24.dp))
                 }
                 // The menu grows out of this button: it tells the menu where it is, and empties while the menu is out.
                 AuraGroupIcon(
@@ -435,7 +435,7 @@ private fun LibraryHeader(
                     size = HEADER_BUTTON,
                     side = 1f,
                 ) {
-                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(20.dp))
+                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(24.dp))
                 }
             }
         }
@@ -446,31 +446,33 @@ private fun LibraryHeader(
 private fun TrackList(
     tracks: List<Track>,
     sort: LibrarySort,
+    layoutMode: TrackLayoutMode,
     onTrackClick: (Int) -> Unit,
     onTrackLongPress: (Track) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
+    val isList = layoutMode == TrackLayoutMode.LIST
+    val columns = if (isList) 1 else 2
     IndexedList(
         target = rememberScrollTarget(gridState),
-        // Remembered, as AlbumGrid's are: recomputed on every recomposition, the keys were a new list each time,
-        // which also made IndexedList recompute its set of letters over the whole library.
         indexKeys = remember(tracks, sort) { tracks.indexKeysFor(sort) { it.title to it.artist } },
         onJumped = onJumped,
     ) {
         LazyVerticalGrid(
             state = gridState,
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = PAGE_MARGIN, end = INDEX_GUTTER, top = 8.dp, bottom = listBottomPadding() + 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else 8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else 0.dp),
         ) {
             gridItemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
                 TrackListItem(
                     track = track,
                     onClick = { onTrackClick(index) },
                     onLongClick = { onTrackLongPress(track) },
-                    artSize = 52.dp,
+                    artSize = if (isList) 48.dp else 52.dp,
                 )
             }
         }
@@ -481,68 +483,136 @@ private fun TrackList(
 private fun AlbumGrid(
     albums: List<Album>,
     sort: LibrarySort,
+    layoutMode: AlbumLayoutMode,
     navController: NavHostController,
     onAlbumLongPress: (Album) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
+    val isList = layoutMode == AlbumLayoutMode.LIST
+    val columns = when (layoutMode) {
+        AlbumLayoutMode.LIST -> 1
+        AlbumLayoutMode.GRID_2 -> 2
+        AlbumLayoutMode.GRID_3 -> 3
+    }
     IndexedList(
         target = rememberScrollTarget(gridState),
         onJumped = onJumped,
-        // Albums are always ordered alphabetically — by title, or by artist when that is what
-        // was chosen — so unlike the track list they always have letters to jump to.
         indexKeys = remember(albums, sort) {
             albums.map { if (sort == LibrarySort.ARTIST) it.artist else it.title }
         },
     ) {
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(3),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = PAGE_MARGIN, end = INDEX_GUTTER, top = 0.dp, bottom = listBottomPadding() + 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(13.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp),
-    ) {
-        itemsIndexed(albums, key = { _, album -> album.id }) { index, album ->
-            // Moves with its page like everything else on the other pages. Each column used to trail behind it by
-            // its own delay (20 to 56 ms), so on a swipe the albums arrived one column after another, out of step
-            // with the rest.
-            Column {
-                SquircleCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                    onClick = { navController.navigate(album.route()) },
-                    onLongClick = { onAlbumLongPress(album) },
-                ) {
-                    AlbumArt(
-                        uri = album.artworkUri,
-                        contentDescription = album.title,
-                        modifier = Modifier.fillMaxSize(),
-                        targetSizeDp = 180.dp,
-                        cacheKey = album.id.toString(),
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = PAGE_MARGIN,
+                end = INDEX_GUTTER,
+                top = if (isList) 8.dp else 0.dp,
+                bottom = listBottomPadding() + 12.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else if (columns == 2) 12.dp else 10.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else if (columns == 2) 14.dp else 12.dp),
+        ) {
+            itemsIndexed(albums, key = { _, album -> album.id }) { index, album ->
+                if (isList) {
+                    AlbumListItem(
+                        album = album,
+                        onClick = { navController.navigate(album.route()) },
+                        onLongClick = { onAlbumLongPress(album) },
                     )
+                } else {
+                    Column {
+                        SquircleCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f),
+                            onClick = { navController.navigate(album.route()) },
+                            onLongClick = { onAlbumLongPress(album) },
+                        ) {
+                            AlbumArt(
+                                uri = album.artworkUri,
+                                contentDescription = album.title,
+                                modifier = Modifier.fillMaxSize(),
+                                targetSizeDp = if (columns == 2) 260.dp else 180.dp,
+                                cacheKey = album.id.toString(),
+                            )
+                        }
+                        Text(
+                            text = album.title,
+                            style = if (columns == 2) LibraryTypography.AlbumTitle.copy(fontSize = 15.sp, lineHeight = 19.sp) else LibraryTypography.AlbumTitle,
+                            color = Color.White,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = if (columns == 2) 10.dp else 9.dp),
+                        )
+                        CoverText(
+                            text = album.artist,
+                            style = if (columns == 2) LibraryTypography.AlbumArtist.copy(fontSize = 13.sp) else LibraryTypography.AlbumArtist,
+                            alpha = 0.72f,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                Text(
-                    text = album.title,
-                    style = LibraryTypography.AlbumTitle,
-                    color = Color.White,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 9.dp),
-                )
-                CoverText(
-                    text = album.artist,
-                    style = LibraryTypography.AlbumArtist,
-                    alpha = 0.72f,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumListItem(
+    album: Album,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(AuraShapes.SquircleMedium)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SquircleCard(
+            modifier = Modifier.size(50.dp),
+            shape = AuraShapes.AlbumCover,
+        ) {
+            AlbumArt(
+                uri = album.artworkUri,
+                contentDescription = album.title,
+                modifier = Modifier.fillMaxSize(),
+                shape = AuraShapes.AlbumCover,
+                targetSizeDp = 50.dp,
+                cacheKey = album.id.toString(),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = album.title,
+                style = LibraryTypography.AlbumTitle,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            CoverText(
+                text = if (album.trackCount > 0) {
+                    "${album.artist} · ${album.trackCount} titre${if (album.trackCount > 1) "s" else ""}"
+                } else {
+                    album.artist
+                },
+                style = LibraryTypography.AlbumArtist,
+                alpha = 0.72f,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -709,7 +779,7 @@ private fun ScanningState() {
  * Keeps the index strip clear of the content it scrubs. Everything else keeps its own 16dp.
  */
 /** Kept clear at the grid's right for the index strip. */
-private val INDEX_GUTTER = 50.dp
+private val INDEX_GUTTER = 12.dp
 
 /**
  * The names the alphabet strip files this list under, or null when the strip should not be shown
@@ -788,7 +858,11 @@ private const val MIN_ITEMS_FOR_INDEX = 25
 @Composable
 private fun listBottomPadding(): androidx.compose.ui.unit.Dp {
     val capsule = LocalTabCapsule.current
-    val shown = capsule != null && capsule.shown.targetValue > 0.5f
+    // Whether the list's own scrolling has put the capsule away — and nothing else. It used to be the capsule's animation
+    // target, which also moves when the player opens (the capsule is reset under the card) and again when it closes: each
+    // time the list's end padding changed and every grid and list of the page, hidden under the player, was measured again —
+    // text and all — in the middle of the card's travel.
+    val shown = capsule != null && !capsule.scrolledAway
     return LocalPlayerPillHeight.current +
         if (shown) (PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP).dp else 0.dp
 }

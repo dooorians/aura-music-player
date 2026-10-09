@@ -3,6 +3,7 @@ package com.ikko.aura.ui.screens.album
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +90,7 @@ import com.ikko.aura.ui.components.ButtonTone
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.theme.AuraColors
+import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LocalPageTheme
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
@@ -101,9 +103,9 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-private val PAGE_PADDING = 21.dp // the other pages' margin (it was 22)
+private val PAGE_PADDING = 12.dp
 private val ART_SIZE = 96.dp
-private val ART_SHAPE = RoundedCornerShape(24.dp)
+private val ART_SHAPE = AuraShapes.AlbumCoverDetail
 private val ACTION_HEIGHT = 44.dp
 private val ROW_SHAPE = RoundedCornerShape(20.dp)
 
@@ -196,7 +198,6 @@ fun AlbumPageContent(
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(
             applyStatusBarInset = false,
-            modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { if (isTransitioning) 0f else listState.headerScrollPx(1000f) },
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AlbumGround(ground = theme.solid, listState = listState)
@@ -220,7 +221,7 @@ fun AlbumPageContent(
                             },
                             onShuffle = {
                                 if (uiState.tracks.isNotEmpty()) {
-                                    playerViewModel.playQueue(uiState.tracks.shuffled(), 0)
+                                    playerViewModel.playShuffled(uiState.tracks)
                                 }
                             },
                             onFavorite = onFavorite,
@@ -308,24 +309,29 @@ private fun AlbumGround(ground: Color, listState: LazyListState) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { val fadeEnd = GROUND_SOLID_DP.dp.toPx()
-            translationY = -listState.headerScrollPx(fadeEnd) }
-            .drawBehind {
+            .graphicsLayer {
+                val fadeEnd = GROUND_SOLID_DP.dp.toPx()
+                translationY = -listState.headerScrollPx(fadeEnd)
+            }
+            .drawWithCache {
                 val fadeStart = GROUND_CLEAR_DP.dp.toPx()
                 val fadeEnd = GROUND_SOLID_DP.dp.toPx()
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        0f to ground.copy(alpha = 0f),
-                        0.42f to ground.copy(alpha = 0.38f),
-                        0.78f to ground.copy(alpha = 0.86f),
-                        1f to ground,
-                        startY = fadeStart,
-                        endY = fadeEnd,
-                    ),
-                    topLeft = Offset(0f, fadeStart),
-                    size = Size(size.width, fadeEnd - fadeStart),
+                val gradientBrush = Brush.verticalGradient(
+                    0f to ground.copy(alpha = 0f),
+                    0.42f to ground.copy(alpha = 0.38f),
+                    0.78f to ground.copy(alpha = 0.86f),
+                    1f to ground,
+                    startY = fadeStart,
+                    endY = fadeEnd,
                 )
-                drawRect(ground, topLeft = Offset(0f, fadeEnd), size = Size(size.width, size.height * 3f))
+                onDrawBehind {
+                    drawRect(
+                        brush = gradientBrush,
+                        topLeft = Offset(0f, fadeStart),
+                        size = Size(size.width, fadeEnd - fadeStart),
+                    )
+                    drawRect(ground, topLeft = Offset(0f, fadeEnd), size = Size(size.width, size.height * 3f))
+                }
             },
     )
 }
@@ -397,17 +403,19 @@ private fun AlbumHeader(
         Row(verticalAlignment = Alignment.Top) {
             Box(
                 modifier = Modifier.shadow(
-                    elevation = 22.dp,
+                    elevation = 16.dp,
                     shape = ART_SHAPE,
-                    ambientColor = Color.Black.copy(alpha = 0.55f),
-                    spotColor = Color.Black.copy(alpha = 0.65f),
+                    ambientColor = Color.Black.copy(alpha = 0.45f),
+                    spotColor = Color.Black.copy(alpha = 0.55f),
                 ),
             ) {
                 AlbumArt(
                     uri = uiState.tracks.firstOrNull()?.artworkUri,
                     contentDescription = uiState.title,
                     shape = ART_SHAPE,
-                    modifier = Modifier.size(ART_SIZE),
+                    modifier = Modifier
+                        .size(ART_SIZE)
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
                     targetSizeDp = ART_SIZE,
                     cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
                 )
@@ -453,7 +461,7 @@ private fun AlbumHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PlayAllButton(onClick = onPlayAll)
+            PlayAllButton(onClick = onPlayAll, tint = null)
             ShuffleButton(onClick = onShuffle)
             Spacer(Modifier.weight(1f))
             CircleAction(onClick = onFavorite) {
@@ -482,14 +490,14 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun PlayAllButton(onClick: () -> Unit) {
+private fun PlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
     AuraButton(
         onClick = onClick,
-        tone = ButtonTone.Primary,
         minHeight = ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 18.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        tint = tint,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(7.dp))
         Text(text = "Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
@@ -530,7 +538,7 @@ private fun AlbumTrackRow(
 ) {
     // "Wild And Alone (feat. PinkPantheress)" is the title and its credit run together; the page
     // sets them apart, the credit small beneath the title.
-    val (shownTitle, subtitle) = remember(track.title, track.artist, albumArtist) {
+    val (shownTitle, subtitle) = remember(track.id, albumArtist) {
         val split = splitFeaturing(track.title)
         val credit = split.second?.let { "feat. $it" }
             ?: trackSubtitle(albumArtist, track.artist)?.takeUnless { featuringIsInTitle(track.title, it) }
@@ -777,5 +785,5 @@ private fun formatTrackDuration(ms: Long): String {
     val totalSeconds = ms / 1000
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
+    return if (seconds < 10) "$minutes:0$seconds" else "$minutes:$seconds"
 }

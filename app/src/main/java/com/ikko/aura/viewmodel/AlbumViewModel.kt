@@ -25,8 +25,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
 
 /** See [LibraryUiState]'s doc comment — same `List<T>` stability-inference issue applies here. */
 @Immutable
@@ -102,24 +104,33 @@ class AlbumViewModel @Inject constructor(
     val page: StateFlow<AlbumPage?> = uiState
         .map { it.tracks.firstOrNull() }
         .distinctUntilChangedBy { it?.albumId to it?.artworkUri }
-        .mapLatest { track ->
-            if (track == null) return@mapLatest AlbumPage(AlbumTheme.Neutral, FileTags())
-            AlbumPageCache.get(albumId) ?: coroutineScope {
-                val theme = async(Dispatchers.Default) { buildAlbumTheme(context, track) }
-                val tags = async(Dispatchers.IO) { readFileTags(context, track) }
-                // Tags come off the file, which on a slow card can take a while; the page does not
-                // wait past this for a caption.
-                AlbumPage(theme.await(), withTimeoutOrNull(TAGS_TIMEOUT_MS) { tags.await() } ?: FileTags(null, track.year))
-                    .also { AlbumPageCache.put(albumId, it) }
+        .transformLatest { track ->
+            if (track == null) {
+                emit(AlbumPage(AlbumTheme.Neutral, FileTags()))
+                return@transformLatest
+            }
+            val cached = AlbumPageCache.get(albumId)
+            if (cached != null) {
+                emit(cached)
+                return@transformLatest
+            }
+            // 1. Build theme fast (~10-15ms)
+            val theme = withContext(Dispatchers.Default) { buildAlbumTheme(context, track) }
+            val initial = AlbumPage(theme, FileTags(null, track.year))
+            AlbumPageCache.put(albumId, initial)
+            emit(initial)
+
+            // 2. Read tags in background without blocking transition
+            val tags = withContext(Dispatchers.IO) { readFileTags(context, track) }
+            if (tags.genre != null || (tags.year > 0 && tags.year != track.year)) {
+                val updated = AlbumPage(theme, tags)
+                AlbumPageCache.put(albumId, updated)
+                emit(updated)
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPageCache.get(albumId))
 
     fun toggleFavorite() = favoritesStore.toggle(albumId)
-
-    private companion object {
-        const val TAGS_TIMEOUT_MS = 350L
-    }
 }
 
 @Immutable

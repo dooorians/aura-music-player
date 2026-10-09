@@ -89,10 +89,12 @@ fun Modifier.liquidGlass(
     tintAlpha: Float = SURFACE_OPACITY,
     blurRadiusDp: Float = BLUR_RADIUS_DP,
     dropShadow: Boolean = true,
+    edge: Boolean = true,
 ): Modifier {
     if (LocalAuraBatterySaver.current) {
-        return background(tint.copy(alpha = 0.55f), shape)
-            .border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, shape)
+        return background(tint.copy(alpha = 0.55f), shape).let {
+            if (edge) it.border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, shape) else it
+        }
     }
     val backdrop = LocalAuraBackdrop.current
     val density = LocalDensity.current
@@ -115,7 +117,7 @@ fun Modifier.liquidGlass(
                 chromaticAberration = false,
             )
         },
-        highlight = { Highlight.Default },
+        highlight = if (edge) ({ Highlight.Default }) else null,
         shadow = if (dropShadow) ({ Shadow.Default }) else null,
         onDrawSurface = { drawRect(color = tint.copy(alpha = tintAlpha), size = size) },
         backdropScale = GLASS_RESOLUTION_SCALE,
@@ -149,6 +151,7 @@ fun LiquidGlassPanel(
     tintAlpha: Float = SURFACE_OPACITY,
     blurRadiusDp: Float = BLUR_RADIUS_DP,
     dropShadow: Boolean = true,
+    edge: Boolean = true,
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -165,7 +168,7 @@ fun LiquidGlassPanel(
                 // rendered glass is kept and reused until the backdrop behind it actually
                 // changes.
                 .graphicsLayer { }
-                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow),
+                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge),
         )
         content()
     }

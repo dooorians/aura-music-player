@@ -1,6 +1,7 @@
 package com.ikko.aura.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -9,6 +10,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 /** Shared with [FavoritesStore]: one store for everything small the app has to remember. */
@@ -22,24 +25,92 @@ data class EqualizerSettings(
     val bassBoostStrength: Int = 0,
 )
 
+enum class AlbumLayoutMode(val label: String) {
+    GRID_2("Grille 2 colonnes"),
+    GRID_3("Grille 3 colonnes"),
+    LIST("Liste"),
+}
+
+enum class TrackLayoutMode(val label: String) {
+    LIST("Liste"),
+    GRID_2("Grille 2 colonnes"),
+}
+
 @Singleton
 class SettingsStore @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) {
+    private val albumLayoutKey = stringPreferencesKey("library_album_layout")
+    private val trackLayoutKey = stringPreferencesKey("library_track_layout")
     private val onlineLyricsKey = booleanPreferencesKey("online_lyrics")
     private val automixKey = booleanPreferencesKey("automix")
     private val ytmKey = booleanPreferencesKey("ytm_enabled")
+    private val profileImageUriKey = stringPreferencesKey("profile_image_uri")
+    private val profileFirstNameKey = stringPreferencesKey("profile_first_name")
+    private val amoledBackgroundKey = booleanPreferencesKey("amoled_background")
+    private val shuffleKey = booleanPreferencesKey("playback_shuffle_enabled")
+
+    /**
+     * One setting, read from the shared DataStore, emitting only when its own value changes. The store re-emits every
+     * mapped value on any write to the file — the queue snapshot included, every few seconds while music plays — and
+     * without this each write woke every collector: the queue writer (which then wrote again, a loop for as long as
+     * music played), the library re-sort, the Home widgets.
+     */
+    private fun <T> setting(read: (Preferences) -> T): Flow<T> = context.settingsDataStore.data.map(read).distinctUntilChanged()
+
+    val profileImageUri = setting { prefs -> prefs[profileImageUriKey] }
+    val profileFirstName = setting { prefs -> prefs[profileFirstNameKey].orEmpty() }
+    val amoledBackgroundEnabled = setting { prefs -> prefs[amoledBackgroundKey] ?: false }
+    val shuffleEnabled = setting { prefs -> prefs[shuffleKey] ?: false }
+
+    suspend fun setProfileImageUri(uri: String?) {
+        context.settingsDataStore.edit { prefs ->
+            if (uri == null) prefs.remove(profileImageUriKey) else prefs[profileImageUriKey] = uri
+        }
+    }
+
+    suspend fun setProfileFirstName(name: String) {
+        context.settingsDataStore.edit { it[profileFirstNameKey] = name.trim() }
+    }
+
+    suspend fun setAmoledBackgroundEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[amoledBackgroundKey] = enabled }
+    }
+
+    suspend fun setShuffleEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[shuffleKey] = enabled }
+    }
+
+    val albumLayoutMode = setting { prefs ->
+        prefs[albumLayoutKey]?.let { name ->
+            runCatching { AlbumLayoutMode.valueOf(name) }.getOrNull()
+        } ?: AlbumLayoutMode.GRID_3
+    }
+
+    val trackLayoutMode = setting { prefs ->
+        prefs[trackLayoutKey]?.let { name ->
+            runCatching { TrackLayoutMode.valueOf(name) }.getOrNull()
+        } ?: TrackLayoutMode.GRID_2
+    }
+
+    suspend fun setAlbumLayoutMode(mode: AlbumLayoutMode) {
+        context.settingsDataStore.edit { it[albumLayoutKey] = mode.name }
+    }
+
+    suspend fun setTrackLayoutMode(mode: TrackLayoutMode) {
+        context.settingsDataStore.edit { it[trackLayoutKey] = mode.name }
+    }
 
     /**
      * Whether a track with no `.lrc` beside it may be looked up online. On by default —
      * it is what makes the feature work — but this is a local player reaching out to
      * three third-party hosts with a song title, so it is a switch and not a given.
      */
-    val onlineLyricsEnabled = context.settingsDataStore.data.map { prefs ->
+    val onlineLyricsEnabled = setting { prefs ->
         prefs[onlineLyricsKey] ?: true
     }
 
-    val automixEnabled = context.settingsDataStore.data.map { prefs ->
+    val automixEnabled = setting { prefs ->
         prefs[automixKey] ?: false
     }
 
@@ -47,7 +118,7 @@ class SettingsStore @Inject constructor(
      * The YouTube Music source. Off by default and unofficial: it is a switch the user turns on knowing what it is,
      * and the way to stop it at once.
      */
-    val ytmEnabled = context.settingsDataStore.data.map { prefs -> prefs[ytmKey] ?: false }
+    val ytmEnabled = setting { prefs -> prefs[ytmKey] ?: false }
 
     suspend fun setYtmEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[ytmKey] = enabled }
@@ -67,7 +138,7 @@ class SettingsStore @Inject constructor(
     private val eqBassBoostEnabledKey = booleanPreferencesKey("eq_bass_boost_enabled")
     private val eqBassBoostStrengthKey = intPreferencesKey("eq_bass_boost_strength")
 
-    val equalizerSettings = context.settingsDataStore.data.map { prefs ->
+    val equalizerSettings = setting { prefs ->
         EqualizerSettings(
             enabled = prefs[eqEnabledKey] ?: false,
             bandLevels = prefs[eqBandLevelsKey]

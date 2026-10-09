@@ -66,7 +66,7 @@ private const val LIGHT_SPAN = 80L
  * Dark glass: what the player's rewind and forward tiles do to the background behind them. Measured on
  * the device, a tile is 14% darker than the backdrop around it.
  */
-private val NeutralFill = Color.Black.copy(alpha = 0.14f)
+private val NeutralFill = Color(0xFF080C1C).copy(alpha = 0.38f)
 
 /** The player's play tile, without its colour: pale glass with a dark glyph. */
 private val PrimaryFill = Color(0xFFEDEDF2).copy(alpha = 0.90f)
@@ -85,9 +85,10 @@ fun AuraButton(
     shape: Shape = TileShape,
     minHeight: Dp = 44.dp,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp),
+    tint: (() -> Color)? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
-    TileSurface(onClick, modifier, tone, shape) { contentColor ->
+    TileSurface(onClick, modifier, tone, shape, tint = tint) { contentColor ->
         CompositionLocalProvider(LocalContentColor provides contentColor) {
             Row(
                 modifier = Modifier.defaultMinSize(minHeight = minHeight).padding(contentPadding),
@@ -144,7 +145,7 @@ fun AuraIconGroup(
                 .glassPressLayer(press)
                 .clip(CircleShape)
                 .drawBehind { drawRect(NeutralFill) }
-                .playerRim(CircleShape, ICON_RIM_STRENGTH, light)
+                .glassEdge(CircleShape)
                 .glassPressGlow(press, strength = GLASS_PRESS_GLOW * 0.4f),
             verticalAlignment = Alignment.CenterVertically,
             content = content,
@@ -193,6 +194,9 @@ fun AuraGroupIcon(
     }
 }
 
+/** How much of the album's colour a tinted button takes on, over its dark glass. */
+private const val TINT_ALPHA = 0.11f
+
 /** A glyph inside a group swells by this much when pressed. */
 private const val GLYPH_PRESSED_SCALE = 1.12f
 
@@ -227,6 +231,7 @@ private fun TileSurface(
     shape: Shape,
     rimStrength: Float = 1f,
     lightDegrees: Float = 45f,
+    tint: (() -> Color)? = null,
     content: @Composable (contentColor: Color) -> Unit,
 ) {
     val press = rememberGlassPress()
@@ -239,8 +244,11 @@ private fun TileSurface(
             // The swell is outside the clip, so the clip, the fill and the rim all grow together.
             .glassPressLayer(press)
             .clip(shape)
-            .drawBehind { drawRect(fill) }
-            .playerRim(shape, rimStrength, lightDegrees)
+            .drawBehind {
+                drawRect(fill)
+                if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+            }
+            .glassEdge(shape)
             .glassPressGlow(press)
             .semantics { role = Role.Button }
             .glassPressInput(press, onClick),

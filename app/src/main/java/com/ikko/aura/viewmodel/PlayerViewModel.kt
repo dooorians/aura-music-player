@@ -104,6 +104,8 @@ class PlayerViewModel @Inject constructor(
     fun livePositionMs(): Long = boundPlayer?.currentPosition?.coerceAtLeast(0L) ?: _positionMs.value
 
     private val entryKeys = QueueKeys()
+    private var originalQueue: List<Track> = emptyList()
+    private var originalQueueKeys: List<Long> = emptyList()
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
@@ -155,7 +157,8 @@ class PlayerViewModel @Inject constructor(
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            _uiState.update { it.copy(shuffleEnabled = shuffleModeEnabled) }
+            // Intentionally no-op: ExoPlayer's internal shuffle mode is kept disabled.
+            // Queue-based shuffle state is managed directly via PlayerViewModel.
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
@@ -208,6 +211,12 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.automixEnabled.collect { enabled ->
                 _uiState.update { it.copy(automixEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsStore.shuffleEnabled.collect { enabled ->
+                _uiState.update { it.copy(shuffleEnabled = enabled) }
+                playerController.setShuffleActive(enabled)
             }
         }
         // The heart shows whether the track playing is in Favoris — for each track, and kept on disk. It used to be
@@ -285,10 +294,13 @@ class PlayerViewModel @Inject constructor(
         val queue = ids.mapNotNull { byId[it] }
         if (queue.isEmpty()) return
         val index = player.currentMediaItemIndex.coerceIn(0, queue.lastIndex)
+        val keys = entryKeys.fresh(queue.size)
+        originalQueue = queue
+        originalQueueKeys = keys
         _uiState.update {
             it.copy(
                 queue = queue,
-                queueKeys = entryKeys.fresh(queue.size),
+                queueKeys = keys,
                 queueIndex = index,
                 currentTrack = queue[index],
                 isPlaying = player.isPlaying,
@@ -326,10 +338,13 @@ class PlayerViewModel @Inject constructor(
         val queue = snapshot.items.mapNotNull { byId[it.id] }
         if (queue.size != snapshot.items.size) return
         val track = queue[snapshot.index]
+        val keys = entryKeys.fresh(queue.size)
+        originalQueue = queue
+        originalQueueKeys = keys
         _uiState.update {
             it.copy(
                 queue = queue,
-                queueKeys = entryKeys.fresh(queue.size),
+                queueKeys = keys,
                 queueIndex = snapshot.index,
                 currentTrack = track,
                 isPlaying = false,
@@ -382,10 +397,49 @@ class PlayerViewModel @Inject constructor(
      */
     fun removeDownloads(tracks: List<Track>) = unkeepStreamed(tracks)
 
-    fun playQueue(tracks: List<Track>, startIndex: Int) {
+    fun playQueue(tracks: List<Track>, startIndex: Int, shuffle: Boolean = false) {
+        if (tracks.isEmpty()) return
         rememberStreamed(tracks)
-        _uiState.update { it.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = startIndex) }
-        playerController.playQueue(tracks, startIndex)
+        originalQueue = tracks
+        val keys = entryKeys.fresh(tracks.size)
+        originalQueueKeys = keys
+
+        if (shuffle) {
+            val startTrack = tracks.getOrElse(startIndex) { tracks.first() }
+            val startKey = keys.getOrElse(startIndex) { keys.first() }
+            val remainderIndices = tracks.indices.filter { it != startIndex }.shuffled()
+            val newQueue = listOf(startTrack) + remainderIndices.map { tracks[it] }
+            val newKeys = listOf(startKey) + remainderIndices.map { keys[it] }
+            _uiState.update {
+                it.copy(
+                    queue = newQueue,
+                    queueKeys = newKeys,
+                    queueIndex = 0,
+                    shuffleEnabled = true,
+                )
+            }
+            playerController.setShuffleActive(true)
+            viewModelScope.launch { settingsStore.setShuffleEnabled(true) }
+            playerController.playQueue(newQueue, 0)
+        } else {
+            _uiState.update {
+                it.copy(
+                    queue = tracks,
+                    queueKeys = keys,
+                    queueIndex = startIndex,
+                    shuffleEnabled = false,
+                )
+            }
+            playerController.setShuffleActive(false)
+            viewModelScope.launch { settingsStore.setShuffleEnabled(false) }
+            playerController.playQueue(tracks, startIndex)
+        }
+    }
+
+    fun playShuffled(tracks: List<Track>, startIndex: Int? = null) {
+        if (tracks.isEmpty()) return
+        val start = startIndex?.takeIf { it in tracks.indices } ?: tracks.indices.random()
+        playQueue(tracks, start, shuffle = true)
     }
 
     fun togglePlayPause() = playerController.togglePlayPause()
@@ -404,7 +458,82 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setAutomixEnabled(!_uiState.value.automixEnabled) }
     }
 
-    fun toggleShuffle() = playerController.setShuffleEnabled(!_uiState.value.shuffleEnabled)
+    fun toggleShuffle() {
+        val state = _uiState.value
+        val currentQueue = state.queue
+        if (currentQueue.isEmpty()) return
+        val currentIndex = state.queueIndex
+        val upcomingStart = currentIndex + 1
+        val willEnable = !state.shuffleEnabled
+
+        if (willEnable) {
+            if (originalQueue.isEmpty() || originalQueue.size != currentQueue.size) {
+                originalQueue = currentQueue
+                originalQueueKeys = state.queueKeys
+            }
+            if (upcomingStart < currentQueue.size) {
+                val pastAndCurrent = currentQueue.take(upcomingStart)
+                val pastAndCurrentKeys = state.queueKeys.take(upcomingStart)
+
+                val upcoming = currentQueue.drop(upcomingStart)
+                val upcomingKeys = state.queueKeys.drop(upcomingStart)
+                val shuffledIndices = upcoming.indices.shuffled()
+
+                val newUpcoming = shuffledIndices.map { upcoming[it] }
+                val newUpcomingKeys = shuffledIndices.map { upcomingKeys[it] }
+
+                val newQueue = pastAndCurrent + newUpcoming
+                val newKeys = pastAndCurrentKeys + newUpcomingKeys
+
+                _uiState.update {
+                    it.copy(
+                        queue = newQueue,
+                        queueKeys = newKeys,
+                        shuffleEnabled = true,
+                    )
+                }
+                playerController.setShuffleActive(true)
+                viewModelScope.launch { settingsStore.setShuffleEnabled(true) }
+                playerController.reorderUpcoming(upcomingStart, newQueue.map { it.id })
+            } else {
+                _uiState.update { it.copy(shuffleEnabled = true) }
+                playerController.setShuffleActive(true)
+                viewModelScope.launch { settingsStore.setShuffleEnabled(true) }
+            }
+        } else {
+            // Turning shuffle OFF: restore upcoming tracks to their original order
+            if (upcomingStart < currentQueue.size && originalQueue.isNotEmpty()) {
+                val pastAndCurrent = currentQueue.take(upcomingStart)
+                val pastAndCurrentKeys = state.queueKeys.take(upcomingStart)
+
+                val upcoming = currentQueue.drop(upcomingStart)
+                val upcomingKeys = state.queueKeys.drop(upcomingStart)
+                val origKeyOrder = originalQueueKeys.withIndex().associate { it.value to it.index }
+
+                val restoredPairs = upcoming.zip(upcomingKeys).sortedBy { (_, key) ->
+                    origKeyOrder[key] ?: Int.MAX_VALUE
+                }
+
+                val newQueue = pastAndCurrent + restoredPairs.map { it.first }
+                val newKeys = pastAndCurrentKeys + restoredPairs.map { it.second }
+
+                _uiState.update {
+                    it.copy(
+                        queue = newQueue,
+                        queueKeys = newKeys,
+                        shuffleEnabled = false,
+                    )
+                }
+                playerController.setShuffleActive(false)
+                viewModelScope.launch { settingsStore.setShuffleEnabled(false) }
+                playerController.reorderUpcoming(upcomingStart, newQueue.map { it.id })
+            } else {
+                _uiState.update { it.copy(shuffleEnabled = false) }
+                playerController.setShuffleActive(false)
+                viewModelScope.launch { settingsStore.setShuffleEnabled(false) }
+            }
+        }
+    }
 
     fun jumpToQueueIndex(index: Int) = playerController.seekToQueueIndex(index)
 
@@ -414,12 +543,21 @@ class PlayerViewModel @Inject constructor(
         playerController.playNext(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
-                state.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = 0)
+                val keys = entryKeys.fresh(tracks.size)
+                originalQueue = tracks
+                originalQueueKeys = keys
+                state.copy(queue = tracks, queueKeys = keys, queueIndex = 0)
             } else {
                 val at = (state.queueIndex + 1).coerceIn(0, state.queue.size)
+                val newKeys = entryKeys.inserted(state.queueKeys, at, tracks.size)
+                val newQueue = state.queue.toMutableList().apply { addAll(at, tracks) }
+                if (originalQueue.isNotEmpty()) {
+                    originalQueue = originalQueue.toMutableList().apply { addAll(at.coerceIn(0, size), tracks) }
+                    originalQueueKeys = entryKeys.inserted(originalQueueKeys, at.coerceIn(0, originalQueueKeys.size), tracks.size)
+                }
                 state.copy(
-                    queue = state.queue.toMutableList().apply { addAll(at, tracks) },
-                    queueKeys = entryKeys.inserted(state.queueKeys, at, tracks.size),
+                    queue = newQueue,
+                    queueKeys = newKeys,
                 )
             }
         }
@@ -431,9 +569,18 @@ class PlayerViewModel @Inject constructor(
         playerController.addToQueue(tracks)
         _uiState.update { state ->
             if (state.queue.isEmpty()) {
-                state.copy(queue = tracks, queueKeys = entryKeys.fresh(tracks.size), queueIndex = 0)
+                val keys = entryKeys.fresh(tracks.size)
+                originalQueue = tracks
+                originalQueueKeys = keys
+                state.copy(queue = tracks, queueKeys = keys, queueIndex = 0)
             } else {
-                state.copy(queue = state.queue + tracks, queueKeys = entryKeys.appended(state.queueKeys, tracks.size))
+                val newKeys = entryKeys.appended(state.queueKeys, tracks.size)
+                val newQueue = state.queue + tracks
+                if (originalQueue.isNotEmpty()) {
+                    originalQueue = originalQueue + tracks
+                    originalQueueKeys = entryKeys.appended(originalQueueKeys, tracks.size)
+                }
+                state.copy(queue = newQueue, queueKeys = newKeys)
             }
         }
     }
@@ -484,13 +631,24 @@ class PlayerViewModel @Inject constructor(
         playerController.clearQueueExceptCurrent()
         _uiState.update { state ->
             val current = state.queue.getOrNull(state.queueIndex) ?: return@update state
-            state.copy(queue = listOf(current), queueKeys = listOf(state.queueKeys.keyAt(state.queueIndex)), queueIndex = 0)
+            val key = state.queueKeys.keyAt(state.queueIndex)
+            originalQueue = listOf(current)
+            originalQueueKeys = listOf(key)
+            state.copy(queue = listOf(current), queueKeys = listOf(key), queueIndex = 0)
         }
     }
 
     fun removeFromQueue(index: Int) {
         playerController.removeFromQueue(index)
         _uiState.update { state ->
+            val removedKey = state.queueKeys.getOrNull(index)
+            if (removedKey != null && originalQueueKeys.isNotEmpty()) {
+                val origIdx = originalQueueKeys.indexOf(removedKey)
+                if (origIdx != -1) {
+                    originalQueue = originalQueue.toMutableList().apply { removeAt(origIdx) }
+                    originalQueueKeys = originalQueueKeys.toMutableList().apply { removeAt(origIdx) }
+                }
+            }
             val newQueue = state.queue.toMutableList().apply { if (index in indices) removeAt(index) }
             val newIndex = if (index < state.queueIndex) state.queueIndex - 1 else state.queueIndex
             state.copy(queue = newQueue, queueKeys = entryKeys.removed(state.queueKeys, index), queueIndex = newIndex)

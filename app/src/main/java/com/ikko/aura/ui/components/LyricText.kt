@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.lyrics.LyricLine
 
@@ -138,8 +139,28 @@ fun SweepLyricLine(
     dimColor: Color,
     textAlign: TextAlign,
     modifier: Modifier = Modifier,
+    /** For a single-line strip: the line is cut with an ellipsis rather than wrapped. */
+    maxLines: Int = Int.MAX_VALUE,
+    /**
+     * The one-line strip's look: the sung part just fills in, at a steady pace across each timed word, with no bloom
+     * on the head. The full lyrics keep the glow.
+     */
+    plain: Boolean = false,
 ) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // Where each timed word sits in the text, walked in order so a repeated word still lines up.
+    val spans = remember(line, plain) {
+        if (!plain) {
+            emptyList()
+        } else {
+            var offset = 0
+            line.words.map { word ->
+                val start = line.text.indexOf(word.text, offset).takeIf { it >= 0 } ?: offset
+                offset = start + word.text.length
+                start until offset
+            }
+        }
+    }
 
     Box(modifier) {
         Text(
@@ -147,6 +168,8 @@ fun SweepLyricLine(
             style = style,
             color = dimColor,
             textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -154,6 +177,8 @@ fun SweepLyricLine(
             style = style,
             color = litColor,
             textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
             onTextLayout = { layout = it },
             modifier = Modifier
                 .fillMaxWidth()
@@ -177,8 +202,12 @@ fun SweepLyricLine(
                         val right = if (revealed >= end) {
                             result.getLineRight(row)
                         } else {
-                            head = Offset(horizontalAt(result, revealed, start, end), (top + bottom) / 2f)
-                            horizontalAt(result, revealed, start, end)
+                            if (plain) {
+                                horizontalAtSpans(result, revealed, row, spans)
+                            } else {
+                                head = Offset(horizontalAt(result, revealed, start, end), (top + bottom) / 2f)
+                                horizontalAt(result, revealed, start, end)
+                            }
                         }
                         clipRect(left, top, right, bottom) { this@drawWithContent.drawContent() }
                     }
@@ -188,7 +217,7 @@ fun SweepLyricLine(
                     // word rattled off in a tenth of one barely registers, which is the
                     // difference between light that belongs to the singing and a lamp
                     // dragged along under the text.
-                    val glow = line.glowIntensity(positionProvider())
+                    val glow = if (plain) 0f else line.glowIntensity(positionProvider())
                     if (glow > 0.01f && head != Offset.Unspecified) {
                         val radius = GLOW_RADIUS.toPx()
                         drawCircle(
@@ -218,6 +247,37 @@ private fun horizontalAt(result: TextLayoutResult, revealed: Float, start: Int, 
     if (index >= end) return here
     val next = result.getHorizontalPosition(index + 1, usePrimaryDirection = true)
     return here + (next - here) * fraction
+}
+
+/** Where a row's text ends at [offset], held inside the row's own edges. */
+private fun TextLayoutResult.xOn(offset: Int, row: Int): Float {
+    val left = getLineLeft(row)
+    val right = getLineRight(row)
+    return when {
+        offset <= getLineStart(row) -> left
+        offset >= getLineEnd(row, visibleEnd = true) -> right
+        else -> getHorizontalPosition(offset, usePrimaryDirection = true).coerceIn(left, right)
+    }
+}
+
+/**
+ * Where the lit part of a row ends, [chars] characters in. Inside a timed word the edge crosses it at a constant rate
+ * — read letter by letter it sped up over an "i" and slowed over a "w" — and between words, or across a wrap, it goes
+ * letter by letter.
+ */
+private fun horizontalAtSpans(result: TextLayoutResult, chars: Float, row: Int, spans: List<IntRange>): Float {
+    val rowStart = result.getLineStart(row)
+    val rowEnd = result.getLineEnd(row, visibleEnd = true)
+    val word = spans.firstOrNull { chars >= it.first && chars < it.last + 1 }
+    if (word != null && word.first >= rowStart && word.last + 1 <= rowEnd) {
+        val from = result.xOn(word.first, row)
+        val to = result.xOn(word.last + 1, row)
+        return from + (to - from) * (chars - word.first) / (word.last + 1 - word.first)
+    }
+    val index = chars.toInt().coerceIn(rowStart, rowEnd)
+    val here = result.xOn(index, row)
+    val next = result.xOn((index + 1).coerceAtMost(rowEnd), row)
+    return here + (next - here) * (chars - index)
 }
 
 private val GLOW_RADIUS = 22.dp

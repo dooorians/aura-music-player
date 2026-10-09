@@ -85,7 +85,7 @@ fun PlaylistScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 12.dp)
                 .padding(top = 16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -170,7 +170,7 @@ fun PlaylistScreen(
                     }
                     AuraButton(
                         onClick = {
-                            playerViewModel.playQueue(current.tracks.shuffled(), 0)
+                            playerViewModel.playShuffled(current.tracks)
                         },
                     ) {
                         Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))

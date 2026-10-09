@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.ikko.aura.ui.theme.AuraColors
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
@@ -41,6 +42,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -90,12 +92,14 @@ class TabCapsuleState {
 
     /** Fed the library's vertical scroll: negative is the list moving up (the finger going up). */
     fun onScroll(dy: Float, density: Float, atTop: Boolean) {
-        if (atTop) { scrolledAway = false; down = 0f; up = 0f; return }
         if (dy < 0f) {
             up = 0f
             down += -dy
             if (down > PageMotionSpec.SCROLL_DOWN_HIDES_DP * density) scrolledAway = true
         } else if (dy > 0f) {
+            // Only a scroll toward the top, at the top, brings it back at once: a scroll down from the top must be able to
+            // hide it while the header is still on its way out, not wait for it.
+            if (atTop) { scrolledAway = false; down = 0f; up = 0f; return }
             down = 0f
             up += dy
             if (up > PageMotionSpec.SCROLL_UP_SHOWS_DP * density) scrolledAway = false
@@ -111,7 +115,9 @@ fun rememberCapsuleScrollConnection(state: TabCapsuleState?, density: Float, atT
     remember(state, density) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (source == NestedScrollSource.UserInput && available.y != 0f) {
+                // The finger and the fling after it both count: a flick is a short touch and a long coast, and counting
+                // only the touch left it never reaching the distance.
+                if (available.y != 0f) {
                     state?.onScroll(available.y, density, atTop())
                 }
                 return androidx.compose.ui.geometry.Offset.Zero
@@ -149,6 +155,8 @@ fun TabCapsule(
     backdrop: LayerBackdrop,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /** The search bubble to the left of the capsule; none when null. */
+    onSearchClick: (() -> Unit)? = null,
 ) {
     val sheen = remember { Animatable(0f) }
     LaunchedEffect(state) {
@@ -174,9 +182,9 @@ fun TabCapsule(
     // The lit pastille is one shape. At rest it sits on the chosen tab. Under a finger it is the finger's:
     // its position is the finger's, exactly, frame for frame — no spring between them — after a short glide
     // onto it from where it was. On lifting, it settles onto the tab the finger lifted from.
-    val rest = remember { Animatable(selectedIndex.toFloat()) }
+    val rest = remember { Animatable(slotOf(selectedIndex).toFloat()) }
     var dragging by remember { mutableStateOf(false) }
-    var finger by remember { mutableFloatStateOf(selectedIndex.toFloat()) }
+    var finger by remember { mutableFloatStateOf(slotOf(selectedIndex).toFloat()) }
     val grip = remember { Animatable(0f) }
 
     val pressScale = remember { Animatable(1f) }
@@ -187,26 +195,26 @@ fun TabCapsule(
     fun pastilleAt(x: Float): Float {
         val pad = with(density) { TAB_PAD.toPx() }
         val gap = with(density) { TAB_GAP.toPx() }
-        val w = (barWidthPx - 2 * pad - (Tabs.size - 1) * gap) / Tabs.size
-        return ((x - pad - w / 2f) / (w + gap)).coerceIn(0f, (Tabs.size - 1).toFloat())
+        val w = (barWidthPx - 2 * pad - (SLOTS - 1) * gap) / SLOTS
+        return ((x - pad - w / 2f) / (w + gap)).coerceIn(1f, Tabs.size.toFloat())
     }
     fun shownAt(): Float = rest.value + (finger - rest.value) * grip.value
 
     LaunchedEffect(selectedIndex) {
         chosen = selectedIndex
-        if (!dragging) rest.animateTo(selectedIndex.toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
+        if (!dragging) rest.animateTo(slotOf(selectedIndex).toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
     }
     // The tab lit up (filled icon, white label) is the one the pastille is nearest to.
-    val displayIndex by remember { derivedStateOf { if (dragging) (finger + 0.5f).toInt() else chosen } }
+    val displaySlot by remember { derivedStateOf { if (dragging) (finger + 0.5f).toInt() else slotOf(chosen) } }
     val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentOnSearch by rememberUpdatedState(onSearchClick)
 
     val cover = LocalCoverColors.current
     androidx.compose.runtime.CompositionLocalProvider(LocalAuraBackdrop provides backdrop) {
         // The touch zone is 48 dp tall, the drawing 45: the pointer handler is on the taller box, and the
         // capsule's own motion is applied to both together.
-        Box(
+        Row(
             modifier = modifier
-                .fillMaxWidth()
                 .height(PageMotionSpec.CAPSULE_TOUCH_HEIGHT_DP.dp)
                 .graphicsLayer {
                     val p = state.shown.value
@@ -217,6 +225,17 @@ fun TabCapsule(
                     translationY = (1f - p) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
                     alpha = (1.6f * p).coerceIn(0f, 1f)
                 }
+                // Not drawn at all while fully hidden (on Home, under the player). At alpha 0 the layer was still part of
+                // the frame, and the RenderThread kept re-rendering the glass's offscreen layers — blur, lens — every
+                // frame the page behind it moved, for a capsule nobody could see.
+                .drawWithContent { if (state.shown.value > 0f) drawContent() },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(TAB_SLOT_WIDTH * SLOTS + TAB_GAP * (SLOTS - 1) + TAB_PAD * 2)
+                    .fillMaxHeight()
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
                 // One handler for the whole capsule, so a finger can go down on one tab, slide to another
                 // and lift: what is chosen is where it lifts, not where it landed.
@@ -225,8 +244,8 @@ fun TabCapsule(
                     val pad = TAB_PAD.toPx()
                     val gap = TAB_GAP.toPx()
                     fun tabAt(x: Float): Int {
-                        val w = (size.width - 2 * pad - (Tabs.size - 1) * gap) / Tabs.size
-                        return ((x - pad) / (w + gap)).toInt().coerceIn(0, Tabs.size - 1)
+                        val w = (size.width - 2 * pad - (SLOTS - 1) * gap) / SLOTS
+                        return ((x - pad) / (w + gap)).toInt().coerceIn(0, SLOTS - 1)
                     }
                     awaitPointerEventScope {
                         while (true) {
@@ -279,7 +298,9 @@ fun TabCapsule(
                                     ),
                                 )
                             }
-                            val index = tabAt(last)
+                            val slot = tabAt(last)
+                            // Lifted on the search: it opens, and the pastille goes back to the view it was on.
+                            val index = if (slot == SEARCH_SLOT) chosen else slot - 1
                             chosen = index
                             val from = shownAt()
                             dragging = false
@@ -287,21 +308,22 @@ fun TabCapsule(
                                 // Hand over from the finger's position to the resting one without a jump.
                                 rest.snapTo(from)
                                 grip.snapTo(0f)
-                                rest.animateTo(index.toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
+                                rest.animateTo(slotOf(index).toFloat(), androidx.compose.animation.core.spring(CAPSULE_REST_DAMPING, 520f, 0.001f))
                             }
-                            currentOnSelect(Tabs[index].filter)
+                            if (slot == SEARCH_SLOT) currentOnSearch?.invoke() else currentOnSelect(Tabs[index].filter)
                         }
                     }
                 },
-            contentAlignment = Alignment.Center,
-        ) {
-            val dynamicTint = androidx.compose.runtime.remember(cover.accent) { androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(CapsuleGlassTint.toArgb(), cover.accent.toArgb(), 0.18f)) }
+                contentAlignment = Alignment.Center,
+            ) {
             LiquidGlassPanel(
                 shape = CapsuleShape,
-                tint = dynamicTint,
+                // The mini player's own glass, exactly: the same dark tint, strength and blur.
+                tint = CapsuleGlassTint,
                 tintAlpha = CAPSULE_GLASS_ALPHA,
                 blurRadiusDp = CAPSULE_BLUR_DP,
                 dropShadow = false,
+                edge = false,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(PageMotionSpec.CAPSULE_HEIGHT_DP.dp)
@@ -315,6 +337,8 @@ fun TabCapsule(
                     .drawBehind { drawRect(Color.Transparent, blendMode = BlendMode.Clear) }
                     .sheen(position = { 1.3f - 1.7f * sheen.value }, strength = { if (sheen.value in 0.001f..0.999f) 1f else 0f }),
             ) {
+                // The glass's edge, lit like Apple's: bright at two corners, a hairline along the sides.
+                Spacer(Modifier.matchParentSize().clip(CapsuleShape).pillEdge(CapsuleShape))
                 // The lit pastille sits under the labels: the accent at 26%, with a dp of the accent at 62%.
                 Box(
                     Modifier
@@ -324,24 +348,25 @@ fun TabCapsule(
                             val gap = TAB_GAP.roundToPx()
                             // Never below zero: measured narrower than its gaps for a frame at launch, it asked for a
                             // negative width and crashed the app.
-                            val w = ((constraints.maxWidth - (Tabs.size - 1) * gap) / Tabs.size).coerceAtLeast(0)
+                            val w = ((constraints.maxWidth - (SLOTS - 1) * gap) / SLOTS).coerceAtLeast(0)
                             val placeable = measurable.measure(Constraints.fixed(w, constraints.maxHeight))
                             layout(constraints.maxWidth, constraints.maxHeight) {
                                 placeable.place((shownAt() * (w + gap)).roundToInt(), 0)
                             }
                         }
                         .clip(CapsuleShape)
-                        .drawBehind { drawRect(cover.accent.copy(alpha = 0.26f)) }
-                        .border(BorderStroke(1.dp, cover.accent.copy(alpha = 0.62f)), CapsuleShape),
+                        .drawBehind { drawRect(Color.White.copy(alpha = 0.20f)) },
                 )
                 Row(
                     Modifier.fillMaxSize().padding(TAB_PAD),
                     horizontalArrangement = Arrangement.spacedBy(TAB_GAP),
                 ) {
-                    Tabs.forEachIndexed { index, tab ->
-                        val active = index == displayIndex
+                    for (slot in 0 until SLOTS) {
+                        val isSearch = slot == SEARCH_SLOT
+                        val view = slot - 1
+                        val active = !isSearch && slot == displaySlot
                         val tint by androidx.compose.animation.animateColorAsState(
-                            targetValue = if (active) Color.White else cover.tint.copy(alpha = 0.84f),
+                            targetValue = if (active) Color.White else Color.White.copy(alpha = 0.72f),
                             animationSpec = androidx.compose.animation.core.tween(160),
                             label = "tab-tint",
                         )
@@ -349,36 +374,38 @@ fun TabCapsule(
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (active) tab.iconFilled() else tab.icon(),
-                                    contentDescription = null,
-                                    tint = tint,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(5.dp))
-                                Text(
-                                    tab.label,
-                                    color = tint,
-                                    style = if (active) LibraryTypography.CapsuleLabelActive else LibraryTypography.CapsuleLabel,
-                                    maxLines = 1,
-                                )
-                            }
+                            Icon(
+                                imageVector = if (isSearch) CupertinoIcons.Search else if (active) Tabs[view].iconFilled() else Tabs[view].icon(),
+                                contentDescription = if (isSearch) "Rechercher" else Tabs[view].label,
+                                tint = tint,
+                                modifier = Modifier.size(24.dp),
+                            )
                         }
                     }
                 }
             }
         }
+        }
     }
 }
 
-/** Dark navy over the blur — rgba(8, 12, 28, 0.56) — so the labels read over any cover, however pale or bright. */
+/** Dark navy over the blur, the mini player's tint, so the glyphs read over any cover, however pale or bright. */
 private val CapsuleGlassTint = Color(0xFF080C1C)
-private const val CAPSULE_GLASS_ALPHA = 0.56f
+private const val CAPSULE_GLASS_ALPHA = 0.4f
 private const val CAPSULE_BLUR_DP = 16f
 
-private val TAB_PAD = 4.dp
+private val TAB_PAD = 5.dp
 private val TAB_GAP = 2.dp
+
+/** One slot of the capsule: a glyph and its touch area. */
+private val TAB_SLOT_WIDTH = 52.dp
+
+/** The search, then the four views: five slots. The search is a button, not a view — the pastille never rests on it. */
+private val SLOTS = Tabs.size + 1
+private const val SEARCH_SLOT = 0
+
+/** The slot a view sits in: the search is the first, so the views follow it. */
+private fun slotOf(view: Int): Int = view + 1
 
 /** How long the pastille takes to glide from where it was onto a finger that has just landed. */
 private const val GRIP_MS = 90

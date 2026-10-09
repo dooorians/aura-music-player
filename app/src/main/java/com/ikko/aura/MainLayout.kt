@@ -27,6 +27,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawWithContent
@@ -81,6 +83,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.min
@@ -98,6 +101,8 @@ import com.ikko.aura.ui.components.FloatingPlayerPill
 import com.ikko.aura.ui.components.AlbumArtBackground
 import com.ikko.aura.ui.components.AlbumTheme
 import com.ikko.aura.ui.components.LocalAuraBackdrop
+import com.ikko.aura.ui.components.backdrop.GlassSettle
+import com.ikko.aura.ui.components.backdrop.LocalGlassSettle
 import com.ikko.aura.ui.components.backdrop.backdrops.LayerBackdrop
 import com.ikko.aura.ui.components.backdrop.backdrops.layerBackdrop
 import com.ikko.aura.ui.components.backdrop.backdrops.rememberLayerBackdrop
@@ -139,6 +144,7 @@ import com.ikko.aura.viewmodel.TabCapsuleViewModel
 import kotlinx.coroutines.flow.collectLatest
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.viewmodel.PlayerViewModel
+import com.ikko.aura.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -243,6 +249,10 @@ class SheetCard {
             (edge - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)
             ).coerceIn(0f, 1f)
 
+    /** True while the sheet card is actively traveling (animating open or closed), so underlying backdrops and glass freeze. */
+    var frozen: Boolean by mutableStateOf(false)
+        internal set
+
     /** Gives it back, if it is still ours: another player may already have taken it. */
     fun release(token: Any) {
         if (owner === token) {
@@ -250,6 +260,7 @@ class SheetCard {
             edge = 1f
             ready = true
             sinking = false
+            frozen = false
         }
     }
 
@@ -342,9 +353,8 @@ val LocalSheetDim = androidx.compose.runtime.staticCompositionLocalOf<() -> Floa
  * A destination that can sit under the player's card: cut off at the card's top edge, and dimmed.
  *
  * Both are done to a layer of this page rather than in a draw over it. A clip that changes shape is a new
- * outline on the same recorded picture — the picture itself is not drawn again — whereas clipping inside a
- * draw block made the whole page (a grid of covers, a list, their glass) re-record on every frame of the
- * card's travel, which is most of what made the player open and close in steps.
+ * outline on the same recorded picture, while the reveal pass keeps the page visible beneath the card as its
+ * alpha clears during the close.
  */
 @Composable
 private fun UnderSheet(content: @Composable () -> Unit) {
@@ -361,30 +371,49 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val maxShiftY = with(density) { 14.dp.toPx() }
     val maxCornerRadius = with(density) { 26.dp.toPx() }
+    val pageSnapshot = rememberGraphicsLayer()
+    val pageSnapshotState = remember { PageSnapshotState() }
 
     Box(
         Modifier
             .fillMaxSize()
             .drawWithContent {
+                if (!card.frozen) pageSnapshotState.invalidate()
                 // A page under the player, while the player leaves for another one: not drawn at all.
                 if (card.leavingSideways && card.owner != null && myRoute != null && myRoute != card.topRoute) return@drawWithContent
                 val o = card.edge
                 // Nor once the card has cleared completely (the end of a close): it is invisible, and the page is
                 // drawn whole.
                 if (card.passing || card.owner == null || !card.ready || o >= 1f || card.cardAlpha <= 0f) {
+                    pageSnapshotState.invalidate()
                     drawContent()
                     return@drawWithContent
                 }
+                val snapshotSize = IntSize(size.width.toInt(), size.height.toInt())
+                val useSnapshot = card.frozen && pageSnapshotState.isValid(snapshotSize)
+                if (card.frozen && !useSnapshot) {
+                    pageSnapshot.record(snapshotSize) {
+                        this@drawWithContent.drawContent()
+                    }
+                    pageSnapshotState.record(snapshotSize)
+                }
+                fun drawPage() {
+                    if (card.frozen && pageSnapshotState.isValid(snapshotSize)) {
+                        drawLayer(pageSnapshot)
+                    } else {
+                        this@drawWithContent.drawContent()
+                    }
+                }
                 setToCard(cutout, o, size, AuraMotion.cornerAt(o).toPx())
                 clipPath(cutout, androidx.compose.ui.graphics.ClipOp.Difference) {
-                    this@drawWithContent.drawContent()
+                    drawPage()
                 }
                 val reveal = 1f - card.cardAlpha
                 if (reveal > 0.004f) {
                     clipPath(cutout) {
                         revealPaint.alpha = reveal
                         drawContext.canvas.saveLayer(Rect(Offset.Zero, size), revealPaint)
-                        this@drawWithContent.drawContent()
+                        drawPage()
                         drawContext.canvas.restore()
                     }
                 }
@@ -427,6 +456,22 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                     if (d > 0.001f) drawRect(Color.Black, alpha = d)
                 },
         )
+    }
+}
+
+private class PageSnapshotState {
+    private var size = IntSize.Zero
+    private var valid = false
+
+    fun record(newSize: IntSize) {
+        size = newSize
+        valid = true
+    }
+
+    fun isValid(newSize: IntSize): Boolean = valid && size == newSize
+
+    fun invalidate() {
+        valid = false
     }
 }
 
@@ -538,7 +583,7 @@ fun MainLayout() {
     // The dissolve back to the player lasts as long as the outgoing page's own exit (its start delay and its slide).
     LaunchedEffect(sheetCard.passing) {
         if (sheetCard.passing) {
-            kotlinx.coroutines.delay((AuraMotion.POP_START_DELAY_MS + AuraMotion.PUSH_MS + 60).toLong())
+            kotlinx.coroutines.delay((AuraMotion.PUSH_START_DELAY_MS + AuraMotion.PUSH_MS + 60).toLong())
             sheetCard.passing = false
         }
     }
@@ -558,6 +603,10 @@ fun MainLayout() {
     // Records only the artwork backdrop, not the page on top of it — see LocalAuraBackdrop.
     val glassBackdrop = rememberLayerBackdrop()
     val playerViewModel: PlayerViewModel = hiltViewModel()
+    // Makes the player's ground ahead of time, so its opening has nothing to build.
+    com.ikko.aura.ui.screens.nowplaying.PlayerGroundWarmer(playerViewModel)
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val amoledBackgroundEnabled by settingsViewModel.amoledBackgroundEnabled.collectAsStateWithLifecycle()
     // Narrowed on purpose. Collecting the whole PlayerUiState here subscribed MainLayout — and so
     // the entire NavHost under it — to `positionMs`, which ticks every 500ms during playback, so
     // the whole tree recomposed four times a second while scrolling. Only the backdrop's inputs
@@ -566,6 +615,10 @@ fun MainLayout() {
     val coverColors = com.ikko.aura.ui.theme.rememberCoverColors(backdrop.theme.hue)
     // Set by a page that is lit with colours of its own; the playing track's are used otherwise.
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
+    var albumAuroraTheme by remember { mutableStateOf<AlbumTheme?>(null) }
+    LaunchedEffect(pageTheme.value) {
+        pageTheme.value?.let { albumAuroraTheme = it }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     sheetCard.topRoute = currentRoute
@@ -624,8 +677,6 @@ fun MainLayout() {
             }
     }
     val density = LocalDensity.current
-    val batterySaver = com.ikko.aura.ui.theme.LocalAuraBatterySaver.current
-
 
     // Search: how far the page has receded to make room for it, 0 shut, 1 open.
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -652,12 +703,13 @@ fun MainLayout() {
     // last row needs the bar's height as well as the pill's to be reachable.
     val navigationBarHeight = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
     val reservedPillHeight = navigationBarHeight +
-        if ((showPill || isOpening) && backdrop.hasTrack) 70.dp else 0.dp
+        if ((showPill || isOpening) && backdrop.hasTrack) 76.dp else 0.dp
 
     Surface(color = AuraColors.Black, modifier = Modifier.fillMaxSize()) {
         PermissionGate {
         CompositionLocalProvider(
             LocalNowPlayingMesh provides backdrop.meshColors,
+            com.ikko.aura.ui.theme.LocalAmoledBackgroundEnabled provides amoledBackgroundEnabled,
             LocalPlayerPillHeight provides reservedPillHeight,
             LocalAuraBackdrop provides glassBackdrop,
             LocalSearchOpener provides ::openSearch,
@@ -685,13 +737,50 @@ fun MainLayout() {
         // Outside the page's recorded layer: the background is its own surface, not something the
         // mini player has to re-process when it changes. The pill loses nothing it could show — what
         // it refracts is the page, and the background under it is smooth colour.
-        AuroraBackground(
-            theme = pageTheme.value ?: backdrop.theme,
-            // Not while the player or any of its screens (lyrics, queue, equalizer) covers it: they all share the
-            // player's own background, the blurred cover.
-            active = currentRoute !in AuraDestination.fullScreenRoutes,
-            modifier = Modifier.fillMaxSize(),
+        val isAlbumRoute = currentRoute?.let {
+            it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/")
+        } == true
+        val albumAuroraScrim by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isAlbumRoute) 0f else 1f,
+            animationSpec = if (isAlbumRoute) {
+                tween(
+                    durationMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_MS,
+                    delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS,
+                    easing = androidx.compose.animation.core.LinearOutSlowInEasing,
+                )
+            } else {
+                tween(
+                    durationMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_MS,
+                    delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS,
+                    easing = androidx.compose.animation.core.FastOutLinearInEasing,
+                )
+            },
+            label = "album-aurora-scrim",
         )
+        val albumAuroraVisible = !amoledBackgroundEnabled || (albumAuroraTheme != null && (isAlbumRoute || albumAuroraScrim < 1f))
+        if (albumAuroraVisible) {
+            val currentTheme = if (amoledBackgroundEnabled) {
+                albumAuroraTheme ?: backdrop.theme
+            } else {
+                if (isAlbumRoute || albumAuroraScrim == 0f) {
+                    pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
+                } else {
+                    pageTheme.value ?: backdrop.theme
+                }
+            }
+            AuroraBackground(
+                theme = currentTheme,
+                active = currentRoute !in AuraDestination.fullScreenRoutes && (!amoledBackgroundEnabled || isAlbumRoute || albumAuroraScrim < 1f),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (amoledBackgroundEnabled && albumAuroraScrim > 0f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = albumAuroraScrim))
+            )
+        }
         // Clipped to the card while it travels: the cover's wash is the player's own background, so above the
         // card's top edge the page keeps the plain one it always has. Drawn full-screen through the whole
         // travel instead, it darkened the page under the card and then lifted again — a dip in brightness
@@ -725,7 +814,14 @@ fun MainLayout() {
             // its way out is drawn above this and deliberately outside the record. See the
             // parameter's own note for what that buys.
             // Under the battery saver the glass is flat and samples nothing, so there is nothing to record for it.
-            settledModifier = if (batterySaver) Modifier else Modifier.layerBackdrop(glassBackdrop),
+            settledModifier = Modifier.layerBackdrop(
+                glassBackdrop,
+                // The player glass has already captured its resting picture before the sheet
+                // starts moving. Do not re-record the artwork source while that picture is frozen.
+                // Off: the player draws its own ground (the album aurora under the cover) and records that instead — see
+                // PlayerCoverGround. Two things recording into one layer would fight over it.
+                enabled = false,
+            ),
             modifier = Modifier
                 .fillMaxSize()
                 // Inside the card's own shape — its width and its rounded corners — rather than everything
@@ -756,6 +852,10 @@ fun MainLayout() {
                         routeTrail.before in AuraDestination.fullScreenRoutes &&
                         routeTrail.before != AuraDestination.NowPlaying.route &&
                         (sheetCard.passing || sheetCard.owner == null)
+                    // The player's card carries its own opaque ground (the cover and the aurora, see PlayerCoverGround) over every
+                    // pixel this would be drawn on: drawn anyway, it was a full-screen, panning, blurred picture per frame of the
+                    // card's travel for nothing. It is still the background of the player's own screens (lyrics, queue, equaliser).
+                    if (currentRoute == AuraDestination.NowPlaying.route && !comingBack) return@drawWithContent
                     if (edge <= 0f || comingBack || (onPlayerScreen && currentRoute != AuraDestination.NowPlaying.route)) {
                         drawContent()
                         return@drawWithContent
@@ -775,7 +875,7 @@ fun MainLayout() {
         // glass that samples this recording. Not recorded there, it drew nothing — it went out for those frames, came
         // back when the card was claimed, and went out again under the card: the blink on the first opening.
         val playerOpening = currentRoute == AuraDestination.NowPlaying.route && sheetCard.owner == null
-        val pageBackdropNeeded = !batterySaver && (showPill || playerOpening || (sheetCard.owner != null && !cardOverPill)) && backdrop.hasTrack
+        val pageBackdropNeeded = (showPill || playerOpening || (sheetCard.owner != null && !cardOverPill)) && !sheetCard.frozen
         // A layer of its own, before the recording. Without one, the page shares its picture with everything
         // drawn beside it — the mini player, the tab capsule — so each frame of their own arrival had the
         // whole page recorded again for a backdrop whose content had not changed.
@@ -783,7 +883,7 @@ fun MainLayout() {
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { }
-                .then(if (pageBackdropNeeded) Modifier.layerBackdrop(pillBackdrop) else Modifier),
+                .layerBackdrop(pillBackdrop, enabled = pageBackdropNeeded),
         ) {
         Column(
             modifier = Modifier
@@ -812,7 +912,9 @@ fun MainLayout() {
             NavHost(
                 navController = navController,
                 startDestination = AuraDestination.Tabs.route,
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 // Two vocabularies left, now that the five spaces are pages of one pager rather
                 // than five destinations: the player rises as a sheet, everything else is pushed.
                 enterTransition = {
@@ -835,7 +937,7 @@ fun MainLayout() {
                     if (isSheet(targetState)) { sheetFlags.opening = false; sheetFlags.away = false }
                     when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
-                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> { sheetCard.passing = true; throughEnter(fromLeft = true, startMs = AuraMotion.POP_START_DELAY_MS) }
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> { sheetCard.passing = true; throughEnter(fromLeft = true, startMs = AuraMotion.PUSH_START_DELAY_MS) }
                         isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
@@ -844,11 +946,14 @@ fun MainLayout() {
                     if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
                     when {
                         isSheet(initialState) -> AuraMotion.sheetExit
-                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughExit(toLeft = false, startMs = AuraMotion.POP_START_DELAY_MS)
+                        isSheet(targetState) && isLyricsOrAlbum(initialState) -> throughExit(toLeft = false, startMs = AuraMotion.PUSH_START_DELAY_MS)
                         else -> popExit()
                     }
                 },
             ) {
+                composable(AuraDestination.Settings.route) {
+                    UnderSheet { SettingsScreen(navController) }
+                }
                 composable(AuraDestination.Tabs.route) {
                     UnderSheet {
                         Box(Modifier.fillMaxSize()) {
@@ -882,11 +987,14 @@ fun MainLayout() {
                     )
                 }
                 composable(AuraDestination.AlbumPattern.route) { backStack ->
+                    val sliding = transition.currentState != androidx.compose.animation.EnterExitState.Visible ||
+                        transition.targetState != androidx.compose.animation.EnterExitState.Visible
                     UnderSheet {
                         AlbumScreen(
                             albumId = backStack.arguments?.getString("albumId").orEmpty(),
                             navController = navController,
                             playerViewModel = playerViewModel,
+                            isTransitioning = sliding,
                         )
                     }
                 }
@@ -1014,136 +1122,164 @@ fun MainLayout() {
             // animation that only holds it at 0 — the one run when the player returns to a page the capsule does not
             // belong to — used to count, and composed an invisible capsule (alpha 0) in the very frame the closing card
             // uncovered the mini player: that frame's missed deadline, measured on every close from the home page.
+            val pillGlassSettle = remember { GlassSettle() }
+            pillGlassSettle.frozen = sheetCard.frozen
+            LaunchedEffect(sheetCard.frozen) {
+                pillGlassSettle.frozen = sheetCard.frozen
+            }
+
             val capsuleEnabled = isTabsRoute && !cardOverPill && !searchOpen
-            
-            TabCapsule(
-                state = capsule,
-                selected = selectedFilter,
-                onSelect = capsuleViewModel.selection::select,
-                backdrop = pillBackdrop,
-                enabled = capsuleEnabled,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 21.dp)
-                    .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) }
-                    .graphicsLayer {
-                        val isTabs = currentRoute == AuraDestination.Tabs.route
-                        val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
-                        alpha = searchClear(searchPull.value, !searchOpen) * when {
-                            !isTabs && !isNowPlaying -> 0f
-                            // The route is the player's but its card has not been claimed yet: the first frames of an
-                            // opening from the mini player, before the player has composed. The capsule is not part of
-                            // the opening, so it stays exactly as it was until the card covers it — as the mini player
-                            // does in the same frames (see `waiting` below). Only for an opening from the pill: a
-                            // player coming back from the lyrics or the queue has nothing to hold the capsule for.
-                            sheetCard.owner == null && isNowPlaying && sheetFlags.fromPill -> 1f
-                            sheetCard.owner == null -> if (isTabs) 1f else 0f
-                            sheetCard.waitingToShow || (isNowPlaying && !sheetCard.ready) -> 1f
-                            // A narrow ramp on opening: a handful of frames of blend right at the cut, not
-                            // dozens. Closing is untouched (still the hard cut).
-                            !sheetCard.sinking -> ((0.22f - sheetCard.openProgress) / 0.05f).coerceIn(0f, 1f)
-                            else -> if (sheetCard.edge > 0.72f) 1f else 0f
-                        }
-                    },
-            )
-            // The player is being opened but has not claimed the card yet: the route changes a frame or more
-            // before the player's first composition, and the mini player stays until the card replaces it.
-            val playerComing = currentRoute == AuraDestination.NowPlaying.route
-            // The pill belongs to the pages and to the player's own card. On the lyrics, the queue and the equalizer it
-            // does not exist: the player leaving for one of them keeps the card (and so `owner`) until its exit
-            // transition is over — about a second — with the card's edge put back at the pill, and the rules below for
-            // a card in use drew the pill in full, over the lyrics, for that whole second.
-            val pillRouteOk = showPill || playerComing
-            val pillComposed by remember(showPill, currentRoute) {
-                derivedStateOf {
-                    showPill ||
-                        pillAlpha.value > 0f ||
-                        sheetCard.waitingToShow ||
-                        (playerComing && sheetCard.owner == null) ||
-                        (sheetCard.owner != null && !sheetCard.coversPill && pillRouteOk)
+
+            // How visible the capsule is, from the route, the search and the player's card. Read by its layer and by its
+            // drawing, so both follow the same states.
+            fun capsuleAlpha(): Float {
+                val isTabs = currentRoute == AuraDestination.Tabs.route
+                val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
+                return searchClear(searchPull.value, !searchOpen) * when {
+                    !isTabs && !isNowPlaying -> 0f
+                    // The route is the player's but its card has not been claimed yet: the first frames of an
+                    // opening from the mini player, before the player has composed. The capsule is not part of
+                    // the opening, so it stays exactly as it was until the card covers it — as the mini player
+                    // does in the same frames (see `waiting` below). Only for an opening from the pill: a
+                    // player coming back from the lyrics or the queue has nothing to hold the capsule for.
+                    sheetCard.owner == null && isNowPlaying && sheetFlags.fromPill -> 1f
+                    sheetCard.owner == null -> if (isTabs) 1f else 0f
+                    sheetCard.waitingToShow || (isNowPlaying && !sheetCard.ready) -> 1f
+                    // A narrow ramp on opening: a handful of frames of blend right at the cut, not
+                    // dozens. Closing is untouched (still the hard cut).
+                    !sheetCard.sinking -> ((0.22f - sheetCard.openProgress) / 0.05f).coerceIn(0f, 1f)
+                    else -> if (sheetCard.edge > 0.72f) 1f else 0f
                 }
             }
-            if (pillComposed) {
-                val pillInteractive = showPill && sheetCard.owner == null && !searchOpen
-                PlayerPillHost(
-                    playerViewModel = playerViewModel,
+
+            CompositionLocalProvider(LocalGlassSettle provides pillGlassSettle) {
+                TabCapsule(
+                    state = capsule,
+                    selected = selectedFilter,
+                    onSelect = capsuleViewModel.selection::select,
                     backdrop = pillBackdrop,
-                    enabled = pillInteractive,
-                    // The finger is still on the pill: start building the player now. It opens exactly as it does for
-                    // a tap (the same navigation, the same hidden warm-up under the pill); it is just earlier.
-                    onPrewarm = {
-                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
-                        if (!playerOnTop && sheetCard.acceptsOpen) {
-                            sheetFlags.openingFromPill()
-                            navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
-                        }
-                    },
-                    // The press became something else before the player had shown: let it go, unseen. Past that point
-                    // the player is already on its way up and is left to finish.
-                    onPrewarmCancel = {
-                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
-                        if (playerOnTop && !sheetCard.ready) navController.popBackStack()
-                    },
-                    onOpenNowPlaying = {
-                        // Once per opening. The mini player stays on screen (and under the finger) until the player's card
-                        // replaces it, and every further tap navigated to the player again: launchSingleTop still swaps
-                        // the entry for a new one, which tore the player down and built it again from the start — the
-                        // card went back to the pill each time, and for a frame there was no card at all, so the
-                        // cover's wash showed across the whole screen. Read here, at the tap, not captured.
-                        val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
-                        if (!playerOnTop && sheetCard.acceptsOpen) {
-                            sheetFlags.openingFromPill()
-                            navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
-                        }
-                    },
+                    enabled = capsuleEnabled,
+                    onSearchClick = ::openSearch,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
+                        .align(Alignment.BottomEnd)
+                        .padding(horizontal = 12.dp)
+                        .offset { IntOffset(0, -capsuleBottomDp.roundToPx()) }
                         .graphicsLayer {
-                            // Kept, as it is, while the card waits for the player to draw: it goes in the
-                            // frame the card comes in (see SheetCard.ready), so the two never leave a gap.
-                            // "The player is coming, the card has not been claimed yet" holds the pill only for a player opened
-                            // from the pill (sheetFlags.opening). Coming back from the lyrics or the queue it is the same
-                            // moment — the route has changed, the screen is still being composed — and the pill was drawn
-                            // in full for all of it.
-                            val waiting = sheetCard.waitingToShow ||
-                                (playerComing && sheetCard.owner == null && sheetFlags.fromPill)
-                            val pAlpha = when {
-                                !pillRouteOk -> 0f
-                                waiting -> 1f
-                                sheetCard.owner != null -> {
-                                    if (sheetCard.sinking) {
-                                        // On closing: card clears via cardAlpha; keep mini player opaque (1f) once card is near pill,
-                                        // avoiding any semi-transparent phase that exposes the underlying list.
-                                        if (sheetCard.coversPill) 0f else 1f
-                                    } else {
-                                        // On opening: narrow ramp, same as the capsule's fade above.
-                                        if (sheetCard.coversPill || (sheetCard.edge >= 1f && playerComing)) 0f
-                                        else ((sheetCard.edge - 0.75f) / 0.05f).coerceIn(0f, 1f)
-                                    }
-                                }
-                                showPill -> pillAlpha.value
-                                else -> 0f
-                            }
-                            if (pAlpha <= 0f) {
+                            val targetAlpha = capsuleAlpha()
+                            if (targetAlpha <= 0f) {
                                 alpha = 0f
+                                // Not only unseen but out of reach: an invisible capsule is still composed, and its touch handling
+                                // is still in the way of whatever is drawn under it — on the player it sat over the playback
+                                // controls and swallowed the touches that landed on them (every press in its band was lost).
+                                // Moved off the screen, it can be hit by nothing.
+                                translationY = CAPSULE_PARKED_PX
                                 return@graphicsLayer
                             }
-                            val a = arrival.value
-                            val speed = if (arrival.isRunning) {
-                                min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)
-                            } else {
-                                0f
-                            }
-                            val scale = PageMotionSpec.CAPSULE_SCALE_FROM + (1f - PageMotionSpec.CAPSULE_SCALE_FROM) * a
-                            scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
-                            scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
-                            translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                            alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
+                            alpha = targetAlpha
                         }
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(horizontal = 21.dp, vertical = 6.dp),
+                        // And not drawn at all then: at alpha 0 its glass was still part of every frame, its offscreen layers
+                        // (blur, lens) re-rendered each time anything moved — under the player, the lyrics and the queue.
+                        .drawWithContent { if (capsuleAlpha() > 0f) drawContent() },
                 )
+                // The player is being opened but has not claimed the card yet: the route changes a frame or more
+                // before the player's first composition, and the mini player stays until the card replaces it.
+                val playerComing = currentRoute == AuraDestination.NowPlaying.route
+                // The pill belongs to the pages and to the player's own card. On the lyrics, the queue and the equalizer it
+                // does not exist: the player leaving for one of them keeps the card (and so `owner`) until its exit
+                // transition is over — about a second — with the card's edge put back at the pill, and the rules below for
+                // a card in use drew the pill in full, over the lyrics, for that whole second.
+                val pillRouteOk = showPill || playerComing
+                val pillComposed by remember(showPill, currentRoute) {
+                    derivedStateOf {
+                        showPill ||
+                            pillAlpha.value > 0f ||
+                            sheetCard.waitingToShow ||
+                            (playerComing && sheetCard.owner == null) ||
+                            (sheetCard.owner != null && !sheetCard.coversPill && pillRouteOk)
+                    }
+                }
+                if (pillComposed) {
+                    val pillInteractive = showPill && sheetCard.owner == null && !searchOpen
+                    PlayerPillHost(
+                        playerViewModel = playerViewModel,
+                        backdrop = pillBackdrop,
+                        enabled = pillInteractive,
+                        // The finger is still on the pill: start building the player now. It opens exactly as it does for
+                        // a tap (the same navigation, the same hidden warm-up under the pill); it is just earlier.
+                        onPrewarm = {
+                            val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                            if (!playerOnTop && sheetCard.acceptsOpen) {
+                                sheetFlags.openingFromPill()
+                                navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
+                            }
+                        },
+                        // The press became something else before the player had shown: let it go, unseen. Past that point
+                        // the player is already on its way up and is left to finish.
+                        onPrewarmCancel = {
+                            val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                            if (playerOnTop && !sheetCard.ready) navController.popBackStack()
+                        },
+                        onOpenNowPlaying = {
+                            // Once per opening. The mini player stays on screen (and under the finger) until the player's card
+                            // replaces it, and every further tap navigated to the player again: launchSingleTop still swaps
+                            // the entry for a new one, which tore the player down and built it again from the start — the
+                            // card went back to the pill each time, and for a frame there was no card at all, so the
+                            // cover's wash showed across the whole screen. Read here, at the tap, not captured.
+                            val playerOnTop = navController.currentBackStackEntry?.destination?.route == AuraDestination.NowPlaying.route
+                            if (!playerOnTop && sheetCard.acceptsOpen) {
+                                sheetFlags.openingFromPill()
+                                navController.navigate(AuraDestination.NowPlaying.route) { launchSingleTop = true }
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                // Kept, as it is, while the card waits for the player to draw: it goes in the
+                                // frame the card comes in (see SheetCard.ready), so the two never leave a gap.
+                                // "The player is coming, the card has not been claimed yet" holds the pill only for a player opened
+                                // from the pill (sheetFlags.opening). Coming back from the lyrics or the queue it is the same
+                                // moment — the route has changed, the screen is still being composed — and the pill was drawn
+                                // in full for all of it.
+                                val waiting = sheetCard.waitingToShow ||
+                                    (playerComing && sheetCard.owner == null && sheetFlags.fromPill)
+                                val pAlpha = when {
+                                    !pillRouteOk -> 0f
+                                    waiting -> 1f
+                                    sheetCard.owner != null -> {
+                                        if (sheetCard.sinking) {
+                                            // On closing: card clears via cardAlpha; keep mini player opaque (1f) once card is near pill,
+                                            // avoiding any semi-transparent phase that exposes the underlying list.
+                                            if (sheetCard.coversPill) 0f else 1f
+                                        } else {
+                                            // On opening: narrow ramp, same as the capsule's fade above.
+                                            if (sheetCard.coversPill || (sheetCard.edge >= 1f && playerComing)) 0f
+                                            else ((sheetCard.edge - 0.75f) / 0.05f).coerceIn(0f, 1f)
+                                        }
+                                    }
+                                    showPill -> pillAlpha.value
+                                    else -> 0f
+                                }
+                                if (pAlpha <= 0f) {
+                                    alpha = 0f
+                                    return@graphicsLayer
+                                }
+                                val a = arrival.value
+                                val speed = if (arrival.isRunning) {
+                                    min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)
+                                } else {
+                                    0f
+                                }
+                                val scale = PageMotionSpec.CAPSULE_SCALE_FROM + (1f - PageMotionSpec.CAPSULE_SCALE_FROM) * a
+                                scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
+                                scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
+                                translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
+                                alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
+                            }
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
         }
@@ -1254,7 +1390,6 @@ private fun TabPager(
                         HomeScreen(navController = navController, playerViewModel = playerViewModel)
                     AuraDestination.Library ->
                         LibraryScreen(navController = navController, playerViewModel = playerViewModel)
-                    AuraDestination.Settings -> SettingsScreen(navController)
                     else -> Unit
                 }
             }
@@ -1362,3 +1497,6 @@ private class TopRoundedClip(private val radius: Float) : androidx.compose.ui.gr
         ),
     )
 }
+
+/** Where the capsule is parked while it is not shown: far enough below the screen to be touched by nothing. */
+private const val CAPSULE_PARKED_PX = 20_000f

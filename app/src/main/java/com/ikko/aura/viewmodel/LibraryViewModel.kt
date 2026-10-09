@@ -3,7 +3,10 @@ package com.ikko.aura.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ikko.aura.data.AlbumLayoutMode
 import com.ikko.aura.data.MusicRepository
+import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.data.TrackLayoutMode
 import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.data.model.Track
@@ -39,6 +42,8 @@ data class LibraryUiState(
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val isScanning: Boolean = true,
+    val albumLayoutMode: AlbumLayoutMode = AlbumLayoutMode.GRID_3,
+    val trackLayoutMode: TrackLayoutMode = TrackLayoutMode.GRID_2,
 )
 
 private data class RepositorySnapshot(
@@ -54,6 +59,7 @@ class LibraryViewModel @Inject constructor(
     private val analysisReader: AnalysisReader,
     private val selection: LibrarySelection,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     /**
@@ -91,7 +97,13 @@ class LibraryViewModel @Inject constructor(
         RepositorySnapshot(tracks, albums, artists, isScanning)
     }
 
-    val uiState: StateFlow<LibraryUiState> = combine(filter, sort, repositorySnapshot) { f, s, snapshot ->
+    val uiState: StateFlow<LibraryUiState> = combine(
+        filter,
+        sort,
+        repositorySnapshot,
+        settingsStore.albumLayoutMode,
+        settingsStore.trackLayoutMode,
+    ) { f, s, snapshot, albumLayout, trackLayout ->
         LibraryUiState(
             filter = f,
             sort = s,
@@ -99,6 +111,8 @@ class LibraryViewModel @Inject constructor(
             albums = sortAlbums(snapshot.albums, s),
             artists = snapshot.artists,
             isScanning = snapshot.isScanning,
+            albumLayoutMode = albumLayout,
+            trackLayoutMode = trackLayout,
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 

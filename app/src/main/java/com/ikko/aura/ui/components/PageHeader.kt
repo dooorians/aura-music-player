@@ -27,7 +27,7 @@ fun PageHeader(
             .fillMaxWidth()
             .padding(top = 8.dp)
             .height(PAGE_HEADER_HEIGHT)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

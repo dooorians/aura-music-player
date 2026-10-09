@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.cos
@@ -129,3 +130,58 @@ private const val SIDE_SHARE = 0.70710677f
  */
 private fun factorAt(degrees: Float, lightDegrees: Float): Float =
     abs(cos(Math.toRadians((degrees - lightDegrees).toDouble()))).toFloat() / SIDE_SHARE
+
+/**
+ * The hairline edge of the reference's buttons: one 1dp stroke, lit along the top and the left, fading to almost nothing
+ * through the middle and picking up a faint glow again at the bottom-right. Draw it inside a clip to the shape.
+ */
+fun Modifier.glassEdge(shape: Shape, strength: Float = 1f, angleDegrees: Float? = null, tint: Color = Color.White): Modifier = drawWithCache {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val width = 1.dp.toPx()
+    // Square things are lit from the top-left corner; the wider the shape, the more the light falls straight from above,
+    // so a long edge is lit along its whole top instead of fading away from the corner.
+    val tilt = (size.height / size.width).coerceIn(0f, 1f).let { it * it * it }
+    // With an angle given, the light runs along that direction (0 = from the left, 90 = from the top), so neighbouring
+    // cards can each catch it from a different side.
+    val rad = Math.toRadians((angleDegrees ?: 0f).toDouble())
+    val dx = cos(rad).toFloat()
+    val dy = kotlin.math.sin(rad).toFloat()
+    val half = (abs(size.width * dx) + abs(size.height * dy)) / 2f
+    val centre = Offset(size.width / 2f, size.height / 2f)
+    val start = if (angleDegrees == null) Offset.Zero else Offset(centre.x - dx * half, centre.y - dy * half)
+    val end = if (angleDegrees == null) Offset(size.width * tilt, size.height) else Offset(centre.x + dx * half, centre.y + dy * half)
+    val brush = Brush.linearGradient(
+        0f to tint.copy(alpha = 0.42f * strength),
+        0.45f to tint.copy(alpha = 0.07f * strength),
+        1f to tint.copy(alpha = 0.16f * strength),
+        start = start,
+        end = end,
+    )
+    onDrawBehind { drawOutline(outline, brush, style = Stroke(width = 2 * width)) }
+}
+
+/**
+ * The pills' edge, after Apple Music's: a hairline lit along the top and thinning to nothing round the corners and down the
+ * sides, a fainter one along the bottom, and a soft sheen just under the top line. Draw it inside a clip to the shape.
+ */
+fun Modifier.pillEdge(shape: Shape): Modifier = drawWithCache {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val line = Brush.verticalGradient(
+        0f to Color.White.copy(alpha = 0.40f),
+        0.22f to Color.White.copy(alpha = 0.05f),
+        0.5f to Color.White.copy(alpha = 0.015f),
+        0.8f to Color.White.copy(alpha = 0.05f),
+        1f to Color.White.copy(alpha = 0.20f),
+        endY = size.height,
+    )
+    val sheen = Brush.verticalGradient(
+        0f to Color.White.copy(alpha = 0.07f),
+        1f to Color.Transparent,
+        endY = 14.dp.toPx(),
+    )
+    val stroke = Stroke(width = 1.5.dp.toPx())
+    onDrawBehind {
+        drawOutline(outline, sheen)
+        drawOutline(outline, line, style = stroke)
+    }
+}

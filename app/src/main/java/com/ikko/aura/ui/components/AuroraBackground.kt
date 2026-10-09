@@ -12,7 +12,6 @@ import android.view.SurfaceView
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 
 /**
  * The app's background: the playing cover's colours as an Apple-Music-style aurora (see
@@ -33,7 +32,10 @@ import com.ikko.aura.ui.theme.LocalAuraBatterySaver
  */
 @Composable
 fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Modifier) {
-    val animate = !LocalAuraBatterySaver.current
+    // The aurora stays on a settled frame. Liquid Glass samples it and the page backdrop;
+    // animating this separate SurfaceView underneath would still consume CPU/GPU during
+    // navigation and make the glass transitions compete with an unrelated render loop.
+    val animate = false
     AndroidView(
         factory = { AuroraSurfaceView(it) },
         update = { it.update(theme, active, animate) },

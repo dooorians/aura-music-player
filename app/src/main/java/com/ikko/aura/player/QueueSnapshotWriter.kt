@@ -19,12 +19,23 @@ import kotlinx.coroutines.launch
  */
 class QueueSnapshotWriter(
     private val store: QueueSnapshotStore,
+    private val settingsStore: com.ikko.aura.data.SettingsStore,
     private val scope: CoroutineScope,
 ) : Player.Listener {
 
     private var player: Player? = null
     private var pending: Job? = null
     private var ticker: Job? = null
+    private var shuffleActive: Boolean = false
+
+    init {
+        scope.launch {
+            settingsStore.shuffleEnabled.collect {
+                shuffleActive = it
+                schedule(DEBOUNCE_MS)
+            }
+        }
+    }
 
     /** The items, rebuilt only when the queue itself changes: a position tick should not walk the whole queue again. */
     private var entries: List<QueueSnapshot.Entry> = emptyList()
@@ -107,7 +118,7 @@ class QueueSnapshotWriter(
             items = entries,
             index = p.currentMediaItemIndex,
             positionMs = p.currentPosition.coerceAtLeast(0L),
-            shuffle = p.shuffleModeEnabled,
+            shuffle = shuffleActive,
             repeat = p.repeatMode,
         )
     }

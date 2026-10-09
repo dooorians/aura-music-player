@@ -10,59 +10,81 @@
 package com.ikko.aura.ui.components.backdrop.backdrops
 
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.unit.IntSize
 import com.ikko.aura.ui.components.backdrop.internal.recordLayer
 
-fun Modifier.layerBackdrop(backdrop: LayerBackdrop): Modifier =
-    this then LayerBackdropElement(backdrop)
+fun Modifier.layerBackdrop(backdrop: LayerBackdrop, enabled: Boolean = true): Modifier =
+    this then LayerBackdropElement(backdrop, enabled)
 
 private class LayerBackdropElement(
-    val backdrop: LayerBackdrop
+    val backdrop: LayerBackdrop,
+    val enabled: Boolean,
 ) : ModifierNodeElement<LayerBackdropNode>() {
 
     override fun create(): LayerBackdropNode {
-        return LayerBackdropNode(backdrop)
+        return LayerBackdropNode(backdrop, enabled)
     }
 
     override fun update(node: LayerBackdropNode) {
+        var changed = false
         if (node.backdrop != backdrop) {
             node.backdrop.layerCoordinates = null
             node.backdrop = backdrop
+            node.resetCoordinatesCache()
+            changed = true
         }
-        node.invalidateDraw()
+        if (node.enabled != enabled) {
+            node.enabled = enabled
+            changed = true
+        }
+        if (changed) {
+            node.invalidateDraw()
+        }
     }
 
     override fun InspectorInfo.inspectableProperties() {
         name = "layerBackdrop"
         properties["backdrop"] = backdrop
+        properties["enabled"] = enabled
     }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is LayerBackdropElement) return false
 
-        if (backdrop != other.backdrop) return false
+        if (backdrop != other.backdrop || enabled != other.enabled) return false
 
         return true
     }
 
     override fun hashCode(): Int {
-        return backdrop.hashCode()
+        return 31 * backdrop.hashCode() + enabled.hashCode()
     }
 }
 
 private class LayerBackdropNode(
-    var backdrop: LayerBackdrop
+    var backdrop: LayerBackdrop,
+    var enabled: Boolean,
 ) : DrawModifierNode, GlobalPositionAwareModifierNode, Modifier.Node() {
 
+    private var lastPositionInWindow = Offset.Unspecified
+    private var lastSize = IntSize.Zero
+
     override fun ContentDrawScope.draw() {
+        if (!enabled) {
+            drawContent()
+            return
+        }
         // Vendored change: record once and composite, rather than upstream's
         // draw-then-record.
         //
@@ -89,11 +111,22 @@ private class LayerBackdropNode(
 
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
         if (coordinates.isAttached) {
-            backdrop.layerCoordinates = coordinates
+            val position = coordinates.positionInWindow()
+            if (position != lastPositionInWindow || coordinates.size != lastSize) {
+                lastPositionInWindow = position
+                lastSize = coordinates.size
+                backdrop.layerCoordinates = coordinates
+            }
         }
     }
 
     override fun onDetach() {
         backdrop.layerCoordinates = null
+        resetCoordinatesCache()
+    }
+
+    fun resetCoordinatesCache() {
+        lastPositionInWindow = Offset.Unspecified
+        lastSize = IntSize.Zero
     }
 }

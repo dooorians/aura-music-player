@@ -85,7 +85,7 @@ fun ArtistPageContent(
             contentPadding = PaddingValues(top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
-                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)) {
                     Text(
                         text = uiState.name,
                         style = MaterialTheme.typography.headlineLarge,
@@ -119,7 +119,7 @@ fun ArtistPageContent(
                         AuraButton(
                             onClick = {
                                 if (uiState.tracks.isNotEmpty()) {
-                                    playerViewModel.playQueue(uiState.tracks.shuffled(), 0)
+                                    playerViewModel.playShuffled(uiState.tracks)
                                 }
                             },
                         ) {
@@ -137,13 +137,13 @@ fun ArtistPageContent(
                         text = "Albums",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
                 item {
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(uiState.albums, key = { it.id }) { album ->
                             ArtistAlbumCard(album = album, navController = navController)
@@ -158,7 +158,7 @@ fun ArtistPageContent(
                     text = "Titres",
                     style = MaterialTheme.typography.headlineMedium,
                     color = AuraColors.TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
 
@@ -173,7 +173,7 @@ fun ArtistPageContent(
                     // The artist is the page's own title: the album is what tells the rows apart.
                     subtitle = track.album,
                     onLongClick = { menu.show(track) },
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
         }

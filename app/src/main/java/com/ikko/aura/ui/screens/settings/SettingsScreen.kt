@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,9 +46,21 @@ import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.AuraSwitch
 import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.scrollTopBlur
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.font.FontWeight
+import com.ikko.aura.data.AlbumLayoutMode
+import com.ikko.aura.data.TrackLayoutMode
+import com.ikko.aura.ui.theme.CupertinoIcons
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
+import com.ikko.aura.ui.components.ProfileAvatar
 import com.ikko.aura.viewmodel.SettingsViewModel
 
 @Composable
@@ -55,7 +69,23 @@ fun SettingsScreen(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val profileImageUri by settingsViewModel.profileImageUri.collectAsStateWithLifecycle()
+    val profileFirstName by settingsViewModel.profileFirstName.collectAsStateWithLifecycle()
+    var editedFirstName by remember(profileFirstName) { mutableStateOf(profileFirstName) }
+    val context = LocalContext.current
+    val profilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        settingsViewModel.setProfileImageUri(uri.toString())
+    }
     var showSleepPicker by remember { mutableStateOf(false) }
+    var showAlbumLayoutPicker by remember { mutableStateOf(false) }
+    var showTrackLayoutPicker by remember { mutableStateOf(false) }
 
     if (showSleepPicker) {
         SleepTimerPicker(
@@ -64,6 +94,33 @@ fun SettingsScreen(
                 showSleepPicker = false
             },
             onDismiss = { showSleepPicker = false },
+        )
+    }
+
+    if (showAlbumLayoutPicker) {
+        SettingsChoiceDialog(
+            title = "Disposition des albums",
+            options = listOf(
+                AlbumLayoutMode.GRID_2 to "Grille 2 colonnes",
+                AlbumLayoutMode.GRID_3 to "Grille 3 colonnes",
+                AlbumLayoutMode.LIST to "Liste",
+            ),
+            selected = uiState.albumLayoutMode,
+            onSelect = { settingsViewModel.setAlbumLayoutMode(it) },
+            onDismiss = { showAlbumLayoutPicker = false },
+        )
+    }
+
+    if (showTrackLayoutPicker) {
+        SettingsChoiceDialog(
+            title = "Disposition des titres",
+            options = listOf(
+                TrackLayoutMode.LIST to "Liste",
+                TrackLayoutMode.GRID_2 to "Grille 2 colonnes",
+            ),
+            selected = uiState.trackLayoutMode,
+            onSelect = { settingsViewModel.setTrackLayoutMode(it) },
+            onDismiss = { showTrackLayoutPicker = false },
         )
     }
 
@@ -99,6 +156,16 @@ fun SettingsScreen(
                 }
             }
 
+            item { SectionLabel("Apparence") }
+            item {
+                val amoledEnabled by settingsViewModel.amoledBackgroundEnabled.collectAsStateWithLifecycle()
+                SettingsSwitchRow(
+                    title = "Fond AMOLED noir",
+                    subtitle = "Désactive l’Aurora et utilise un noir pur pour économiser l’énergie sur les écrans OLED",
+                    checked = amoledEnabled,
+                    onCheckedChange = settingsViewModel::setAmoledBackgroundEnabled,
+                )
+            }
             item { SectionLabel("Paroles") }
             item {
                 SettingsSwitchRow(
@@ -243,6 +310,34 @@ fun SettingsScreen(
             item { SectionLabel("Bibliothèque") }
             item {
                 SettingsActionRow(
+                    title = "Disposition des albums",
+                    subtitle = "Grille 2 colonnes, 3 colonnes ou liste",
+                    trailing = {
+                        Text(
+                            text = uiState.albumLayoutMode.label,
+                            style = LibraryTypography.AlbumArtist,
+                            color = AuraColors.TextSecondary,
+                        )
+                    },
+                    onClick = { showAlbumLayoutPicker = true },
+                )
+            }
+            item {
+                SettingsActionRow(
+                    title = "Disposition des titres",
+                    subtitle = "Liste ou grille 2 colonnes",
+                    trailing = {
+                        Text(
+                            text = uiState.trackLayoutMode.label,
+                            style = LibraryTypography.AlbumArtist,
+                            color = AuraColors.TextSecondary,
+                        )
+                    },
+                    onClick = { showTrackLayoutPicker = true },
+                )
+            }
+            item {
+                SettingsActionRow(
                     title = "Rescanner la bibliothèque",
                     subtitle = if (uiState.isScanning) "Scan en cours…" else "Recherche de nouveaux titres sur l'appareil",
                     trailing = if (uiState.isScanning) {
@@ -252,6 +347,45 @@ fun SettingsScreen(
                     },
                     onClick = { if (!uiState.isScanning) settingsViewModel.rescanLibrary() },
                 )
+            }
+
+            item { SectionLabel("Profil") }
+            item {
+                OutlinedTextField(
+                    value = editedFirstName,
+                    onValueChange = {
+                        editedFirstName = it
+                        settingsViewModel.setProfileFirstName(it)
+                    },
+                    label = { Text("Prénom") },
+                    placeholder = { Text("Ton prénom") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PAGE_MARGIN, vertical = 4.dp),
+                )
+            }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { profilePicker.launch(arrayOf("image/*")) }
+                        .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileAvatar(
+                        imageUri = profileImageUri,
+                        modifier = Modifier.size(56.dp),
+                        contentDescription = "Photo de profil",
+                    )
+                    Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
+                        RowTitle("Photo de profil")
+                        RowSubtitle(
+                            if (profileImageUri == null) "Ajouter une photo"
+                            else "Toucher pour changer la photo",
+                        )
+                    }
+                }
             }
 
             item { SectionLabel("À propos") }
@@ -277,7 +411,7 @@ fun SettingsScreen(
 }
 
 /** The margin and title height of the other pages (see HomeScreen). */
-private val PAGE_MARGIN = 21.dp
+private val PAGE_MARGIN = 12.dp
 private val PAGE_HEADER_HEIGHT = 56.dp
 
 // Rows set like the lists on the other pages: the title as a track's (white, bold), the line under it as its
@@ -390,6 +524,61 @@ private fun SleepTimerPicker(onPick: (Int) -> Unit, onDismiss: () -> Unit) {
                         .clickable { onPick(minutes) }
                         .padding(horizontal = 18.dp, vertical = 12.dp),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> SettingsChoiceDialog(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .auraMenuSurface()
+                .padding(vertical = 12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = AuraColors.TextPrimary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.height(4.dp))
+            options.forEach { (value, label) ->
+                val isSelected = value == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onSelect(value)
+                            onDismiss()
+                        }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isSelected) Color.White else AuraColors.TextSecondary,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    if (isSelected) {
+                        Icon(
+                            CupertinoIcons.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
     }

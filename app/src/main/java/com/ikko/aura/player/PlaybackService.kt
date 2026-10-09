@@ -104,7 +104,7 @@ class PlaybackService : MediaSessionService() {
     private val recovery by lazy { PlaybackRecovery(trackResolver, PlaybackRecoveryPolicy(), scope) }
 
     /** Writes the queue down as it changes, so it can come back after the process is killed. */
-    private val snapshotWriter by lazy { QueueSnapshotWriter(queueSnapshotStore, scope) }
+    private val snapshotWriter by lazy { QueueSnapshotWriter(queueSnapshotStore, settingsStore, scope) }
 
     override fun onCreate() {
         super.onCreate()

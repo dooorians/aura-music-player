@@ -53,8 +53,11 @@ import kotlin.math.roundToInt
 fun Modifier.topBlur(topInset: Dp = 0.dp, strength: Density.() -> Float): Modifier =
     if (TOP_BLUR_ENABLED) this.then(TopBlurElement(topInset, strength)) else this
 
-/** Switch for the whole effect: false draws pages plain under the status bar. */
-private const val TOP_BLUR_ENABLED = true
+/**
+ * Switch for the whole effect: false draws pages plain under the status bar. Off in the QA build only (the user's
+ * request, for Aura QA); the other builds keep the blur.
+ */
+private val TOP_BLUR_ENABLED: Boolean get() = !com.ikko.aura.BuildConfig.IS_QA
 
 /**
  * [topBlur] driven by how far the page has been scrolled, [scrolledPx]: none at the top, growing with the scroll to

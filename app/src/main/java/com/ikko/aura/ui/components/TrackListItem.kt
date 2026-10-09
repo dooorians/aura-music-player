@@ -62,7 +62,7 @@ fun TrackListItem(
         AlbumArt(
             uri = track.artworkUri,
             contentDescription = track.album,
-            shape = AuraShapes.SquircleSmall,
+            shape = AuraShapes.AlbumCover,
             modifier = Modifier.size(artSize),
             targetSizeDp = artSize,
             cacheKey = track.albumId.toString(),

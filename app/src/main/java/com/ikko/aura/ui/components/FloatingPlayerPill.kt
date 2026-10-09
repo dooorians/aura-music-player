@@ -46,7 +46,6 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +62,8 @@ import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 import com.ikko.aura.ui.theme.LibraryTypography
 import com.ikko.aura.ui.theme.LocalCoverColors
 import kotlin.math.abs
@@ -70,13 +71,16 @@ import kotlin.math.hypot
 import kotlin.math.min
 import kotlinx.coroutines.launch
 
-private val PillShape = AuraShapes.MiniPlayer
+// Corners about a quarter of the pill's height, as in the reference: a rounded rectangle, not a stadium.
+private const val RIM_STRENGTH = 0.55f
+
+private val PillShape = RoundedCornerShape(16.dp)
 
 // Proportions taken from iOS's mini player, scaled to this screen's width (the two are the same
 // width once the screen margins are the same fraction of it, which is what makes the ratios carry
 // over): a capsule 46dp tall, artwork 30dp, text set at 12sp.
-private val PILL_HEIGHT = 58.dp
-private val ART_SIZE = 44.dp
+private val PILL_HEIGHT = 64.dp
+private val ART_SIZE = 50.dp
 private val ART_SHAPE = RoundedCornerShape(12.dp)
 // 7 dp rather than the spec's 5: at 5 the cover's corners ran into the curve of the pill's end and were
 // clipped by it, most of all at the bottom-left, where the pill's rim highlight also lies over them.
@@ -85,8 +89,8 @@ private val ART_TEXT_GAP = 10.dp
 private val END_INSET = 17.7.dp
 
 // The transport glyphs are drawn in a 22dp box, centred, so play and pause sit on the same axis.
-private val GLYPH_SIZE = 26.dp
-private val GLYPH_GAP = 20.6.dp
+private val GLYPH_SIZE = 30.dp
+private val GLYPH_GAP = 22.dp
 
 // The two glyphs are drawn apart, but the taps are not: each keeps a zone as wide as the glyph
 // plus its share of the gap on either side, and the boundary between them is the midpoint.
@@ -103,7 +107,7 @@ private val PLAY_ZONE = NEXT_ZONE + GLYPH_SIZE + GLYPH_GAP
  * clear glass with its rim, and over rows and covers it bends them.
  */
 private val PillGlassTint = Color(0xFF080C1C)
-private const val PILL_GLASS_ALPHA = 0.56f
+private const val PILL_GLASS_ALPHA = 0.4f
 
 /**
  * Deeper than the player's own 8dp: the player's panels sit over a smooth backdrop, the pill over
@@ -158,13 +162,13 @@ fun FloatingPlayerPill(
 
     val motion = LocalPageMotion.current
     val cover = LocalCoverColors.current
-    val dynamicTint = androidx.compose.runtime.remember(cover.accent) { androidx.compose.ui.graphics.Color(androidx.core.graphics.ColorUtils.blendARGB(PillGlassTint.toArgb(), cover.accent.toArgb(), 0.18f)) }
     LiquidGlassPanel(
         shape = PillShape,
-        tint = dynamicTint,
+        tint = PillGlassTint,
         tintAlpha = PILL_GLASS_ALPHA,
         blurRadiusDp = PILL_BLUR_DP,
         dropShadow = false,
+        edge = false,
         modifier = modifier
             .fillMaxWidth()
             .height(PILL_HEIGHT)
@@ -177,11 +181,6 @@ fun FloatingPlayerPill(
                 transformOrigin = touchPivot
             }
             .clip(PillShape)
-            // Clears what the page drew here before the glass draws. The page has no background of its
-            // own (that is a surface behind the window), so the glass's blurred copy of it, being partly
-            // transparent, was laid over the page's own crisp text and the two read as double: a row
-            // of type passing under the pill showed sharp through it. Cleared first, what shows is the
-            // glass alone — the blurred page, over the background.
             .drawBehind { drawRect(Color.Transparent, blendMode = BlendMode.Clear) }
             .sheen(
                 // The light slides across as the pages travel between two neighbours: 0 at one, 1 at the other.
@@ -340,6 +339,8 @@ fun FloatingPlayerPill(
             }
             ,
     ) {
+        // The glass's edge, lit like Apple's: bright at two corners, a hairline along the sides.
+        Spacer(Modifier.matchParentSize().clip(PillShape).pillEdge(PillShape))
     Row(
         modifier = Modifier.fillMaxSize().padding(start = START_INSET, end = END_INSET),
         verticalAlignment = Alignment.CenterVertically,

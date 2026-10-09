@@ -324,6 +324,7 @@ private class DrawBackdropNode(
         }
 
     private var graphicsLayer: GraphicsLayer? = null
+    private var hasRecordedLayer = false
 
     private val layoutLayerBlock: GraphicsLayerScope.() -> Unit = {
         clip = true
@@ -383,16 +384,21 @@ private class DrawBackdropNode(
         if (layer != null) {
             val padding = padding
             val scale = backdropScale
+            val settle = currentValueOf(LocalGlassSettle)
+            val frozen = settle?.frozen == true && hasRecordedLayer
 
-            recordLayer(
-                this@DrawBackdropNode,
-                layer,
-                size = IntSize(
-                    ((size.width * scale).toInt() + padding.toInt() * 2).coerceAtLeast(1),
-                    ((size.height * scale).toInt() + padding.toInt() * 2).coerceAtLeast(1)
-                ),
-                block = recordBackdropBlock
-            )
+            if (!frozen) {
+                recordLayer(
+                    this@DrawBackdropNode,
+                    layer,
+                    size = IntSize(
+                        ((size.width * scale).toInt() + padding.toInt() * 2).coerceAtLeast(1),
+                        ((size.height * scale).toInt() + padding.toInt() * 2).coerceAtLeast(1)
+                    ),
+                    block = recordBackdropBlock
+                )
+                hasRecordedLayer = true
+            }
 
             layer.topLeft =
                 if (padding != 0f) IntOffset(-padding.toInt(), -padding.toInt())
@@ -507,6 +513,7 @@ private class DrawBackdropNode(
             graphicsLayer = null
         }
 
+        hasRecordedLayer = false
         effectScope.reset()
         layoutCoordinates = null
         lastPositionInWindow = Offset.Unspecified

@@ -11,6 +11,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 /**
@@ -27,7 +28,8 @@ class SourceOrder @Inject constructor(
 
     /** The entries in priority order: what was stored, then whatever is new, in the order it was added. */
     val order: Flow<List<String>> = combine(
-        context.settingsDataStore.data.map { it[key].orEmpty().split(SEPARATOR).filter(String::isNotEmpty) },
+        // Distinct: the store re-emits on every write to the shared settings file (the queue snapshot among them).
+        context.settingsDataStore.data.map { it[key].orEmpty().split(SEPARATOR).filter(String::isNotEmpty) }.distinctUntilChanged(),
         remote.configs,
     ) { stored, configs -> merge(stored, listOf(LOCAL_ENTRY, JIOSAAVN_ENTRY, YTM_ENTRY) + configs.map { it.id }) }
 

@@ -64,7 +64,7 @@ sealed class AuraDestination(val route: String) {
         val fullScreenRoutes = setOf(NowPlaying.route, Lyrics.route, Queue.route, Equalizer.route)
 
         /** The pager's pages, in swipe order. Search is not one: it opens over whichever page is showing. */
-        val topLevelRoutes = listOf(Home, Library, Settings)
+        val topLevelRoutes = listOf(Home, Library)
     }
 }
 

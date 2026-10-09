@@ -88,9 +88,9 @@ object PageMotionSpec {
     const val CAPSULE_GAP_TO_PLAYER_DP = 8f
     const val CAPSULE_SHOW_DAMPING = 0.5f
     const val CAPSULE_SHOW_STIFFNESS = 200f
-    const val CAPSULE_HIDE_MS = 450
+    const val CAPSULE_HIDE_MS = 240
     const val CAPSULE_LEAVE_MS = 90
-    val CapsuleHideEasing = CubicBezierEasing(0.36f, 0f, 0.66f, -0.56f)
+    val CapsuleHideEasing = CubicBezierEasing(0.36f, 0f, 0.66f, -0.25f)
     const val CAPSULE_RISE_DP = 42f
     const val CAPSULE_SCALE_FROM = 0.88f
     const val CAPSULE_STRETCH_X = 0.03f
@@ -98,7 +98,7 @@ object PageMotionSpec {
     const val CAPSULE_STRETCH_FULL_AT = 4f
     const val CAPSULE_INTERACTIVE_ABOVE = 0.05f
     const val CAPSULE_APPEARS_AT_PAGE = 0.9f
-    const val SCROLL_DOWN_HIDES_DP = 20f
+    const val SCROLL_DOWN_HIDES_DP = 6f
     const val SCROLL_UP_SHOWS_DP = 10f
     const val SHEEN_MS = 900
 

@@ -58,7 +58,7 @@ fun AlbumListScreen(
                 state = gridState,
                 columns = GridCells.Fixed(2),
                 modifier = Modifier.fillMaxSize().weight(1f).listTopBlur(gridState),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {

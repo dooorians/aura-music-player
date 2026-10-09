@@ -94,23 +94,28 @@ class LocalMusicRepository @Inject constructor(
             val cached = withContext(Dispatchers.IO) { propertiesCache.read() }
             // Everything already measured goes in straight away, so the library is complete from its
             // first emission and only new or changed files are left for the extractor.
-            val initial = canonicaliseAlbums(scan.tracks).filterNot { it.id in forgotten }.map { track ->
-                cached[track.id]?.takeIf { it.stamp == scan.stamps[track.id] }
-                    ?.let { track.withProperties(it.properties) }
-                    ?: track
-            }
-            _tracks.value = initial
-            // Which file's picture is each device album's cover: chosen here, once, for everything that draws it.
-            com.ikko.aura.util.AlbumCovers.publish(
-                initial.map {
-                    com.ikko.aura.util.AlbumCovers.Entry(
-                        albumId = it.albumId,
-                        trackNumber = it.trackNumber,
-                        mediaId = it.contentUri.lastPathSegment?.toLongOrNull() ?: Long.MAX_VALUE,
-                        uri = it.contentUri.toString(),
+            // Off the main thread: refresh() is launched from a ViewModel, and grouping, folding every album and artist name
+            // and ordering every album's files landed in the frames right after start-up.
+            val initial = withContext(Dispatchers.Default) {
+                canonicaliseAlbums(scan.tracks).filterNot { it.id in forgotten }.map { track ->
+                    cached[track.id]?.takeIf { it.stamp == scan.stamps[track.id] }
+                        ?.let { track.withProperties(it.properties) }
+                        ?: track
+                }.also { initial ->
+                    _tracks.value = initial
+                    // Which file's picture is each device album's cover: chosen here, once, for everything that draws it.
+                    com.ikko.aura.util.AlbumCovers.publish(
+                        initial.map {
+                            com.ikko.aura.util.AlbumCovers.Entry(
+                                albumId = it.albumId,
+                                trackNumber = it.trackNumber,
+                                mediaId = it.contentUri.lastPathSegment?.toLongOrNull() ?: Long.MAX_VALUE,
+                                uri = it.contentUri.toString(),
+                            )
+                        },
                     )
-                },
-            )
+                }
+            }
             _scanned.value = true
             // Only now: a scan that failed (no permission yet, a provider error) leaves the library to be tried again.
             hasScanned = true

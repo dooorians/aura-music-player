@@ -77,10 +77,10 @@ object LibraryTypography {
     )
     val CapsuleLabelActive = CapsuleLabel.copy(fontWeight = FontWeight.Bold)
     val PlayerTitle = TextStyle(
-        fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = 14.5.sp, lineHeight = 17.sp,
+        fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, lineHeight = 20.sp,
     )
     val PlayerArtist = TextStyle(
-        fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, lineHeight = 14.5.sp,
+        fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 17.sp,
     )
     val IndexLetter = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = 9.sp)
     val IndexLetterCurrent = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = 10.5.sp)

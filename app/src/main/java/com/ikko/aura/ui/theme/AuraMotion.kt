@@ -49,10 +49,9 @@ object AuraMotion {
     const val PUSH_START_DELAY_MS = 80
 
     /**
-     * The same for going back, which rebuilds the page underneath from nothing — the pager's Home, its covers and
-     * its lists: 120–130 ms, measured.
+     * The same for going back, which gives the page underneath enough time to lay out its frame without freezing.
      */
-    const val POP_START_DELAY_MS = 150
+    const val POP_START_DELAY_MS = 90
 
     /** Fraction of the container height the entering peer rises from — deliberately small. */
     private const val PEER_RISE_DIVISOR = 14

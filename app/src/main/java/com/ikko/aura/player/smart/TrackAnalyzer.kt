@@ -93,9 +93,14 @@ class TrackAnalyzer(private val context: Context) {
     private val triedRenditions = ConcurrentHashMap.newKeySet<String>()
 
     private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "bitchord-smart-analysis").apply {
+        // Background priority: a whole-track analysis is seconds of CPU, and at normal priority it ran beside the UI and
+        // render threads — measured at a full core during a search, while that journey missed 6.5% of its frames. It is
+        // still done well ahead of the transition it prepares; it only yields to what is on screen.
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            runnable.run()
+        }, "bitchord-smart-analysis").apply {
             isDaemon = true
-            priority = Thread.NORM_PRIORITY
         }
     }
 

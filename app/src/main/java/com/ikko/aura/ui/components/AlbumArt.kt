@@ -441,7 +441,7 @@ fun AlbumArt(
     uri: Uri?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = AuraShapes.SquircleLarge,
+    shape: RoundedCornerShape = AuraShapes.AlbumCover,
     // Decoding every thumbnail at the library-wide default (512x512, 1MB as ARGB_8888)
     // regardless of how small it's actually displayed was the real cause of catastrophic Library
     // scroll jank: a 2-column grid of 52dp thumbnails was decoding ~16x more pixels per image

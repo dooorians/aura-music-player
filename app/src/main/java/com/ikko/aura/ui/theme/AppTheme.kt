@@ -12,11 +12,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * The app's one look for glass and backgrounds: flat tinted glass with an edge (no blur, lens, saturation, highlight, shadow
- * or backdrop recording) and an aurora and cover wash held still. It was the "battery saver" setting; it is now the
- * permanent design, so this is always true and nothing provides another value.
+ * Whether the app should use the flat battery-saving surface instead of the live liquid-glass renderer.
+ * Live glass is the default; callers can provide true for the explicit performance fallback.
  */
-val LocalAuraBatterySaver = staticCompositionLocalOf { true }
+val LocalAuraBatterySaver = staticCompositionLocalOf { false }
+
+/** AMOLED removes the global aurora, but album detail pages keep their cover-derived atmosphere. */
+val LocalAmoledBackgroundEnabled = staticCompositionLocalOf { false }
 
 /**
  * The theme the background is lit with when a page has colours of its own (the album page, which is
