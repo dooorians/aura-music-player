@@ -487,24 +487,13 @@ private fun AlbumHeader(
         Spacer(Modifier.height(22.dp))
 
         // "Lire tout" is exactly at the middle of the page; the round buttons are laid out either side of it:
-        // shuffle (and the download, for an external source) on its left, favourite and the menu on its right.
+        // shuffle on its left, the menu on its right (the download of an external album is in it; favourites are in the album's long-press menu).
         ActionRow(
             left = {
-                if (hasDownload) CircleAction(onClick = {}) { downloadSlot() }
                 ShuffleButton(onClick = onShuffle)
             },
             center = { PlayAllButton(onClick = onPlayAll) },
             right = {
-                CircleAction(onClick = onFavorite) {
-                    FillableIcon(
-                        outline = CupertinoIcons.Star,
-                        filled = CupertinoIcons.StarFilled,
-                        active = uiState.isFavorite,
-                        contentDescription = "Favori",
-                        tint = Color.White,
-                        modifier = Modifier.size(21.dp),
-                    )
-                }
                 Box {
                     CircleAction(onClick = onMore) {
                         Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -570,15 +559,10 @@ internal fun ShuffleButton(onClick: () -> Unit) {
 
 @Composable
 internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
-    // The same height as the play capsule; a light, translucent disc.
-    Box(
-        modifier = Modifier
-            .size(ACTION_HEIGHT)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.14f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { content() }
+    // The app's own round button; as tall as the play capsule beside it.
+    AuraIconButton(onClick = onClick, size = ACTION_HEIGHT) {
+        content()
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
