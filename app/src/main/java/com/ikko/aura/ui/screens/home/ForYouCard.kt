@@ -213,6 +213,17 @@ fun ForYouCardView(
             .drawBehind { drawAmbience(look, seed, phase(), motion) }
             .clickable(role = Role.Button, onClick = onClick),
     ) {
+        // The title is centred on the card itself, not on what is left between the logo and the text below it, so it
+        // sits in the same place on every card whatever the artists line says.
+        Box(Modifier.fillMaxSize().padding(horizontal = width * 0.068f), contentAlignment = Alignment.Center) {
+            Text(
+                card.heading,
+                style = face.copy(
+                    fontSize = sp(w * titleScale), lineHeight = sp(w * titleScale * 0.98f), fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.03f).em, textAlign = TextAlign.Center,
+                ),
+            )
+        }
         Column(
             Modifier.fillMaxSize().padding(width * 0.068f),
             verticalArrangement = Arrangement.SpaceBetween,
@@ -222,19 +233,10 @@ fun ForYouCardView(
                 style = face.copy(fontSize = sp(w * 0.042f), fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.92f)),
                 modifier = Modifier.align(Alignment.End),
             )
-            Box(Modifier.weight(1f).fillMaxSize().padding(bottom = height * 0.04f), contentAlignment = Alignment.Center) {
-                Text(
-                    card.heading,
-                    style = face.copy(
-                        fontSize = sp(w * titleScale), lineHeight = sp(w * titleScale * 0.98f), fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.03f).em, textAlign = TextAlign.Center,
-                    ),
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(width * 0.012f)) {
-                Text(card.kicker, style = face.copy(fontSize = sp(w * 0.044f), fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.80f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(verticalArrangement = Arrangement.spacedBy(width * 0.008f)) {
+                Text(card.kicker, style = face.copy(fontSize = sp(w * 0.034f), fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.80f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (card.artists.isNotBlank()) {
-                    Text(card.artists, style = face.copy(fontSize = sp(w * 0.05f), lineHeight = sp(w * 0.066f), fontWeight = FontWeight.SemiBold), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(card.artists, style = face.copy(fontSize = sp(w * 0.038f), lineHeight = sp(w * 0.05f), fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

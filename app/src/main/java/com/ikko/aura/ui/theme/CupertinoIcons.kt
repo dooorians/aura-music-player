@@ -34,7 +34,6 @@ object CupertinoIcons {
     val Close: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_xmark)
     val Refresh: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_arrow_clockwise)
     val Person: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_person)
-    val House: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_house)
     val MusicNote: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_music_note)
     val DragHandle: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_line_horizontal_3)
     val Check: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_checkmark)
