@@ -26,9 +26,9 @@ fun CoverText(
     softWrap: Boolean = true,
     overflow: TextOverflow = TextOverflow.Clip,
 ) {
-    val cover = LocalCoverColors.current
-    val color = remember(cover, alpha) {
-        ColorProducer { if (alpha == 1f) cover.tint else cover.tint.copy(alpha = alpha) }
+    // White, whatever the record: the page titles used to take a trace of its hue, which read as a pale pink.
+    val color = remember(alpha) {
+        ColorProducer { if (alpha == 1f) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = alpha) }
     }
     BasicText(
         text = text,

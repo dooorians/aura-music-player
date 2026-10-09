@@ -174,7 +174,7 @@ fun FloatingPlayerPill(
         animationSpec = tween(if (isPlaying) 220 else 340, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "pill-play-morph",
     )
-    val accent = rememberPlayerAccent(onDarkGlass = true)
+    val accent = rememberPlayerAccent(onDarkGlass = true, followPage = false)
     LiquidGlassPanel(
         shape = PillShape,
         tint = PillGlassTint,

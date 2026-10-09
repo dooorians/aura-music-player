@@ -19,11 +19,12 @@ import kotlin.math.abs
  * light on a dark backdrop, dark on a light one. A cover with nothing but one hue gets a tint of it, pale or deep.
  */
 @Composable
-fun rememberPlayerAccent(onDarkGlass: Boolean = true): Color {
+fun rememberPlayerAccent(onDarkGlass: Boolean = true, followPage: Boolean = true): Color {
     val mesh = LocalNowPlayingMesh.current
     // A page lit with an album of its own (an album's page, a card's playlist) is coloured by that album, not by the
     // track playing: its controls take that album's soft accent.
-    val pageTheme = com.ikko.aura.ui.theme.LocalPageTheme.current.value
+    // [followPage] false: the mini player and its pills always wear the colour of the track playing, on every page.
+    val pageTheme = if (followPage) com.ikko.aura.ui.theme.LocalPageTheme.current.value else null
     val target = remember(mesh, onDarkGlass, pageTheme) {
         if (pageTheme != null && pageTheme !== com.ikko.aura.ui.components.AlbumTheme.Neutral) {
             // The same choice as the player's, made among the album's own colours.

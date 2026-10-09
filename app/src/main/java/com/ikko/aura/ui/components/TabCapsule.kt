@@ -234,7 +234,7 @@ fun TabCapsule(
         ) {
             Box(
                 modifier = Modifier
-                    .width(TAB_SLOT_WIDTH * SLOTS + TAB_GAP * (SLOTS - 1) + TAB_PAD * 2)
+                    .weight(1f)
                     .fillMaxHeight()
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
                 // One handler for the whole capsule, so a finger can go down on one tab, slide to another
@@ -361,7 +361,7 @@ fun TabCapsule(
                     Modifier.fillMaxSize().padding(TAB_PAD),
                     horizontalArrangement = Arrangement.spacedBy(TAB_GAP),
                 ) {
-                    val accent = rememberPlayerAccent(onDarkGlass = true)
+                    val accent = rememberPlayerAccent(onDarkGlass = true, followPage = false)
                     for (slot in 0 until SLOTS) {
                         val isSearch = slot == SEARCH_SLOT
                         val view = slot - 1

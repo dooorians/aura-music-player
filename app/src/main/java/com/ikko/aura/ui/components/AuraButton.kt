@@ -172,7 +172,7 @@ fun AuraGroupIcon(
     val group = LocalAuraGroupPress.current
     val press = rememberGlassPress(fixedScale = GLYPH_PRESSED_SCALE)
 
-    CompositionLocalProvider(LocalContentColor provides rememberPlayerAccent()) {
+    CompositionLocalProvider(LocalContentColor provides Color.White) {
         Box(
             modifier = modifier
                 .size(size)
