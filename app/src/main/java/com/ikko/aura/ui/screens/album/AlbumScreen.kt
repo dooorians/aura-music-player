@@ -658,27 +658,19 @@ internal fun AlbumTrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // The row's content sits on the page's margin, the same line as the cover, the title and the buttons above;
-            // the highlight of the playing row reaches out past it instead.
-            .padding(horizontal = PAGE_PADDING)
+            // The row (its press mark and the playing row's highlight) reaches HIGHLIGHT_OUTSET past the page's margin on each
+            // side, with rounded corners; its content sits back on the margin, on the cover's and the buttons' line.
+            .padding(horizontal = PAGE_PADDING - HIGHLIGHT_OUTSET)
+            .clip(RoundedCornerShape(ROW_RADIUS))
             .then(
                 if (isCurrent) Modifier.drawWithCache {
-                    val outset = if (inset.value > 0f) 0f else HIGHLIGHT_OUTSET.toPx()
-                    val radius = ROW_RADIUS.toPx()
-                    onDrawBehind {
-                        drawRoundRect(
-                            color = accent.value.copy(alpha = 0.16f),
-                            topLeft = Offset(-outset, 0f),
-                            size = Size(size.width + 2 * outset, size.height),
-                            cornerRadius = CornerRadius(radius),
-                        )
-                    }
+                    onDrawBehind { drawRect(accent.value.copy(alpha = 0.16f)) }
                 } else {
                     Modifier
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = inset, vertical = 11.dp),
+            .padding(horizontal = HIGHLIGHT_OUTSET + inset, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
