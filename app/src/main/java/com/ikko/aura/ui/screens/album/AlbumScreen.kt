@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -670,6 +671,8 @@ internal fun AlbumTrackRow(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // As tall as a row of an external album, whose download button (32 dp) sets its height: local rows match it.
+            .heightIn(min = 54.dp)
             .padding(horizontal = HIGHLIGHT_OUTSET + inset, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
