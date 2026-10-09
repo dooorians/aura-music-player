@@ -111,10 +111,6 @@ private val PLAY_ZONE = NEXT_ZONE + GLYPH_SIZE + GLYPH_GAP
 private val PillGlassTint = Color(0xFF080C1C)
 private const val PILL_GLASS_ALPHA = 0.4f
 
-/** How much darker the glass is at a page change, and how long it takes to clear. */
-private const val SETTLE_BOOST = 0.4f
-private const val SETTLE_MS = 260
-
 /**
  * Deeper than the player's own 8dp: the player's panels sit over a smooth backdrop, the pill over
  * rows of text and covers, and white type on top of those has to stay readable when a pale cover
@@ -152,19 +148,8 @@ fun FloatingPlayerPill(
      */
     onPrewarm: () -> Unit = {},
     onPrewarmCancel: () -> Unit = {},
-    /** Changes with the page under the pill: the glass then darkens at once and clears over ~0.25 s (see below). */
-    settleKey: Any? = null,
 ) {
     val scope = rememberCoroutineScope()
-    // A page change leaves the page that is going out in the picture the glass blurs for a few frames, and a coloured one
-    // (a playlist's red) showed through the pill before it went dark. The tint is raised at the change and let down
-    // gently: a fade from the dark glass to the page behind, instead of the old colour then a jump.
-    val settleBoost = remember { Animatable(0f) }
-    androidx.compose.runtime.LaunchedEffect(settleKey) {
-        if (settleKey == null) return@LaunchedEffect
-        settleBoost.snapTo(SETTLE_BOOST)
-        settleBoost.animateTo(0f, tween(SETTLE_MS, easing = LinearOutSlowInEasing))
-    }
     // Whether the player was started on the finger-down, and has not yet been confirmed by a tap or an upward swipe.
     var prewarmed by remember { mutableStateOf(false) }
     // How far the finger has travelled since it went down, in pixels. Read at the moment the player would be started:
@@ -193,7 +178,7 @@ fun FloatingPlayerPill(
     LiquidGlassPanel(
         shape = PillShape,
         tint = PillGlassTint,
-        tintAlpha = PILL_GLASS_ALPHA + settleBoost.value,
+        tintAlpha = PILL_GLASS_ALPHA,
         blurRadiusDp = PILL_BLUR_DP,
         dropShadow = false,
         edge = false,
