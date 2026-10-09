@@ -78,8 +78,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1061,6 +1064,7 @@ private fun TransportRow(
             weight = 1f,
             icon = CupertinoIcons.SkipPrevious,
             contentDescription = "Précédent",
+            skipDirection = -1,
             onClick = onPrevious,
         )
         TransportTile(
@@ -1076,6 +1080,7 @@ private fun TransportRow(
             weight = 1f,
             icon = CupertinoIcons.SkipNext,
             contentDescription = "Suivant",
+            skipDirection = 1,
             onClick = onNext,
         )
         FlankIcon {
@@ -1107,22 +1112,31 @@ private fun RowScope.TransportTile(
     contentDescription: String,
     onClick: () -> Unit,
     glyphColor: Color = rememberPlayerAccent(),
+    /** 1 for "next", -1 for "previous": the two triangles then chase on a press, as on iOS. 0 for the play button. */
+    skipDirection: Int = 0,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    // The pill's press depth, on the transport. Sinks under the finger and springs back with a
-    // little overshoot — the overshoot is what makes it read as a physical press rather than a
-    // colour change. Deliberately soft: at a stiffer spring the sink-and-return is over almost
-    // before the finger registers it, which reads as a flicker.
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) PRESSED_SCALE else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessVeryLow,
-            visibilityThreshold = 0.0004f,
-        ),
-        label = "transport-press-depth",
-    )
+    // The press, as recorded: a soft round halo shows at once under the finger and fades out after it; on skip buttons the
+    // two triangles run one slot along (a new one comes in behind, the front one leaves), on play the glyph dims a little.
+    val halo = remember { androidx.compose.animation.core.Animatable(0f) }
+    val chase = remember { androidx.compose.animation.core.Animatable(1f) }
+    // The chase runs to its end even when the finger is up before it: it has an effect of its own, started by the press.
+    var pressCount by remember { mutableStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(pressed) {
+        if (pressed) {
+            pressCount++
+            halo.snapTo(HALO_ALPHA)
+        } else {
+            halo.animateTo(0f, tween(HALO_FADE_MS))
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(pressCount) {
+        if (pressCount > 0 && skipDirection != 0) {
+            chase.snapTo(0f)
+            chase.animateTo(1f, tween(CHASE_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        }
+    }
 
     // Just the glyph: no glass, no fill, no outline — the tile is only the touch area around it.
     Box(
@@ -1130,10 +1144,6 @@ private fun RowScope.TransportTile(
         modifier = Modifier
             .weight(weight)
             .fillMaxHeight()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
             .clip(ButtonShape)
             .clickable(
                 interactionSource = interactionSource,
@@ -1141,12 +1151,79 @@ private fun RowScope.TransportTile(
                 onClick = onClick,
             ),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = glyphColor,
-            modifier = Modifier.padding(bottom = TRANSPORT_GLYPH_CENTER - 17.dp).size(34.dp),
-        )
+        val glyphModifier = Modifier.padding(bottom = TRANSPORT_GLYPH_CENTER - 17.dp).size(34.dp)
+        // The halo is drawn behind the glyph, centred on it, about twice its size.
+        Box(
+            modifier = glyphModifier.drawBehind {
+                val a = halo.value
+                if (a > 0.002f) drawCircle(Color.White.copy(alpha = a), radius = size.minDimension * 1.3f / 2f * 1.45f)
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (skipDirection != 0) {
+                SkipGlyph(
+                    forward = skipDirection > 0,
+                    color = glyphColor,
+                    progress = { chase.value },
+                    modifier = Modifier.fillMaxSize().semantics { this.contentDescription = contentDescription },
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = glyphColor.copy(alpha = if (pressed) 0.9f else 1f),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+private const val HALO_ALPHA = 0.16f
+private const val HALO_FADE_MS = 450
+private const val CHASE_MS = 460
+
+/**
+ * The skip glyph: two rounded triangles that, as [progress] runs 0→1, move one slot along the direction of travel — a
+ * third comes in behind them from the edge and the leading one leaves — shrinking and fading with their distance from
+ * the middle, so the pair breathes. At 0 and at 1 the picture is the same: the resting pair.
+ */
+@Composable
+private fun SkipGlyph(forward: Boolean, color: Color, progress: () -> Float, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val t = progress()
+        val h = size.height * 0.52f
+        val w = h * 0.92f
+        val slot = w * 0.94f
+        val corner = h * 0.10f
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val dir = if (forward) 1f else -1f
+        // Slots -1, 0 and 1 (the pair rests on 0 and 1, centred on 0.5), carried by t.
+        for (i in -1..1) {
+            val x = i + t
+            val d = kotlin.math.abs(x - 0.5f)
+            val scale = if (d <= 0.5f) 1f else (1f - 0.65f * (d - 0.5f)).coerceIn(0.2f, 1f)
+            var alpha = if (d <= 0.5f) 1f else (1f - (d - 0.5f)).coerceIn(0f, 1f)
+            if (i == -1) alpha *= (0.55f + 0.45f * t)   // the one coming in lights up as it settles
+            if (alpha <= 0.01f) continue
+            val centreX = cx + dir * (x - 0.5f) * slot
+            withTransform({
+                translate(centreX, cy)
+                scale(scale * dir, scale, androidx.compose.ui.geometry.Offset.Zero)
+            }) {
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(-w / 2f, -h / 2f); lineTo(w / 2f, 0f); lineTo(-w / 2f, h / 2f); close()
+                }
+                drawIntoCanvas { canvas ->
+                    val layer = androidx.compose.ui.graphics.Paint().apply { this.alpha = alpha }
+                    canvas.saveLayer(androidx.compose.ui.geometry.Rect(-w, -h, w, h), layer)
+                    drawPath(path, color)
+                    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = corner * 2f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    canvas.restore()
+                }
+            }
+        }
     }
 }
 
