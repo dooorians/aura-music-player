@@ -25,7 +25,12 @@ import com.ikko.aura.viewmodel.PlayerViewModel
 
 /** Opens the context menu. Handed to [MediaContextHost]'s content so any row can raise one. */
 @Stable
-class MediaContextController internal constructor(private val onShow: (LibraryContextTarget) -> Unit) {
+class MediaContextController internal constructor(
+    private val onShow: (LibraryContextTarget) -> Unit,
+    private val onDelete: (List<Track>) -> Unit = {},
+) {
+    /** Deletes these songs' files, after the system's own confirmation (or lets go of streamed ones). */
+    fun delete(tracks: List<Track>) = onDelete(tracks)
     fun show(target: LibraryContextTarget) = onShow(target)
     fun show(track: Track) = onShow(LibraryContextTarget.TrackTarget(track))
 }
@@ -70,7 +75,20 @@ fun MediaContextHost(
         target = null
     }
 
-    val controller = remember { MediaContextController { target = it } }
+    fun deleteTracks(doomed: List<Track>) {
+        if (doomed.isEmpty()) return
+        // Streamed songs have no file of the system's to delete: what goes is their download, and their place in
+        // the library.
+        if (doomed.all(YtmLibrary::isStreamed)) {
+            playerViewModel.unkeepStreamed(doomed)
+            target = null
+            return
+        }
+        pendingDeletion = doomed
+        val request = MediaStore.createDeleteRequest(context.contentResolver, doomed.map { it.contentUri })
+        deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+    }
+    val controller = remember { MediaContextController(onShow = { target = it }, onDelete = { deleteTracks(it) }) }
     val keptStreamed by playerViewModel.keptStreamedIds.collectAsState()
     val downloads by playerViewModel.downloadStates.collectAsState()
     val scope = rememberCoroutineScope()
@@ -133,23 +151,7 @@ fun MediaContextHost(
             streamedAlbum = (shown as? LibraryContextTarget.AlbumTarget)?.album?.remoteId != null,
             albumFavorite = (shown as? LibraryContextTarget.AlbumTarget)?.takeIf { it.album.remoteId == null }?.let { it.album.id in favoriteAlbums },
             onToggleAlbumFavorite = { (shown as? LibraryContextTarget.AlbumTarget)?.let { albumsVm.toggleFavorite(it.album.id) } },
-            onDelete = {
-                val doomed = shown.tracks()
-                if (doomed.isEmpty()) return@MediaContextSheet
-                // Streamed songs have no file of the system's to delete: what goes is their download, and their place in
-                // the library.
-                if (doomed.all(YtmLibrary::isStreamed)) {
-                    playerViewModel.unkeepStreamed(doomed)
-                    target = null
-                    return@MediaContextSheet
-                }
-                pendingDeletion = doomed
-                val request = MediaStore.createDeleteRequest(
-                    context.contentResolver,
-                    doomed.map { it.contentUri },
-                )
-                deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-            },
+            onDelete = { deleteTracks(shown.tracks()) },
         )
     }
 

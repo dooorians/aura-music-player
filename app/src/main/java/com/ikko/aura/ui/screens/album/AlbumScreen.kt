@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.WindowInsets
@@ -239,35 +241,23 @@ fun AlbumPageContent(
                                     AlbumDownloadChip(uiState.tracks, streamed)
                                 }
                             },
-                            onMore = { if (streamed == null) showAddToPlaylist = true else moreOpen = true },
+                            onMore = { moreOpen = true },
                             moreMenu = {
-                                if (streamed != null) {
-                                    DropdownMenu(
-                                        expanded = moreOpen,
-                                        onDismissRequest = { moreOpen = false },
-                                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-                                        shape = AuraMenu.Shape,
-                                        border = AuraMenu.rimStroke,
-                                        shadowElevation = 0.dp,
-                                        tonalElevation = 0.dp,
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Ajouter à une playlist") },
-                                            onClick = {
-                                                moreOpen = false
-                                                scope.launch { streamed.prepare(); showAddToPlaylist = true }
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Télécharger l'album") },
-                                            onClick = { moreOpen = false; streamed.onDownloadAlbum() },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(if (streamed.kept) "Retirer l'album de la bibliothèque" else "Ajouter l'album à la bibliothèque") },
-                                            onClick = { moreOpen = false; streamed.onToggleKeep() },
-                                        )
-                                    }
-                                }
+                                AlbumMoreMenu(
+                                    expanded = moreOpen,
+                                    onDismiss = { moreOpen = false },
+                                    isFavorite = uiState.isFavorite,
+                                    onFavorite = onFavorite,
+                                    onAddToPlaylist = {
+                                        if (streamed != null) scope.launch { streamed.prepare(); showAddToPlaylist = true }
+                                        else showAddToPlaylist = true
+                                    },
+                                    onPlayNext = { playerViewModel.playNext(uiState.tracks) },
+                                    streamed = streamed,
+                                    downloadedAll = streamed != null && uiState.tracks.isNotEmpty() &&
+                                        uiState.tracks.all { streamed.downloads[it.id]?.state == DownloadState.DONE },
+                                    onDeleteFromLibrary = { menu.delete(uiState.tracks) },
+                                )
                             },
                         )
                     }
@@ -302,6 +292,73 @@ fun AlbumPageContent(
             )
         }
     }
+}
+
+/**
+ * The album's "more" menu: favourite, then playlist and play-next, then what removes things. For an album from another
+ * source the download is in it too, and "remove from the library" is that source's own keep/unkeep.
+ */
+@Composable
+private fun AlbumMoreMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    isFavorite: Boolean,
+    onFavorite: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onPlayNext: () -> Unit,
+    streamed: StreamedAlbumControls?,
+    downloadedAll: Boolean,
+    onDeleteFromLibrary: () -> Unit,
+) {
+    var confirmRemoveDownloads by remember { mutableStateOf(false) }
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+        shape = AuraMenu.Shape,
+        border = AuraMenu.rimStroke,
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        MoreItem(if (isFavorite) CupertinoIcons.StarFilled else CupertinoIcons.Star, if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris") { onDismiss(); onFavorite() }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+        MoreItem(CupertinoIcons.PlaylistAdd, "Ajouter à la playlist") { onDismiss(); onAddToPlaylist() }
+        MoreItem(CupertinoIcons.Queue, "Lire ensuite") { onDismiss(); onPlayNext() }
+        if (streamed != null) {
+            HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+            if (downloadedAll) {
+                MoreItem(CupertinoIcons.Close, "Supprimer le téléchargement") { onDismiss(); confirmRemoveDownloads = true }
+            } else {
+                MoreItem(CupertinoIcons.ArrowDownCircle, "Télécharger l'album") { onDismiss(); streamed.onDownloadAlbum() }
+            }
+            MoreItem(
+                if (streamed.kept) CupertinoIcons.Delete else CupertinoIcons.Add,
+                if (streamed.kept) "Supprimer de la bibliothèque" else "Ajouter à la bibliothèque",
+                tint = if (streamed.kept) AuraColors.AccentPink else null,
+            ) { onDismiss(); streamed.onToggleKeep() }
+        } else {
+            HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+            MoreItem(CupertinoIcons.Delete, "Supprimer de la bibliothèque", tint = AuraColors.AccentPink) { onDismiss(); onDeleteFromLibrary() }
+        }
+    }
+    if (confirmRemoveDownloads && streamed != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRemoveDownloads = false },
+            title = { Text("Supprimer l'album téléchargé ?") },
+            text = { Text("Les fichiers de cet album seront effacés de l'appareil et ses titres retirés de la bibliothèque.") },
+            confirmButton = { TextButton(onClick = { confirmRemoveDownloads = false; streamed.onRemoveAlbumDownloads() }) { Text("Supprimer") } },
+            dismissButton = { TextButton(onClick = { confirmRemoveDownloads = false }) { Text("Annuler") } },
+        )
+    }
+}
+
+@Composable
+private fun MoreItem(icon: ImageVector, label: String, tint: Color? = null, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = tint ?: AuraColors.TextPrimary, maxLines = 2) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = tint ?: AuraColors.TextPrimary, modifier = Modifier.size(20.dp)) },
+        onClick = onClick,
+    )
 }
 
 /**

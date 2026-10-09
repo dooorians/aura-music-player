@@ -14,7 +14,12 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
+    private val settingsStore: com.ikko.aura.data.SettingsStore,
 ) : ViewModel() {
+
+    val recentIds: StateFlow<List<Long>> = settingsStore.recentPlaylistIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
 
     val playlists: StateFlow<List<PlaylistSummary>> = playlistRepository.playlists
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -26,7 +31,7 @@ class PlaylistsViewModel @Inject constructor(
     }
 
     fun addTrack(playlistId: Long, trackId: String) {
-        viewModelScope.launch { playlistRepository.addTrack(playlistId, trackId) }
+        viewModelScope.launch { playlistRepository.addTrack(playlistId, trackId); settingsStore.markPlaylistUsed(playlistId) }
     }
 
     fun createPlaylistAndAddTracks(name: String, trackIds: List<String>) {
@@ -35,6 +40,7 @@ class PlaylistsViewModel @Inject constructor(
         viewModelScope.launch {
             val id = playlistRepository.createPlaylist(trimmed)
             trackIds.forEach { playlistRepository.addTrack(id, it) }
+            settingsStore.markPlaylistUsed(id)
         }
     }
 }

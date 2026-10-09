@@ -64,6 +64,19 @@ class SettingsStore @Inject constructor(
     val amoledBackgroundEnabled = setting { prefs -> prefs[amoledBackgroundKey] ?: false }
     val shuffleEnabled = setting { prefs -> prefs[shuffleKey] ?: false }
 
+    /** The playlists songs were last added to, most recent first. */
+    val recentPlaylistIds = setting { prefs ->
+        prefs[stringPreferencesKey("recent_playlists")].orEmpty().split(',').mapNotNull { it.toLongOrNull() }
+    }
+
+    suspend fun markPlaylistUsed(id: Long) {
+        context.settingsDataStore.edit { prefs ->
+            val key = stringPreferencesKey("recent_playlists")
+            val now = (listOf(id) + prefs[key].orEmpty().split(',').mapNotNull { it.toLongOrNull() }.filter { it != id }).take(6)
+            prefs[key] = now.joinToString(",")
+        }
+    }
+
     /** The playlist Aura made for [key] ("Découverte"…) and when it last filled it: `id:atMs`, or null if never. */
     suspend fun autoPlaylist(key: String): Pair<Long, Long>? =
         context.settingsDataStore.data.first()[stringPreferencesKey("auto_playlist_$key")]
