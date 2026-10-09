@@ -21,7 +21,15 @@ import kotlin.math.abs
 @Composable
 fun rememberPlayerAccent(onDarkGlass: Boolean = true): Color {
     val mesh = LocalNowPlayingMesh.current
-    val target = remember(mesh, onDarkGlass) { playerAccentFor(mesh, onDarkGlass) }
+    // A page lit with an album of its own (an album's page, a card's playlist) is coloured by that album, not by the
+    // track playing: its controls take that album's soft accent.
+    val pageTheme = com.ikko.aura.ui.theme.LocalPageTheme.current.value
+    val target = remember(mesh, onDarkGlass, pageTheme) {
+        if (pageTheme != null && pageTheme !== com.ikko.aura.ui.components.AlbumTheme.Neutral) {
+            // The same choice as the player's, made among the album's own colours.
+            playerAccentFor(listOf(pageTheme.accent) + pageTheme.glows, true)
+        } else playerAccentFor(mesh, onDarkGlass)
+    }
     val animated by animateColorAsState(target, tween(200), label = "player-accent")
     return animated
 }

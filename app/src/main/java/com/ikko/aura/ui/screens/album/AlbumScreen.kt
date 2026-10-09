@@ -62,6 +62,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -494,7 +495,7 @@ private fun AlbumHeader(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 24.sp,
                     lineHeight = 28.sp,
-                    color = AuraColors.TextPrimary,
+                    color = rememberPlayerAccent(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -504,7 +505,8 @@ private fun AlbumHeader(
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     lineHeight = 18.sp,
-                    color = accentSoft.value,
+                    // One colour for the whole header: the title is the full accent, the artist a step softer, the details softer still.
+                    color = rememberPlayerAccent().copy(alpha = 0.85f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -514,7 +516,7 @@ private fun AlbumHeader(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp,
                     lineHeight = 15.sp,
-                    color = Color.White.copy(alpha = 0.72f),
+                    color = rememberPlayerAccent().copy(alpha = 0.72f),
                     maxLines = 1,
                 )
             }
@@ -583,35 +585,26 @@ internal fun ActionRow(
 
 @Composable
 internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier: Modifier = Modifier) {
-    // A solid white capsule, as tall as the round buttons beside it.
+    // The white capsule stays white; its text and icon take the accent's hue, deepened: the pale accent the other
+    // controls wear would not read on white.
+    val accent = rememberPlayerAccent()
+    val ink = remember(accent) {
+        val hsl = FloatArray(3)
+        androidx.core.graphics.ColorUtils.colorToHSL(accent.toArgb(), hsl)
+        Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], hsl[1].coerceIn(0.45f, 0.85f), 0.28f)))
+    }
     Row(
         modifier = modifier
             .height(PLAY_HEIGHT)
-            // Offscreen, so that the icon below can cut a hole through the white and show what is behind.
-            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
             .clip(CircleShape)
             .background(Color.White)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            CupertinoIcons.Play,
-            contentDescription = null,
-            tint = Color.Black,
-            modifier = Modifier
-                .size(16.dp)
-                .drawWithContent {
-                    drawIntoCanvas { canvas ->
-                        val paint = androidx.compose.ui.graphics.Paint().apply { blendMode = androidx.compose.ui.graphics.BlendMode.DstOut }
-                        canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
-                        drawContent()
-                        canvas.restore()
-                    }
-                },
-        )
+        Icon(CupertinoIcons.Play, contentDescription = null, tint = ink, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(7.dp))
-        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black, maxLines = 1)
+        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = ink, maxLines = 1)
     }
 }
 
@@ -687,7 +680,7 @@ internal fun AlbumTrackRow(
                 Text(
                     text = number.toString(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AuraColors.TextTertiary,
+                    color = rememberPlayerAccent().copy(alpha = 0.6f),
                 )
             }
         }
@@ -697,7 +690,7 @@ internal fun AlbumTrackRow(
                 fontSize = 15.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isCurrent) currentTint else AuraColors.TextPrimary,
+                color = if (isCurrent) currentTint else rememberPlayerAccent(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -706,7 +699,7 @@ internal fun AlbumTrackRow(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = AuraColors.TextTertiary,
+                    color = rememberPlayerAccent().copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -716,7 +709,7 @@ internal fun AlbumTrackRow(
         Text(
             text = formatTrackDuration(track.durationMs),
             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS, fontSize = 12.sp),
-            color = if (isCurrent) AuraColors.TextSecondary else AuraColors.TextTertiary,
+            color = rememberPlayerAccent().copy(alpha = if (isCurrent) 0.8f else 0.65f),
             maxLines = 1,
         )
         if (trailing != null) {
