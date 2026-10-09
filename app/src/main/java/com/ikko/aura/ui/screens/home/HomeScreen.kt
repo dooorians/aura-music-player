@@ -57,7 +57,6 @@ import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.keepsDragInRow
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.GradientScreenScaffold
-import com.ikko.aura.ui.components.nowPlayingWash
 import com.ikko.aura.ui.components.ProfileAvatar
 import com.ikko.aura.ui.theme.CoverText
 import com.ikko.aura.ui.theme.LibraryTypography
@@ -107,7 +106,6 @@ fun HomeScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .nowPlayingWash()
         ) {
             Column(
                 modifier = Modifier
