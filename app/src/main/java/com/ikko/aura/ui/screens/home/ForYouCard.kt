@@ -296,7 +296,9 @@ private val Float.em get() = androidx.compose.ui.unit.TextUnit(this, androidx.co
 fun cardAmbienceOf(key: String): CardAmbience? = when (key) {
     "disc" -> CardAmbience.DECOUVERTE
     "top" -> CardAmbience.ENERGIE
-    "style" -> CardAmbience.NOUVEAUTES
+    "style", "new" -> CardAmbience.NOUVEAUTES
+    "night" -> CardAmbience.NUIT
+    "energy" -> CardAmbience.ENERGIE
     else -> null
 }
 

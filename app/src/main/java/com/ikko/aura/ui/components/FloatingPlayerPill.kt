@@ -38,6 +38,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -162,6 +164,16 @@ fun FloatingPlayerPill(
 
     val motion = LocalPageMotion.current
     val cover = LocalCoverColors.current
+    // The recorded press of the transport glyphs, on the pill's two: a soft round halo under the finger and, on "next", the
+    // two triangles running one slot along; the play / pause glyph sinks a little and morphs.
+    val playHalo = remember { Animatable(0f) }
+    val nextHalo = remember { Animatable(0f) }
+    val chase = remember { Animatable(1f) }
+    val playMorph by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(if (isPlaying) 220 else 340, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "pill-play-morph",
+    )
     val accent = rememberPlayerAccent(onDarkGlass = true)
     LiquidGlassPanel(
         shape = PillShape,
@@ -244,6 +256,19 @@ fun FloatingPlayerPill(
                             )
                         }
                         haloCenter = offset
+                        val zone = when {
+                            offset.x >= nextZoneStart -> 2
+                            offset.x >= playZoneStart -> 1
+                            else -> 0
+                        }
+                        if (zone == 1) scope.launch { playHalo.snapTo(HALO_ALPHA) }
+                        if (zone == 2) {
+                            scope.launch { nextHalo.snapTo(HALO_ALPHA) }
+                            scope.launch {
+                                chase.snapTo(0f)
+                                chase.animateTo(1f, tween(CHASE_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                            }
+                        }
                         // Only on the part that opens the player, and only once the finger has stayed: a press that is
                         // about to become a swipe has usually moved by then.
                         val prewarm = if (offset.x < playZoneStart) {
@@ -271,6 +296,8 @@ fun FloatingPlayerPill(
                         }
                         val released = tryAwaitRelease()
                         prewarm?.cancel()
+                        scope.launch { playHalo.animateTo(0f, tween(HALO_FADE_MS)) }
+                        scope.launch { nextHalo.animateTo(0f, tween(HALO_FADE_MS)) }
                         if (released) {
                             val elapsed = System.currentTimeMillis() - pressStart
                             pressAnimJob?.cancel()
@@ -402,26 +429,47 @@ fun FloatingPlayerPill(
         // Not IconButtons: their own clickable would compete with the pill-wide pointer handler
         // for gestures that start here and turn into a swipe. Their tap zones are handled above;
         // these only draw the glyphs.
-        Crossfade(
-            targetState = isPlaying,
-            animationSpec = tween(GLYPH_SWAP_MS),
-            modifier = Modifier.size(GLYPH_SIZE),
-            label = "pill-play-pause",
-        ) { playing ->
+        Box(
+            modifier = Modifier.size(GLYPH_SIZE).drawBehind {
+                val a = playHalo.value
+                if (a > 0.002f) drawCircle(Color.White.copy(alpha = a), radius = size.minDimension * 0.95f)
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            val sink = 1f - 0.12f * (playHalo.value / HALO_ALPHA).coerceIn(0f, 1f)
             Icon(
-                imageVector = if (playing) CupertinoIcons.Pause else CupertinoIcons.Play,
-                contentDescription = if (playing) "Pause" else "Lecture",
+                imageVector = CupertinoIcons.Play,
+                contentDescription = if (isPlaying) null else "Lecture",
                 tint = accent,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    val sc = (1f - 0.65f * playMorph) * sink
+                    scaleX = sc; scaleY = sc; alpha = 1f - playMorph
+                },
+            )
+            Icon(
+                imageVector = CupertinoIcons.Pause,
+                contentDescription = if (isPlaying) "Pause" else null,
+                tint = accent,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    val sc = (0.35f + 0.65f * playMorph) * sink
+                    scaleX = sc; scaleY = sc; alpha = playMorph
+                },
             )
         }
         Spacer(Modifier.width(GLYPH_GAP))
-        Icon(
-            imageVector = CupertinoIcons.SkipNext,
-            contentDescription = "Titre suivant",
-            tint = accent,
-            modifier = Modifier.size(GLYPH_SIZE),
-        )
+        Box(
+            modifier = Modifier.size(GLYPH_SIZE).drawBehind {
+                val a = nextHalo.value
+                if (a > 0.002f) drawCircle(Color.White.copy(alpha = a), radius = size.minDimension * 0.95f)
+            },
+        ) {
+            SkipGlyph(
+                forward = true,
+                color = accent,
+                progress = { chase.value },
+                modifier = Modifier.fillMaxSize().semantics { contentDescription = "Titre suivant" },
+            )
+        }
     }
     }
 }

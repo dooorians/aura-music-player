@@ -64,6 +64,18 @@ class SettingsStore @Inject constructor(
     val amoledBackgroundEnabled = setting { prefs -> prefs[amoledBackgroundKey] ?: false }
     val shuffleEnabled = setting { prefs -> prefs[shuffleKey] ?: false }
 
+    /** The Home cards' order (ids, comma-separated; the ones not listed follow in their usual order) and the hidden ones. */
+    val homeCardOrder = setting { prefs -> prefs[stringPreferencesKey("home_card_order")].orEmpty().split(',').filter { it.isNotBlank() } }
+    val homeCardHidden = setting { prefs -> prefs[stringPreferencesKey("home_card_hidden")].orEmpty().split(',').filter { it.isNotBlank() }.toSet() }
+
+    suspend fun setHomeCardOrder(ids: List<String>) {
+        context.settingsDataStore.edit { it[stringPreferencesKey("home_card_order")] = ids.joinToString(",") }
+    }
+
+    suspend fun setHomeCardHidden(ids: Set<String>) {
+        context.settingsDataStore.edit { it[stringPreferencesKey("home_card_hidden")] = ids.joinToString(",") }
+    }
+
     /** The playlists songs were last added to, most recent first. */
     val recentPlaylistIds = setting { prefs ->
         prefs[stringPreferencesKey("recent_playlists")].orEmpty().split(',').mapNotNull { it.toLongOrNull() }

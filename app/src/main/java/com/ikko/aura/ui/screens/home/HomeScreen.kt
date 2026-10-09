@@ -37,6 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.width
+import com.ikko.aura.ui.theme.CupertinoIcons
+import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -99,6 +102,7 @@ fun HomeScreen(
     // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
     val rowState = rememberLazyListState()
     val day = remember { java.time.LocalDate.now().toEpochDay() }
+    var organizing by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     fun open(card: com.ikko.aura.viewmodel.ForYouCard) {
         val route = card.content.openRoute
@@ -108,6 +112,14 @@ fun HomeScreen(
 
     val tracksOf = rememberAlbumTracks()
     com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
+    if (organizing) {
+        HomeOrganizer(
+            slots = state.layout,
+            onMove = viewModel::moveCard,
+            onHidden = viewModel::setCardHidden,
+            onDismiss = { organizing = false },
+        )
+    }
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
@@ -125,6 +137,14 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CoverText(text = "Pour toi", style = LibraryTypography.PageTitle, maxLines = 1, modifier = Modifier.weight(1f))
+                    // Arranges the cards below: their order, and which ones show.
+                    Box(
+                        Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable { organizing = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(CupertinoIcons.DragHandle, contentDescription = "Organiser les cartes", tint = com.ikko.aura.ui.components.rememberPlayerAccent(), modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(10.dp))
                     ProfileAvatar(
                         imageUri = profileImageUri,
                         contentDescription = "Ouvrir les réglages du profil",
