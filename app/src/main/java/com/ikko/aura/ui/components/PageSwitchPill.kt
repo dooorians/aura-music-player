@@ -78,7 +78,7 @@ fun PageSwitchPill(modifier: Modifier = Modifier) {
         // The lit rim of the mini player's glass.
         Spacer(Modifier.matchParentSize().clip(shape).pillEdge(shape))
         Icon(
-            imageVector = if (onHome) CupertinoIcons.Library else CupertinoIcons.House,
+            imageVector = if (onHome) CupertinoIcons.LibraryStack else CupertinoIcons.House,
             contentDescription = if (onHome) "Bibliothèque" else "Accueil",
             tint = accent,
             modifier = Modifier.size(24.dp).align(Alignment.Center),

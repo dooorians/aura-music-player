@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Two thin sleeves standing behind, then the front sleeve: a rounded block with a slightly slanted back edge. -->
+    <path
+        android:pathData="M60 150Q60 136 74 136Q88 136 88 150V362Q88 376 74 376Q60 376 60 362Z"
+        android:fillColor="#FF000000"/>
+    <path
+        android:pathData="M122 118Q122 104 136 104Q150 104 150 118V394Q150 408 136 408Q122 408 122 394Z"
+        android:fillColor="#FF000000"/>
+    <path
+        android:pathData="M196 112Q196 88 222 88H384Q420 88 420 124V388Q420 424 384 424H222Q196 424 196 400Z"
+        android:fillColor="#FF000000"/>
+</vector>

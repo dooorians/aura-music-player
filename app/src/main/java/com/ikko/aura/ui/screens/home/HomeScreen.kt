@@ -37,6 +37,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.width
 import com.ikko.aura.ui.theme.CupertinoIcons
 import androidx.compose.material3.Icon
@@ -102,7 +106,14 @@ fun HomeScreen(
     // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
     val rowState = rememberLazyListState()
     val day = remember { java.time.LocalDate.now().toEpochDay() }
-    var organizing by remember { androidx.compose.runtime.mutableStateOf(false) }
+    // A card held down is carried along the row and dropped where it is wanted: the order shown while it moves, saved on drop.
+    var dragOrder by remember { androidx.compose.runtime.mutableStateOf<List<String>?>(null) }
+    var draggedId by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var dragOffset by remember { androidx.compose.runtime.mutableStateOf(0f) }
+    val shownCards = remember(state.cards, dragOrder) {
+        val order = dragOrder
+        if (order == null) state.cards else state.cards.sortedBy { order.indexOf(it.id).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+    }
 
     fun open(card: com.ikko.aura.viewmodel.ForYouCard) {
         val route = card.content.openRoute
@@ -112,14 +123,6 @@ fun HomeScreen(
 
     val tracksOf = rememberAlbumTracks()
     com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-    if (organizing) {
-        HomeOrganizer(
-            slots = state.layout,
-            onMove = viewModel::moveCard,
-            onHidden = viewModel::setCardHidden,
-            onDismiss = { organizing = false },
-        )
-    }
     GradientScreenScaffold(applyStatusBarInset = false) {
         Box(
             Modifier
@@ -137,14 +140,6 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CoverText(text = "Pour toi", style = LibraryTypography.PageTitle, maxLines = 1, modifier = Modifier.weight(1f))
-                    // Arranges the cards below: their order, and which ones show.
-                    Box(
-                        Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable { organizing = true },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(CupertinoIcons.DragHandle, contentDescription = "Organiser les cartes", tint = com.ikko.aura.ui.components.rememberPlayerAccent(), modifier = Modifier.size(20.dp))
-                    }
-                    Spacer(Modifier.width(10.dp))
                     ProfileAvatar(
                         imageUri = profileImageUri,
                         contentDescription = "Ouvrir les réglages du profil",
@@ -164,7 +159,9 @@ fun HomeScreen(
                 ) {
                     // No keys: with them the row stayed anchored on the card that was first when the first list arrived, so a card
                     // joining at the front (the favourites arrive after the rest) left the row already scrolled by one.
-                    items(state.cards) { card ->
+                    items(shownCards) { card ->
+                        val stepPx = with(LocalDensity.current) { (unit * 620f + gap).toPx() }
+                        val dragging = draggedId == card.id
                         ForYouCardView(
                             day = day,
                             card = card,
@@ -172,6 +169,51 @@ fun HomeScreen(
                             height = unit * CARD_HEIGHT_PX,
                             unit = unit,
                             onClick = { open(card) },
+                            modifier = Modifier
+                                .zIndex(if (dragging) 1f else 0f)
+                                .graphicsLayer {
+                                    if (dragging) {
+                                        translationX = dragOffset
+                                        scaleX = 1.04f
+                                        scaleY = 1.04f
+                                    }
+                                }
+                                .pointerInput(card.id, shownCards.size) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggedId = card.id
+                                            dragOffset = 0f
+                                            dragOrder = shownCards.map { it.id }
+                                        },
+                                        onDrag = { change, delta ->
+                                            change.consume()
+                                            dragOffset += delta.x
+                                            val order = dragOrder?.toMutableList() ?: return@detectDragGesturesAfterLongPress
+                                            val at = order.indexOf(card.id)
+                                            // Past half a card's width one way: swapped with the neighbour that way, and the
+                                            // card is kept under the finger by taking that step off its offset.
+                                            val to = when {
+                                                dragOffset > stepPx / 2f && at < order.lastIndex -> at + 1
+                                                dragOffset < -stepPx / 2f && at > 0 -> at - 1
+                                                else -> at
+                                            }
+                                            if (to != at) {
+                                                order.add(to, order.removeAt(at))
+                                                dragOrder = order
+                                                dragOffset -= (to - at) * stepPx
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            dragOrder?.let { viewModel.setCardOrder(it) }
+                                            draggedId = null
+                                            dragOffset = 0f
+                                        },
+                                        onDragCancel = {
+                                            draggedId = null
+                                            dragOffset = 0f
+                                        },
+                                    )
+                                },
                         )
                     }
                 }
