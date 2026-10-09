@@ -405,12 +405,8 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + 8.dp, bottom = 18.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
     ) {
-        // Top right: download (external sources only) and the menu, in one capsule.
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.End) {
-            HeaderPill(onMore = onMore, moreMenu = moreMenu, download = if (hasDownload) downloadSlot else null)
-        }
         // The cover and its text are one group, centred on the page, the text level with the middle of the cover. The text
         // column is as wide as its widest line (measured here: left to itself it took all the room left, and the group
         // sat off-centre).
@@ -487,52 +483,59 @@ private fun AlbumHeader(
 
         Spacer(Modifier.height(22.dp))
 
-        // Centred, as the cover above: shuffle (round), play (white, the main one), favourite (round).
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ShuffleButton(onClick = onShuffle)
-            PlayAllButton(onClick = onPlayAll)
-            CircleAction(onClick = onFavorite) {
-                FillableIcon(
-                    outline = CupertinoIcons.Star,
-                    filled = CupertinoIcons.StarFilled,
-                    active = uiState.isFavorite,
-                    contentDescription = "Favori",
-                    tint = Color.White,
-                    modifier = Modifier.size(21.dp),
-                )
-            }
-        }
+        // "Lire tout" is exactly at the middle of the page; the round buttons are laid out either side of it:
+        // shuffle (and the download, for an external source) on its left, favourite and the menu on its right.
+        ActionRow(
+            left = {
+                if (hasDownload) CircleAction(onClick = {}) { downloadSlot() }
+                ShuffleButton(onClick = onShuffle)
+            },
+            center = { PlayAllButton(onClick = onPlayAll) },
+            right = {
+                CircleAction(onClick = onFavorite) {
+                    FillableIcon(
+                        outline = CupertinoIcons.Star,
+                        filled = CupertinoIcons.StarFilled,
+                        active = uiState.isFavorite,
+                        contentDescription = "Favori",
+                        tint = Color.White,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
+                Box {
+                    CircleAction(onClick = onMore) {
+                        Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    moreMenu()
+                }
+            },
+        )
     }
 }
 
-/**
- * The page's actions that are not about playing, in one capsule at the top right: the album's download when it comes from
- * an external source, and the menu. [download] is null for a local album; the capsule is then the menu alone.
- */
+/** The page's action row: [center] on the page's middle line, [left] ending beside it and [right] starting beside it. */
 @Composable
-internal fun HeaderPill(onMore: () -> Unit, moreMenu: @Composable () -> Unit = {}, download: (@Composable () -> Unit)? = null) {
-    AuraButton(
-        onClick = {},
-        shape = CircleShape,
-        minHeight = ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 2.dp),
-    ) {
-        if (download != null) {
-            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { download() }
-        }
-        Box {
-            Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onMore),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
-            }
-            moreMenu()
-        }
+internal fun ActionRow(
+    left: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+    center: @Composable () -> Unit,
+    right: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+            content = left,
+        )
+        Spacer(Modifier.width(8.dp))
+        center()
+        Spacer(Modifier.width(8.dp))
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
+            verticalAlignment = Alignment.CenterVertically,
+            content = right,
+        )
     }
 }
 

@@ -25,7 +25,8 @@ import com.ikko.aura.ui.components.MediaContextHost
 import com.ikko.aura.ui.screens.album.AlbumTrackRow
 import com.ikko.aura.ui.screens.album.ART_SHAPE
 import com.ikko.aura.ui.screens.album.ART_SIZE
-import com.ikko.aura.ui.screens.album.HeaderPill
+import com.ikko.aura.ui.screens.album.ActionRow
+import com.ikko.aura.ui.screens.album.CircleAction
 import com.ikko.aura.ui.screens.album.HEADER_TOP_BELOW_STATUS
 import com.ikko.aura.ui.screens.album.PAGE_PADDING
 import com.ikko.aura.ui.screens.album.PlayAllButton
@@ -153,35 +154,8 @@ fun PlaylistScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + 8.dp, bottom = 18.dp),
+                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
                     ) {
-                        // Top right: the menu, in the same capsule as the album pages'. Favoris is kept: no menu.
-                        if (!isFavorites) Row(modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.End) {
-                            HeaderPill(
-                                onMore = { menuExpanded = true },
-                                moreMenu = {
-                                    DropdownMenu(
-                                        expanded = menuExpanded,
-                                        onDismissRequest = { menuExpanded = false },
-                                        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-                                        shape = AuraMenu.Shape,
-                                        border = AuraMenu.rimStroke,
-                                        shadowElevation = 0.dp,
-                                        tonalElevation = 0.dp,
-                                    ) {
-                                        DropdownMenuItem(text = { Text("Renommer") }, onClick = { menuExpanded = false; renaming = true })
-                                        DropdownMenuItem(
-                                            text = { Text("Supprimer la playlist") },
-                                            onClick = {
-                                                menuExpanded = false
-                                                playlistDetailViewModel.delete()
-                                                navController.popBackStack()
-                                            },
-                                        )
-                                    }
-                                },
-                            )
-                        } else Spacer(Modifier.height(58.dp))
                         Row(verticalAlignment = Alignment.Top) {
                             Box(
                                 modifier = Modifier.shadow(
@@ -241,14 +215,37 @@ fun PlaylistScreen(
                             )
                         }
                         Spacer(Modifier.height(22.dp))
-                        if (current.tracks.isNotEmpty()) Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) })
-                            PlayAllButton(onClick = { playerViewModel.playQueue(current.tracks, 0) })
-                        }
+                        if (current.tracks.isNotEmpty()) ActionRow(
+                            left = { ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) }) },
+                            center = { PlayAllButton(onClick = { playerViewModel.playQueue(current.tracks, 0) }) },
+                            right = {
+                            // Favoris is kept: no renaming or deleting it, so no menu.
+                            if (!isFavorites) Box {
+                                CircleAction(onClick = { menuExpanded = true }) {
+                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false },
+                                    containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+                                    shape = AuraMenu.Shape,
+                                    border = AuraMenu.rimStroke,
+                                    shadowElevation = 0.dp,
+                                    tonalElevation = 0.dp,
+                                ) {
+                                    DropdownMenuItem(text = { Text("Renommer") }, onClick = { menuExpanded = false; renaming = true })
+                                    DropdownMenuItem(
+                                        text = { Text("Supprimer la playlist") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            playlistDetailViewModel.delete()
+                                            navController.popBackStack()
+                                        },
+                                    )
+                                }
+                            }
+                            },
+                        )
                     }
                 }
                 if (current.tracks.isEmpty() && current.unavailable.isEmpty()) {
