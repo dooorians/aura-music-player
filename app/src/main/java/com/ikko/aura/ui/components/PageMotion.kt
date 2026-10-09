@@ -196,31 +196,12 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
         goTo(scope, target, pagesPerSecond)
     }
 
-    fun goTo(scope: kotlinx.coroutines.CoroutineScope, page: Int, initialVelocity: Float = 0f) {
+    /** Home and Bibliothèque are separate pages, reached by the button and nothing else: the switch is immediate, nothing slides. */
+    fun goTo(@Suppress("UNUSED_PARAMETER") scope: kotlinx.coroutines.CoroutineScope, page: Int, initialVelocity: Float = 0f) {
         stop()
-        settleJob = scope.launch {
-            if (reduceMotion) {
-                position.floatValue = page.toFloat()
-                speed.floatValue = 0f
-            } else {
-                // Let go past an end, the pages come back without a bounce and without the drag's speed (which points
-                // outwards and would throw them further): a slow, even return.
-                val beyond = p < 0f || p > (pageCount - 1).toFloat()
-                animate(
-                    initialValue = p,
-                    targetValue = page.toFloat(),
-                    initialVelocity = if (beyond) 0f else initialVelocity,
-                    animationSpec = spring(
-                        if (beyond) 1f else PageMotionSpec.PAGE_DAMPING,
-                        if (beyond) PageMotionSpec.EDGE_RETURN_STIFFNESS else PageMotionSpec.PAGE_STIFFNESS,
-                        // The default threshold is 1% of a page, about 4 dp: the spring was declared done
-                        // that far from its target and the page snapped the rest — the abrupt stop at the
-                        // end of every bounce. This lets it run down to a fraction of a pixel.
-                        PageMotionSpec.PAGE_REST_THRESHOLD,
-                    ),
-                ) { value, _ -> position.floatValue = value }
-            }
-        }
+        dragging = false
+        position.floatValue = page.toFloat().coerceIn(0f, (pageCount - 1).toFloat())
+        speed.floatValue = 0f
     }
 
     internal fun setSpeed(v: Float) {
@@ -289,14 +270,6 @@ fun PagedContainer(
                 return Offset.Zero
             }
 
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput && available.x != 0f && !state.rowKeepsDrag) {
-                    state.dragBy(-available.x / state.widthPx)
-                    return Offset(available.x, 0f)
-                }
-                return Offset.Zero
-            }
-
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (state.inTransit) {
                     state.release(scope, -available.x / state.widthPx)
@@ -349,10 +322,12 @@ fun PagedContainer(
                 .fillMaxSize()
                 .onSizeChanged { state.widthPx = it.width.toFloat().coerceAtLeast(1f) }
                 .nestedScroll(connection)
+                // Off: the pages are not swiped between any more, only switched with the button (see goTo).
                 .scrollable(
                     state = scrollableState,
                     orientation = Orientation.Horizontal,
                     flingBehavior = flingBehavior,
+                    enabled = false,
                 ),
         ) {
             pages.forEachIndexed { index, content ->
