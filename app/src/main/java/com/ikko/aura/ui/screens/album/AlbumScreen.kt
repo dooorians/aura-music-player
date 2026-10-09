@@ -103,10 +103,10 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-private val PAGE_PADDING = 12.dp
-private val ART_SIZE = 96.dp
-private val ART_SHAPE = AuraShapes.AlbumCoverDetail
-private val ACTION_HEIGHT = 44.dp
+internal val PAGE_PADDING = 12.dp
+internal val ART_SIZE = 96.dp
+internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
+internal val ACTION_HEIGHT = 44.dp
 private val ROW_SHAPE = RoundedCornerShape(20.dp)
 
 @Composable
@@ -378,7 +378,7 @@ private const val SCRIM_RAMP_PX = 260f
  * "Réglages": 21 dp under the status bar (8 dp of margin, then a 56 dp title row centring a 30 sp line). At 10 dp
  * it sat noticeably higher than everything else in the app (the user's report).
  */
-private val HEADER_TOP_BELOW_STATUS = 21.dp
+internal val HEADER_TOP_BELOW_STATUS = 21.dp
 
 @Composable
 private fun AlbumHeader(
@@ -490,7 +490,7 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun PlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
+internal fun PlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
     AuraButton(
         onClick = onClick,
         minHeight = ACTION_HEIGHT,
@@ -504,7 +504,7 @@ private fun PlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
 }
 
 @Composable
-private fun ShuffleButton(onClick: () -> Unit) {
+internal fun ShuffleButton(onClick: () -> Unit) {
     AuraButton(
         onClick = onClick,
         minHeight = ACTION_HEIGHT,
@@ -517,7 +517,7 @@ private fun ShuffleButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
+internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
     AuraIconButton(onClick = onClick, size = ACTION_HEIGHT) {
         content()
     }
@@ -525,7 +525,7 @@ private fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumTrackRow(
+internal fun AlbumTrackRow(
     number: Int,
     track: Track,
     albumArtist: String,
@@ -781,7 +781,7 @@ private fun featuringIsInTitle(title: String, subtitle: String): Boolean {
     return names.isNotEmpty() && names.all { title.contains(it, ignoreCase = true) }
 }
 
-private fun formatTrackDuration(ms: Long): String {
+internal fun formatTrackDuration(ms: Long): String {
     val totalSeconds = ms / 1000
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
