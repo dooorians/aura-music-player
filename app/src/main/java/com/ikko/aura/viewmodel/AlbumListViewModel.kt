@@ -56,6 +56,13 @@ class AlbumListViewModel @Inject constructor(
                 "Albums favoris",
                 (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf((known + kept).distinctBy { it.id })).distinctBy { it.id }.filter { it.id in favoriteIds },
             )
+            "top" -> {
+                val countById = plays.associate { it.albumId to it.playCount }
+                AlbumListUiState(
+                    "Les plus écoutés",
+                    albums.filter { (countById[it.id] ?: 0) > 0 }.sortedByDescending { countById[it.id] },
+                )
+            }
             "recent" -> AlbumListUiState("Écoutés récemment", recentIds.mapNotNull { albumsById[it] })
             // Same ordering Home's row uses, uncapped: least-played first. "Tout voir" on a row
             // about what you have forgotten should not reorder it into the plain album list.
