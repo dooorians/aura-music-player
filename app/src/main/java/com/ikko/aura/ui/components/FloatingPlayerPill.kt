@@ -182,6 +182,8 @@ fun FloatingPlayerPill(
         blurRadiusDp = PILL_BLUR_DP,
         dropShadow = false,
         edge = false,
+        // No lens: it bent the pill's whole body into a grey oval on its right, as it did on the small button.
+        lensScale = 0f,
         modifier = modifier
             .fillMaxWidth()
             .height(PILL_HEIGHT)

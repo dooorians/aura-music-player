@@ -745,19 +745,13 @@ fun MainLayout() {
         } == true
         val albumAuroraScrim by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (isAlbumRoute) 0f else 1f,
-            animationSpec = if (isAlbumRoute) {
-                tween(
-                    durationMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_MS,
-                    delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS,
-                    easing = androidx.compose.animation.core.LinearOutSlowInEasing,
-                )
-            } else {
-                tween(
-                    durationMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_MS,
-                    delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS,
-                    easing = androidx.compose.animation.core.FastOutLinearInEasing,
-                )
-            },
+            // Quicker, and eased at both ends: the old return to black ran into its end at full speed (FastOutLinearIn), which
+            // read as a cut on the last frames. This one slows down as it arrives.
+            animationSpec = tween(
+                durationMillis = 240,
+                delayMillis = if (isAlbumRoute) com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS else 40,
+                easing = androidx.compose.animation.core.CubicBezierEasing(0.33f, 0f, 0.15f, 1f),
+            ),
             label = "album-aurora-scrim",
         )
         val albumAuroraVisible = !amoledBackgroundEnabled || (albumAuroraTheme != null && (isAlbumRoute || albumAuroraScrim < 1f))
