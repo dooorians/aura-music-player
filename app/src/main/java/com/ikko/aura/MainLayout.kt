@@ -130,6 +130,7 @@ import com.ikko.aura.ui.theme.LocalPageTheme
 import com.ikko.aura.ui.theme.LocalSearchOpener
 import com.ikko.aura.ui.components.AuroraBackground
 import com.ikko.aura.ui.components.LocalPageMotion
+import com.ikko.aura.ui.components.PageSwitchPill
 import com.ikko.aura.ui.components.LocalTabCapsule
 import com.ikko.aura.ui.components.PageMotionSpec
 import com.ikko.aura.ui.components.PageMotionState
@@ -1204,6 +1205,7 @@ fun MainLayout() {
                         playerViewModel = playerViewModel,
                         backdrop = pillBackdrop,
                         enabled = pillInteractive,
+                        showPageSwitch = isTabsRoute,
                         // The finger is still on the pill: start building the player now. It opens exactly as it does for
                         // a tap (the same navigation, the same hidden warm-up under the pill); it is just earlier.
                         onPrewarm = {
@@ -1337,11 +1339,18 @@ private fun PlayerPillHost(
     onPrewarmCancel: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    showPageSwitch: Boolean = false,
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
 
     CompositionLocalProvider(LocalAuraBackdrop provides backdrop) {
+        androidx.compose.foundation.layout.Row(
+            modifier = modifier,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+        if (showPageSwitch) PageSwitchPill()
         FloatingPlayerPill(
             track = track,
             queueIndex = uiState.queueIndex,
@@ -1352,9 +1361,10 @@ private fun PlayerPillHost(
             onOpen = onOpenNowPlaying,
             onPrewarm = onPrewarm,
             onPrewarmCancel = onPrewarmCancel,
-            modifier = modifier,
+            modifier = Modifier.weight(1f),
             enabled = enabled,
         )
+        }
     }
 }
 

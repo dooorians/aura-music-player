@@ -124,7 +124,7 @@ class HomeWidgetsViewModel @Inject constructor(
     private fun artistsOf(tracks: List<Track>): String {
         val names = tracks.map { it.artist }.filter { it.isNotBlank() }.distinct()
         if (names.isEmpty()) return ""
-        return names.take(5).joinToString(", ") + if (names.size > 5) " et plus encore" else ""
+        return names.take(3).joinToString(", ") + if (names.size > 3) " et plus" else ""
     }
 
     private companion object {

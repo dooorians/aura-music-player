@@ -233,10 +233,10 @@ fun ForYouCardView(
                 style = face.copy(fontSize = sp(w * 0.042f), fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.92f)),
                 modifier = Modifier.align(Alignment.End),
             )
-            Column(verticalArrangement = Arrangement.spacedBy(width * 0.008f)) {
-                Text(card.kicker, style = face.copy(fontSize = sp(w * 0.034f), fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.80f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(verticalArrangement = Arrangement.spacedBy(width * 0.012f)) {
+                Text(card.kicker, style = face.copy(fontSize = sp(w * 0.044f), fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.80f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (card.artists.isNotBlank()) {
-                    Text(card.artists, style = face.copy(fontSize = sp(w * 0.038f), lineHeight = sp(w * 0.05f), fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(card.artists, style = face.copy(fontSize = sp(w * 0.05f), lineHeight = sp(w * 0.066f), fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

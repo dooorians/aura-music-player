@@ -14,6 +14,11 @@ import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.Stable
@@ -133,6 +138,10 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
     val velocity: Float get() = speed.floatValue
 
     var widthPx: Float = 1f
+
+    /** A row that keeps its own drags is being dragged: what it cannot use at its ends is not the pager's (see [keepsDragInRow]). */
+    var rowKeepsDrag: Boolean = false
+
     var dragging by mutableStateOf(false)
         internal set
 
@@ -281,7 +290,7 @@ fun PagedContainer(
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput && available.x != 0f) {
+                if (source == NestedScrollSource.UserInput && available.x != 0f && !state.rowKeepsDrag) {
                     state.dragBy(-available.x / state.widthPx)
                     return Offset(available.x, 0f)
                 }
@@ -307,6 +316,7 @@ fun PagedContainer(
     }
     val scrollableState = rememberScrollableState { delta ->
         // A zero delta is a child's drag passing by (a row of covers), not the pager's: it must not start a drag.
+        if (state.rowKeepsDrag) return@rememberScrollableState 0f
         if (delta != 0f) state.dragBy(-delta / state.widthPx)
         delta
     }
@@ -385,5 +395,56 @@ suspend fun Animatable<Float, androidx.compose.animation.core.AnimationVector1D>
         animateTo(0f, tween(PageMotionSpec.CAPSULE_LEAVE_MS, easing = androidx.compose.animation.core.FastOutLinearInEasing))
     } else {
         animateTo(0f, tween(PageMotionSpec.CAPSULE_HIDE_MS, easing = PageMotionSpec.CapsuleHideEasing))
+    }
+}
+
+/**
+ * For a row of cards or covers that must not hand a drag over to the pager at its ends. Where the row itself cannot
+ * scroll any further it does not claim the drag, so it would fall to the pager: this claims it instead (a horizontal
+ * drag nobody took) and feeds it to [effect], the row's own overscroll effect, which stretches. Pass the same
+ * [effect] to the row.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect?): Modifier {
+    val state = LocalPageMotion.current ?: return this
+    val scope = rememberCoroutineScope()
+    val connection = remember(state) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.x != 0f) state.rowKeepsDrag = true
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                state.rowKeepsDrag = false
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                state.rowKeepsDrag = false
+                return Velocity.Zero
+            }
+        }
+    }
+    return nestedScroll(connection).pointerInput(effect) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var total = Offset.Zero
+            var claimed = false
+            while (true) {
+                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) break
+                if (change.isConsumed) continue
+                val d = change.positionChange()
+                total += d
+                if (!claimed && abs(total.x) > viewConfiguration.touchSlop && abs(total.x) > abs(total.y)) claimed = true
+                if (claimed) {
+                    change.consume()
+                    effect?.applyToScroll(Offset(d.x, 0f), NestedScrollSource.UserInput) { Offset.Zero }
+                }
+            }
+            if (claimed) scope.launch { effect?.applyToFling(Velocity.Zero) { Velocity.Zero } }
+        }
     }
 }

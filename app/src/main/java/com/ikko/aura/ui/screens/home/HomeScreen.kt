@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import androidx.navigation.NavHostController
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.navigation.route
+import com.ikko.aura.ui.components.keepsDragInRow
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.ProfileAvatar
@@ -134,7 +135,10 @@ fun HomeScreen(
                     )
                 }
                 Spacer(Modifier.height(unit * 30f))
+                val cardsEffect = androidx.compose.foundation.rememberOverscrollEffect()
                 LazyRow(
+                    modifier = Modifier.keepsDragInRow(cardsEffect),
+                    overscrollEffect = cardsEffect,
                     state = rowState,
                     contentPadding = PaddingValues(horizontal = margin),
                     horizontalArrangement = Arrangement.spacedBy(gap),
@@ -171,7 +175,10 @@ fun HomeScreen(
                         )
                     }
                     Spacer(Modifier.height(unit * 25f))
+                    val recentEffect = androidx.compose.foundation.rememberOverscrollEffect()
                     LazyRow(
+                        modifier = Modifier.keepsDragInRow(recentEffect),
+                        overscrollEffect = recentEffect,
                         contentPadding = PaddingValues(horizontal = margin),
                         horizontalArrangement = Arrangement.spacedBy(gap),
                     ) {
