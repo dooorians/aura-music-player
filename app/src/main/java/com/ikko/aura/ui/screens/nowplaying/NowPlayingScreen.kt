@@ -1070,6 +1070,7 @@ private fun TransportRow(
         TransportTile(
             weight = 1.15f,
             icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
+            playing = isPlaying,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1114,6 +1115,8 @@ private fun RowScope.TransportTile(
     glyphColor: Color = rememberPlayerAccent(),
     /** 1 for "next", -1 for "previous": the two triangles then chase on a press, as on iOS. 0 for the play button. */
     skipDirection: Int = 0,
+    /** For the play / pause tile: whether it is playing. The glyph then morphs between the two instead of swapping. */
+    playing: Boolean? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1167,11 +1170,45 @@ private fun RowScope.TransportTile(
                     progress = { chase.value },
                     modifier = Modifier.fillMaxSize().semantics { this.contentDescription = contentDescription },
                 )
+            } else if (playing != null) {
+                // As recorded: the glyph sinks a little under the finger; on the change, the one leaving shrinks to a third of
+                // its size and fades while the other grows out of that same small size and lights up. Pause arriving is quick
+                // (about 0.22 s), play arriving a little slower (about 0.34 s).
+                val morph by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (playing) 1f else 0f,
+                    animationSpec = tween(if (playing) 220 else 340, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "play-pause-morph",
+                )
+                val sink by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (pressed) 0.88f else 1f,
+                    animationSpec = tween(90),
+                    label = "play-sink",
+                )
+                val pauseScale = (0.35f + 0.65f * morph) * sink
+                val playScale = (1f - 0.65f * morph) * sink
+                Icon(
+                    imageVector = CupertinoIcons.Play,
+                    contentDescription = if (playing) null else contentDescription,
+                    tint = glyphColor,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = playScale; scaleY = playScale
+                        alpha = (1f - morph).coerceIn(0f, 1f) * (if (pressed) 0.9f else 1f)
+                    },
+                )
+                Icon(
+                    imageVector = CupertinoIcons.Pause,
+                    contentDescription = if (playing) contentDescription else null,
+                    tint = glyphColor,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = pauseScale; scaleY = pauseScale
+                        alpha = morph.coerceIn(0f, 1f) * (if (pressed) 0.9f else 1f)
+                    },
+                )
             } else {
                 Icon(
                     imageVector = icon,
                     contentDescription = contentDescription,
-                    tint = glyphColor.copy(alpha = if (pressed) 0.9f else 1f),
+                    tint = glyphColor,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
