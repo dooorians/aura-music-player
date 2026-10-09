@@ -92,6 +92,7 @@ fun HomeScreen(
 
     // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
     val rowState = rememberLazyListState()
+    val day = remember { java.time.LocalDate.now().toEpochDay() }
 
     fun open(card: com.ikko.aura.viewmodel.ForYouCard) {
         val route = card.content.openRoute
@@ -146,6 +147,7 @@ fun HomeScreen(
                     // joining at the front (the favourites arrive after the rest) left the row already scrolled by one.
                     items(state.cards) { card ->
                         ForYouCardView(
+                            day = day,
                             card = card,
                             width = unit * 620f,
                             height = unit * CARD_HEIGHT_PX,

@@ -94,6 +94,25 @@ private val Looks: Map<CardAmbience, Look> = mapOf(
         Sheen(c(0xe8daff), .42f, 30f, 36f, 1.5f, .6f, 180f, 0.04f)),
 )
 
+/**
+ * The look a card wears on [day]: each day the six palettes are dealt out again among the cards (no two alike on one
+ * day), and the patches of the palette are moved a little, turned and resized, so a palette is never quite the same twice.
+ * The same day gives the same look, on every launch.
+ */
+private fun dailyLook(ambience: CardAmbience, day: Long): Look {
+    val deal = Looks.values.toList().shuffled(Random(day * 7919L + 13))
+    val base = deal[ambience.ordinal % deal.size]
+    val rnd = Random(day * 104729L + ambience.ordinal * 31L + 5)
+    fun j(spread: Float) = (rnd.nextFloat() - 0.5f) * 2f * spread
+    return Look(
+        base.base0, base.base1, base.angle + j(25f),
+        base.blobs.map { b ->
+            Blob(b.color, (b.x + j(10f)).coerceIn(0f, 100f), (b.y + j(10f)).coerceIn(0f, 100f), b.size * (1f + j(0.12f)), b.alpha, b.stretch, b.rot + j(35f))
+        },
+        base.sheen.let { s -> Sheen(s.color, s.alpha, s.angle + j(20f), (s.y + j(14f)).coerceIn(0f, 100f), s.w, s.h, s.edge, s.blur) },
+    )
+}
+
 /** Film grain, drawn over the card as Overlay at this strength: it breaks the bands of a smooth gradient. */
 private const val GRAIN_ALPHA = 0.14f
 
@@ -213,10 +232,12 @@ fun ForYouCardView(
     width: Dp,
     height: Dp,
     unit: Dp,
+    /** The day (days since the epoch): the cards change their colours with it. */
+    day: Long,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val look = Looks.getValue(card.ambience)
+    val look = remember(card.ambience, day) { dailyLook(card.ambience, day) }
     val blobLayer = rememberGraphicsLayer()
     val sheenLayer = rememberGraphicsLayer()
     val rec = remember { LongArray(1) }
