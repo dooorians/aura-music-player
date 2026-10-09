@@ -305,7 +305,7 @@ fun AlbumPageContent(
  * the translation of one layer.
  */
 @Composable
-private fun AlbumGround(ground: Color, listState: LazyListState) {
+internal fun AlbumGround(ground: Color, listState: LazyListState) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -352,7 +352,7 @@ private fun LazyListState.headerScrollPx(fallback: Float): Float =
  * the resting colour fading in as the header leaves.
  */
 @Composable
-private fun StatusBarScrim(solid: Color, listState: LazyListState) {
+internal fun StatusBarScrim(solid: Color, listState: LazyListState) {
     val height = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp
     Box(
         modifier = Modifier

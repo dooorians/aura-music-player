@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
@@ -287,3 +290,34 @@ fun ForYouCardView(
 }
 
 private val Float.em get() = androidx.compose.ui.unit.TextUnit(this, androidx.compose.ui.unit.TextUnitType.Em)
+
+
+/** The Home card an automatic playlist ([key]: "disc", "top", "style") was opened from. */
+fun cardAmbienceOf(key: String): CardAmbience? = when (key) {
+    "disc" -> CardAmbience.DECOUVERTE
+    "top" -> CardAmbience.ENERGIE
+    "style" -> CardAmbience.NOUVEAUTES
+    else -> null
+}
+
+/**
+ * The card's colours as a picture, today's look of [ambience] — the same as on Home. It is the playlist page's cover,
+ * and what that page's background and colours are made from. Null for the first frame, while it is drawn.
+ */
+@Composable
+fun rememberCardArt(ambience: CardAmbience, sizePx: Int = 400): android.graphics.Bitmap? {
+    val day = remember { java.time.LocalDate.now().toEpochDay() }
+    val look = remember(ambience, day) { dailyLook(ambience, day) }
+    val out = rememberGraphicsLayer()
+    val blob = rememberGraphicsLayer()
+    val sheen = rememberGraphicsLayer()
+    val density = LocalDensity.current
+    val direction = androidx.compose.ui.platform.LocalLayoutDirection.current
+    var bitmap by remember(ambience, day) { androidx.compose.runtime.mutableStateOf<android.graphics.Bitmap?>(null) }
+    androidx.compose.runtime.LaunchedEffect(look) {
+        val rec = LongArray(1)
+        out.record(density, direction, IntSize(sizePx, sizePx)) { drawAmbience(look, blob, sheen, rec) }
+        bitmap = out.toImageBitmap().asAndroidBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+    }
+    return bitmap
+}

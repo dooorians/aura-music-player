@@ -135,6 +135,10 @@ class PlaylistRepository @Inject constructor(
         return id
     }
 
+    /** Which Home card ("disc", "top", "style") this playlist is the weekly list of, or null if it is not one. */
+    suspend fun autoKeyOf(playlistId: Long): String? =
+        listOf("disc", "top", "style").firstOrNull { settingsStore.autoPlaylist(it)?.first == playlistId }
+
     suspend fun createPlaylist(name: String): Long =
         playlistDao.insertPlaylist(PlaylistEntity(name = name, createdAtMs = System.currentTimeMillis()))
 

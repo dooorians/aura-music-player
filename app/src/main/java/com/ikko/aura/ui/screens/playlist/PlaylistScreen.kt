@@ -5,6 +5,16 @@ import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import com.ikko.aura.ui.components.albumThemeFromBitmap
+import com.ikko.aura.ui.screens.album.AlbumGround
+import com.ikko.aura.ui.screens.album.StatusBarScrim
+import com.ikko.aura.ui.screens.home.cardAmbienceOf
+import com.ikko.aura.ui.screens.home.rememberCardArt
+import com.ikko.aura.ui.theme.LocalPageTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
@@ -96,8 +106,23 @@ fun PlaylistScreen(
     }.collectAsStateWithLifecycle(
         initialValue = playerViewModel.uiState.value.let { it.currentTrack?.id to it.isPlaying },
     )
-    val accent = rememberUpdatedState(AuraColors.TextPrimary.copy(alpha = 0.9f))
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
+    // A weekly playlist opened from a Home card wears that card: its picture is the cover, and the page's background
+    // (the aurora at the top, the flat colour below) is made from it, as an album's is made from its sleeve.
+    val autoKey by playlistDetailViewModel.autoKey.collectAsStateWithLifecycle()
+    val ambience = autoKey?.let { cardAmbienceOf(it) }
+    val cardArt = ambience?.let { rememberCardArt(it) }
+    val theme = remember(cardArt, ambience) {
+        cardArt?.let { albumThemeFromBitmap(it, seed = ambience!!.ordinal * 31 + 7) }
+    }
+    val pageTheme = LocalPageTheme.current
+    DisposableEffect(theme) {
+        theme?.let { pageTheme.value = it }
+        onDispose { if (pageTheme.value === theme) pageTheme.value = null }
+    }
+    val listState = rememberLazyListState()
+    val accent = rememberUpdatedState(theme?.accent ?: AuraColors.TextPrimary.copy(alpha = 0.9f))
 
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(applyStatusBarInset = false) {
@@ -116,7 +141,10 @@ fun PlaylistScreen(
                 if (current.tracks.isEmpty()) count else "$count · $length"
             }
 
+            Box(Modifier.fillMaxSize()) {
+            if (theme != null) AlbumGround(ground = theme.solid, listState = listState)
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -136,14 +164,30 @@ fun PlaylistScreen(
                                     spotColor = Color.Black.copy(alpha = 0.55f),
                                 ),
                             ) {
-                                AlbumArt(
-                                    uri = current.tracks.firstOrNull()?.artworkUri,
-                                    contentDescription = current.name,
-                                    shape = ART_SHAPE,
-                                    modifier = Modifier.size(ART_SIZE).border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
-                                    targetSizeDp = ART_SIZE,
-                                    cacheKey = current.tracks.firstOrNull()?.albumId?.toString(),
-                                )
+                                if (ambience != null) {
+                                    // The card's picture, while it is drawn, a flat square of its colour.
+                                    Box(
+                                        Modifier.size(ART_SIZE).clip(ART_SHAPE).border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
+                                    ) {
+                                        cardArt?.let {
+                                            androidx.compose.foundation.Image(
+                                                bitmap = it.asImageBitmap(),
+                                                contentDescription = current.name,
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize(),
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    AlbumArt(
+                                        uri = current.tracks.firstOrNull()?.artworkUri,
+                                        contentDescription = current.name,
+                                        shape = ART_SHAPE,
+                                        modifier = Modifier.size(ART_SIZE).border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
+                                        targetSizeDp = ART_SIZE,
+                                        cacheKey = current.tracks.firstOrNull()?.albumId?.toString(),
+                                    )
+                                }
                             }
                             Spacer(Modifier.width(18.dp))
                             Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
@@ -248,6 +292,8 @@ fun PlaylistScreen(
                 items(current.unavailable, key = { "gone-${it.id}" }) { entry ->
                     UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
                 }
+            }
+            if (theme != null) StatusBarScrim(solid = theme.solid, listState = listState)
             }
         }
     }
