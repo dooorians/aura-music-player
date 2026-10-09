@@ -174,9 +174,8 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
         dragging = true
         fingerPosition += pages
         position.floatValue = when {
-            fingerPosition < 0f -> -rubber(-fingerPosition)
-            fingerPosition > last -> last + rubber(fingerPosition - last)
-            else -> fingerPosition
+            // No stretch past the first/last page: it only uncovered a black band beside the page.
+            else -> fingerPosition.coerceIn(0f, last)
         }
     }
 

@@ -89,12 +89,9 @@ fun HomeScreen(
     val margin = unit * 50f
     val gap = unit * 25f
 
-    // The colours drift with the row: they move as the cards are swiped and rest when the finger does. A drift of their own
-    // was measured on the device: every frame it draws is a frame the whole window renders (the mini player's glass
-    // included), 54 % of a core on an idle Home against 7 % without it.
+    // The cards' colours stay still: they used to drift as the row was swiped, which the user did not want.
     val rowState = rememberLazyListState()
-    val cardStepPx = with(LocalDensity.current) { (unit * (620f + 25f)).toPx() }
-    val phase: () -> Float = { (rowState.firstVisibleItemIndex * cardStepPx + rowState.firstVisibleItemScrollOffset) / (cardStepPx * 2.5f) }
+    val phase: () -> Float = { 0f }
 
     fun open(card: com.ikko.aura.viewmodel.ForYouCard) {
         val route = card.content.openRoute
