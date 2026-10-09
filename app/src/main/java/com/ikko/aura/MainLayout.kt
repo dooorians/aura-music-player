@@ -739,7 +739,9 @@ fun MainLayout() {
         // mini player has to re-process when it changes. The pill loses nothing it could show — what
         // it refracts is the page, and the background under it is smooth colour.
         val isAlbumRoute = currentRoute?.let {
-            it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/")
+            it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/") ||
+                // A weekly playlist (it sets a page theme, made from its Home card) is lit like an album, even on the AMOLED black.
+                (it.startsWith("playlist/") && pageTheme.value != null)
         } == true
         val albumAuroraScrim by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (isAlbumRoute) 0f else 1f,
