@@ -134,6 +134,7 @@ import com.ikko.aura.ui.components.rememberLiveLyricClock
 import com.ikko.aura.ui.components.LiquidGlassPanel
 import com.ikko.aura.ui.components.horizontalEdgeBlur
 import com.ikko.aura.ui.theme.AuraColors
+import com.ikko.aura.ui.components.rememberPlayerAccent
 import com.ikko.aura.ui.theme.AuraMotion
 import com.ikko.aura.ui.components.FillableIcon
 import com.ikko.aura.ui.theme.CupertinoIcons
@@ -973,7 +974,7 @@ private fun HeroPanel(
                             fontWeight = FontWeight.Bold,
                             fontSize = 24.sp,
                             lineHeight = 27.sp,
-                            color = AuraColors.TextPrimary,
+                            color = rememberPlayerAccent(),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
@@ -989,7 +990,7 @@ private fun HeroPanel(
                         Text(
                             text = shown?.artist ?: "—",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = AuraColors.TextSecondary,
+                            color = rememberPlayerAccent().copy(alpha = 0.75f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
@@ -1018,8 +1019,7 @@ private fun HeroPanel(
                             filledIcon = CupertinoIcons.StarFilled,
                             contentDescription = "Favori",
                             active = isFavorite,
-                            activeTint = AuraColors.AccentPink,
-                            onClick = onFavoriteToggle,
+                                            onClick = onFavoriteToggle,
                         )
                     }
                 }
@@ -1067,7 +1067,6 @@ private fun TransportRow(
             weight = 1.15f,
             icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
-            glyphColor = PlayTint,
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 onPlayPause()
@@ -1107,7 +1106,7 @@ private fun RowScope.TransportTile(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
-    glyphColor: Color = AuraColors.TextPrimary,
+    glyphColor: Color = rememberPlayerAccent(),
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1157,7 +1156,7 @@ private fun UtilityIcon(
     contentDescription: String,
     active: Boolean,
     onClick: () -> Unit,
-    activeTint: Color = AuraColors.TextPrimary,
+    activeTint: Color = rememberPlayerAccent(),
     filledIcon: ImageVector = icon,
     /** The glyph's own size: the touch area stays 48 dp. A little different per icon, to even out how heavy they look. */
     glyphSize: Dp = 21.dp,
@@ -1177,7 +1176,7 @@ private fun UtilityIcon(
             filled = filledIcon,
             active = active,
             contentDescription = contentDescription,
-            tint = if (active) activeTint else AuraColors.TextTertiary,
+            tint = if (active) activeTint else rememberPlayerAccent().copy(alpha = 0.55f),
             modifier = Modifier.size(glyphSize),
         )
     }
