@@ -230,6 +230,7 @@ fun AlbumPageContent(
                                 }
                             },
                             onFavorite = onFavorite,
+                            hasDownload = streamed != null,
                             downloadSlot = {
                                 if (streamed != null) {
                                     AlbumDownloadChip(uiState.tracks, streamed)
@@ -396,6 +397,7 @@ private fun AlbumHeader(
     onMore: () -> Unit,
     moreMenu: @Composable () -> Unit = {},
     downloadSlot: @Composable () -> Unit = {},
+    hasDownload: Boolean = false,
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
@@ -403,8 +405,12 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
+            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + 8.dp, bottom = 18.dp),
     ) {
+        // Top right: download (external sources only) and the menu, in one capsule.
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.End) {
+            HeaderPill(onMore = onMore, moreMenu = moreMenu, download = if (hasDownload) downloadSlot else null)
+        }
         // The cover and its text are one group, centred on the page, the text level with the middle of the cover. The text
         // column is as wide as its widest line (measured here: left to itself it took all the room left, and the group
         // sat off-centre).
@@ -476,19 +482,19 @@ private fun AlbumHeader(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                downloadSlot()
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(22.dp))
 
+        // Centred, as the cover above: shuffle (round), play (white, the main one), favourite (round).
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PlayAllButton(onClick = onPlayAll, tint = null)
             ShuffleButton(onClick = onShuffle)
-            Spacer(Modifier.weight(1f))
+            PlayAllButton(onClick = onPlayAll)
             CircleAction(onClick = onFavorite) {
                 FillableIcon(
                     outline = CupertinoIcons.Star,
@@ -499,45 +505,55 @@ private fun AlbumHeader(
                     modifier = Modifier.size(21.dp),
                 )
             }
-            Box {
-                CircleAction(onClick = onMore) {
-                    Icon(
-                        CupertinoIcons.MoreVertical,
-                        contentDescription = "Plus d'options",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                moreMenu()
+        }
+    }
+}
+
+/**
+ * The page's actions that are not about playing, in one capsule at the top right: the album's download when it comes from
+ * an external source, and the menu. [download] is null for a local album; the capsule is then the menu alone.
+ */
+@Composable
+internal fun HeaderPill(onMore: () -> Unit, moreMenu: @Composable () -> Unit = {}, download: (@Composable () -> Unit)? = null) {
+    AuraButton(
+        onClick = {},
+        shape = CircleShape,
+        minHeight = ACTION_HEIGHT,
+        contentPadding = PaddingValues(horizontal = 2.dp),
+    ) {
+        if (download != null) {
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { download() }
+        }
+        Box {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onMore),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(20.dp))
             }
+            moreMenu()
         }
     }
 }
 
 @Composable
-internal fun PlayAllButton(onClick: () -> Unit, tint: (() -> Color)?) {
+internal fun PlayAllButton(onClick: () -> Unit) {
     AuraButton(
         onClick = onClick,
-        minHeight = ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        tint = tint,
+        tone = ButtonTone.Primary,
+        minHeight = ACTION_HEIGHT + 4.dp,
+        contentPadding = PaddingValues(horizontal = 26.dp),
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(text = "Lire tout", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Icon(CupertinoIcons.Play, contentDescription = null, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text = "Lire tout", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 @Composable
 internal fun ShuffleButton(onClick: () -> Unit) {
-    AuraButton(
-        onClick = onClick,
-        minHeight = ACTION_HEIGHT,
-        contentPadding = PaddingValues(horizontal = 16.dp),
-    ) {
-        Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(text = "Mélanger", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    CircleAction(onClick = onClick) {
+        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -672,45 +688,35 @@ private fun DownloadBadge(entry: DownloadEntry?, accent: State<Color>, onDownloa
     }
 }
 
-/** The album's download, as a small line under the album's details: its arrow, its progress, its check. */
+/** The album's download as one icon (in the header's capsule): its arrow, its progress ring, its check. */
 @Composable
-private fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumControls) {
+internal fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumControls) {
     val states = tracks.map { controls.downloads[it.id] }
     val done = states.count { it?.state == DownloadState.DONE }
     val busy = states.any { it?.state == DownloadState.QUEUED || it?.state == DownloadState.DOWNLOADING }
     val whole = tracks.isNotEmpty() && done == tracks.size
     var confirmRemove by remember { mutableStateOf(false) }
-    val label = when {
-        busy -> "Téléchargement $done / ${tracks.size}"
-        whole -> "Téléchargé"
-        done > 0 -> "Télécharger le reste ($done / ${tracks.size})"
-        else -> "Télécharger l'album"
-    }
-    Spacer(Modifier.height(10.dp))
-    Row(
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(100))
-            .background(Color.White.copy(alpha = 0.12f))
-            .clickable { if (whole) confirmRemove = true else if (!busy) controls.onDownloadAlbum() }
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable { if (whole) confirmRemove = true else if (!busy) controls.onDownloadAlbum() },
+        contentAlignment = Alignment.Center,
     ) {
         when {
             busy -> {
                 val progress = states.sumOf { (it?.progress ?: 0f).toDouble() }.toFloat() / tracks.size.coerceAtLeast(1)
                 CircularProgressIndicator(
                     progress = { progress.coerceIn(0.03f, 1f) },
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                     color = Color.White,
                     trackColor = Color.White.copy(alpha = 0.2f),
                 )
             }
-            whole -> Icon(CupertinoIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-            else -> Icon(CupertinoIcons.ArrowDownCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+            whole -> Icon(CupertinoIcons.Check, contentDescription = "Téléchargé", tint = Color.White, modifier = Modifier.size(20.dp))
+            else -> Icon(CupertinoIcons.ArrowDownCircle, contentDescription = "Télécharger l'album", tint = Color.White, modifier = Modifier.size(22.dp))
         }
-        Spacer(Modifier.width(7.dp))
-        Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
     }
     if (confirmRemove) {
         AlertDialog(
