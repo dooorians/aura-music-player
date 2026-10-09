@@ -18,6 +18,7 @@ import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.data.playlist.PlaylistRepository
 import com.ikko.aura.data.playlist.PlaylistSummary
+import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.source.ytm.YtmLibrary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -59,7 +60,7 @@ class HomeWidgetsViewModel @Inject constructor(
     recentlyPlayedTracker: RecentlyPlayedTracker,
     favoritesStore: FavoritesStore,
     ytmLibrary: YtmLibrary,
-    playlistRepository: PlaylistRepository,
+    private val playlistRepository: PlaylistRepository,
     settingsStore: SettingsStore,
 ) : ViewModel() {
 
@@ -106,14 +107,19 @@ class HomeWidgetsViewModel @Inject constructor(
         ForYouUiState(
             loaded = true,
             cards = CARDS.mapNotNull { spec ->
-                val content = HomeWidgetResolver.resolve(HomeWidget(spec.id, spec.kind), data)
+                var content = HomeWidgetResolver.resolve(HomeWidget(spec.id, spec.kind), data)
+                if (spec.weekly && !content.isEmpty) {
+                    // A real playlist, refilled once a week: the card opens it.
+                    val id = playlistRepository.autoPlaylist(spec.id, spec.heading, System.currentTimeMillis()) { content.tracks }
+                    content = content.copy(openRoute = AuraDestination.PlaylistPattern.route(id.toString()))
+                }
                 if (content.isEmpty) null else ForYouCard(spec.id, spec.ambience, spec.heading, spec.kicker, artistsOf(content.tracks), content)
             },
             recent = recentAlbumIds.mapNotNull { albumsById[it] }.take(MAX_RECENT),
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
 
-    private class Spec(val id: String, val kind: WidgetKind, val ambience: CardAmbience, val heading: String, val kicker: String)
+    private class Spec(val id: String, val kind: WidgetKind, val ambience: CardAmbience, val heading: String, val kicker: String, val weekly: Boolean = false)
 
     private fun artistsOf(tracks: List<Track>): String {
         val names = tracks.map { it.artist }.filter { it.isNotBlank() }.distinct()
@@ -126,10 +132,10 @@ class HomeWidgetsViewModel @Inject constructor(
         const val MAX_RECENT = 12
         val CARDS = listOf(
             Spec("fav", WidgetKind.FAVORITE_ALBUMS, CardAmbience.FAVORIS, "Favoris", "Fait pour toi"),
-            Spec("disc", WidgetKind.REDISCOVER, CardAmbience.DECOUVERTE, "Découverte", "À redécouvrir"),
-            Spec("top", WidgetKind.TOP_PLAYED, CardAmbience.ENERGIE, "Les plus écoutés", "Ce que tu écoutes le plus"),
+            Spec("disc", WidgetKind.REDISCOVER, CardAmbience.DECOUVERTE, "Découverte", "À redécouvrir", weekly = true),
+            Spec("top", WidgetKind.TOP_PLAYED, CardAmbience.ENERGIE, "Les plus écoutés", "Ce que tu écoutes le plus", weekly = true),
             Spec("daily", WidgetKind.DAILY_MIX, CardAmbience.NUIT, "Mix du jour", "Ambiance du moment"),
-            Spec("style", WidgetKind.FOR_YOU, CardAmbience.NOUVEAUTES, "Dans ton style", "D'après tes écoutes"),
+            Spec("style", WidgetKind.FOR_YOU, CardAmbience.NOUVEAUTES, "Dans ton style", "D'après tes écoutes", weekly = true),
         )
     }
 }

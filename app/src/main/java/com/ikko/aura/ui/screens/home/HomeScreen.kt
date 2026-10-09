@@ -64,8 +64,8 @@ import kotlinx.coroutines.delay
 /** The design is drawn on a 1080-px-wide screen, 432 dp on this device. */
 private const val DESIGN_WIDTH_PX = 1080f
 
-/** The cards are 620 × 720 px of the 1080-px design: 60 px shorter than drawn, so that on a first look they end above the mini player. */
-private const val CARD_HEIGHT_PX = 720f
+/** The cards are 620 × 620 px of the 1080-px design: short enough to end well above the mini player, leaving a band to swipe to the library. */
+private const val CARD_HEIGHT_PX = 620f
 
 /** 1 is the design's own drift, 0 holds the colours still. */
 private const val MOTION = 1f

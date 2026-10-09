@@ -49,6 +49,7 @@ class PlaylistRepository @Inject constructor(
     private val musicRepository: MusicRepository,
     private val catalogDao: CatalogDao,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
+    private val settingsStore: com.ikko.aura.data.SettingsStore,
 ) {
     val playlists: Flow<List<PlaylistSummary>> = playlistDao.observePlaylists()
         .onStart { ensureFavorites() }
@@ -111,6 +112,29 @@ class PlaylistRepository @Inject constructor(
         PlaylistDetail(playlist.id, playlist.name, tracks, unavailable)
     }
 
+    /**
+     * The playlist Aura keeps for [key] (a Home card: "Découverte", "Les plus écoutés"…), as the id of a real playlist
+     * that opens, plays and edits like any other. It is filled again from [tracks] once a week; in between, what the
+     * listener's plays do to the list is not written into it, so the playlist is the same all week. [tracks] is only
+     * read when a fill is due. Made again, at once, if it was deleted.
+     */
+    suspend fun autoPlaylist(key: String, name: String, nowMs: Long, tracks: () -> List<Track>): Long {
+        val known = settingsStore.autoPlaylist(key)
+        val alive = known != null && playlistDao.playlistExists(known.first) > 0
+        if (known != null && alive && nowMs - known.second < AUTO_PLAYLIST_PERIOD_MS) return known.first
+        val id = if (alive) known!!.first else createPlaylist(name)
+        val list = tracks()
+        // An empty pick (nothing played yet) leaves the old list rather than emptying a playlist the user may use.
+        if (list.isNotEmpty()) {
+            playlistDao.clearPlaylistTracks(id)
+            list.forEachIndexed { i, t -> playlistDao.insertPlaylistTrack(PlaylistTrackEntity(id, t.id, i, nowMs)) }
+            settingsStore.setAutoPlaylist(key, id, nowMs)
+        } else if (!alive) {
+            settingsStore.setAutoPlaylist(key, id, 0L)
+        }
+        return id
+    }
+
     suspend fun createPlaylist(name: String): Long =
         playlistDao.insertPlaylist(PlaylistEntity(name = name, createdAtMs = System.currentTimeMillis()))
 
@@ -131,3 +155,5 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun removeTrack(playlistId: Long, trackId: String) = playlistDao.removeTrackFromPlaylist(playlistId, trackId)
 }
+
+private const val AUTO_PLAYLIST_PERIOD_MS = 7L * 24 * 60 * 60 * 1000

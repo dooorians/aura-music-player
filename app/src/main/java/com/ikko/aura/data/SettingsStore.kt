@@ -12,6 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /** Shared with [FavoritesStore]: one store for everything small the app has to remember. */
@@ -62,6 +63,16 @@ class SettingsStore @Inject constructor(
     val profileFirstName = setting { prefs -> prefs[profileFirstNameKey].orEmpty() }
     val amoledBackgroundEnabled = setting { prefs -> prefs[amoledBackgroundKey] ?: false }
     val shuffleEnabled = setting { prefs -> prefs[shuffleKey] ?: false }
+
+    /** The playlist Aura made for [key] ("Découverte"…) and when it last filled it: `id:atMs`, or null if never. */
+    suspend fun autoPlaylist(key: String): Pair<Long, Long>? =
+        context.settingsDataStore.data.first()[stringPreferencesKey("auto_playlist_$key")]
+            ?.split(':')?.takeIf { it.size == 2 }
+            ?.let { (id, at) -> (id.toLongOrNull() ?: return null) to (at.toLongOrNull() ?: return null) }
+
+    suspend fun setAutoPlaylist(key: String, playlistId: Long, atMs: Long) {
+        context.settingsDataStore.edit { it[stringPreferencesKey("auto_playlist_$key")] = "$playlistId:$atMs" }
+    }
 
     suspend fun setProfileImageUri(uri: String?) {
         context.settingsDataStore.edit { prefs ->
