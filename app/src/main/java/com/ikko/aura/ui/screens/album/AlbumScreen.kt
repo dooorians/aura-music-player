@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -403,7 +405,27 @@ private fun AlbumHeader(
             .fillMaxWidth()
             .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        // The cover and its text are one group, centred on the page, the text level with the middle of the cover. The text
+        // column is as wide as its widest line (measured here: left to itself it took all the room left, and the group
+        // sat off-centre).
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val titleStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 28.sp)
+        val artistStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+        val metaStyle = MaterialTheme.typography.bodySmall
+        val density = LocalDensity.current
+        val textMax = LocalConfiguration.current.screenWidthDp.dp - PAGE_PADDING * 2 - ART_SIZE - 18.dp
+        val textWidth = remember(uiState.title, uiState.artist, meta, textMax) {
+            val maxPx = with(density) { textMax.roundToPx() }
+            val widest = listOf(uiState.title.trim() to titleStyle, uiState.artist.trim() to artistStyle, meta.trim() to metaStyle)
+                .filter { it.first.isNotEmpty() }
+                .maxOf { (t, st) -> measurer.measure(t, st, maxLines = if (st === titleStyle) 2 else 1, constraints = androidx.compose.ui.unit.Constraints(maxWidth = maxPx)).size.width }
+            with(density) { widest.toDp() }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(
                 modifier = Modifier.shadow(
                     elevation = 16.dp,
@@ -424,9 +446,9 @@ private fun AlbumHeader(
                 )
             }
             Spacer(Modifier.width(18.dp))
-            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
+            Column(modifier = Modifier.widthIn(max = textMax).width(textWidth).padding(top = 2.dp)) {
                 Text(
-                    text = uiState.title,
+                    text = uiState.title.trim(),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     fontSize = 24.sp,
@@ -437,7 +459,7 @@ private fun AlbumHeader(
                 )
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    text = uiState.artist,
+                    text = uiState.artist.trim(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = accentSoft.value,
