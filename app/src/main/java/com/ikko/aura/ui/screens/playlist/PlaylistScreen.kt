@@ -146,14 +146,14 @@ fun PlaylistScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
+                contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 28.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 item(key = "header") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 18.dp),
+                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 28.dp),
                     ) {
                         Row(verticalAlignment = Alignment.Top) {
                             Box(
@@ -176,7 +176,7 @@ fun PlaylistScreen(
                                     )
                                 }
                             }
-                            if (ambience == null) Spacer(Modifier.width(18.dp))
+                            if (ambience == null) Spacer(Modifier.width(20.dp))
                             Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
                                 Text(
                                     text = current.name,
@@ -213,8 +213,8 @@ fun PlaylistScreen(
                                 onCancel = { renaming = false },
                             )
                         }
-                        Spacer(Modifier.height(18.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.height(22.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (current.tracks.isNotEmpty()) {
                                 PlayAllButton(onClick = { playerViewModel.playQueue(current.tracks, 0) }, tint = null)
                                 ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) })
@@ -255,7 +255,7 @@ fun PlaylistScreen(
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
                             style = MaterialTheme.typography.bodyLarge,
                             color = AuraColors.TextSecondary,
-                            modifier = Modifier.padding(horizontal = PAGE_PADDING + 12.dp, vertical = 24.dp),
+                            modifier = Modifier.padding(horizontal = PAGE_PADDING + 14.dp, vertical = 24.dp),
                         )
                     }
                 }
@@ -319,10 +319,10 @@ private fun RenameField(initialName: String, onConfirm: (String) -> Unit, onCanc
 @Composable
 private fun UnavailableTrackRow(entry: UnavailableEntry, onRemove: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING + 12.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING + 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.width(30.dp))
+        Spacer(Modifier.width(32.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
