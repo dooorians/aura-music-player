@@ -359,16 +359,21 @@ fun LibraryScreen(
         }
     }
     // Over the whole page and outside the header's clip: the glass has to be able to leave the header's bounds.
-    GlassMenu(sortMenu) {
-        GlassMenuItem("Nom", uiState.sort == LibrarySort.NAME, {
-            libraryViewModel.setSort(LibrarySort.NAME); sortMenu.close()
-        })
-        GlassMenuItem("Artiste", uiState.sort == LibrarySort.ARTIST, {
-            libraryViewModel.setSort(LibrarySort.ARTIST); sortMenu.close()
-        })
-        GlassMenuItem("Date d'ajout", uiState.sort == LibrarySort.DATE_ADDED, {
-            libraryViewModel.setSort(LibrarySort.DATE_ADDED); sortMenu.close()
-        })
+    // The design's sort menu: a check button above it, three rows, the chosen one on a lit bed in the accent.
+    val sortAccent = com.ikko.aura.ui.components.rememberPlayerAccent()
+    com.ikko.aura.ui.components.DesignMenu(
+        state = sortMenu,
+        width = 240.dp,
+        shade = 0.16f,
+        closeIcon = CupertinoIcons.Check,
+        closeTint = sortAccent,
+    ) {
+        com.ikko.aura.ui.components.DesignMenuRow("Nom", { libraryViewModel.setSort(LibrarySort.NAME); sortMenu.close() },
+            selected = uiState.sort == LibrarySort.NAME, accent = sortAccent)
+        com.ikko.aura.ui.components.DesignMenuRow("Artiste", { libraryViewModel.setSort(LibrarySort.ARTIST); sortMenu.close() },
+            selected = uiState.sort == LibrarySort.ARTIST, accent = sortAccent)
+        com.ikko.aura.ui.components.DesignMenuRow("Date d'ajout", { libraryViewModel.setSort(LibrarySort.DATE_ADDED); sortMenu.close() },
+            selected = uiState.sort == LibrarySort.DATE_ADDED, accent = sortAccent)
     }
     }
     }

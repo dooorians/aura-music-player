@@ -100,6 +100,7 @@ import com.ikko.aura.ui.components.AuraIconButton
 import com.ikko.aura.ui.components.ButtonTone
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.MediaContextHost
+import com.ikko.aura.ui.components.glassMenuAnchor
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
@@ -178,7 +179,7 @@ fun AlbumPageContent(
     streamed: StreamedAlbumControls? = null,
 ) {
     var showAddToPlaylist by remember { mutableStateOf(false) }
-    var moreOpen by remember { mutableStateOf(false) }
+    val moreMenuState = com.ikko.aura.ui.components.rememberGlassMenuState()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -251,11 +252,11 @@ fun AlbumPageContent(
                                     AlbumDownloadChip(uiState.tracks, streamed)
                                 }
                             },
-                            onMore = { moreOpen = true },
+                            onMore = { moreMenuState.open() },
+                            moreAnchor = Modifier.glassMenuAnchor(moreMenuState),
                             moreMenu = {
                                 AlbumMoreMenu(
-                                    expanded = moreOpen,
-                                    onDismiss = { moreOpen = false },
+                                    state = moreMenuState,
                                     isFavorite = uiState.isFavorite,
                                     onFavorite = onFavorite,
                                     onAddToPlaylist = {
@@ -310,8 +311,7 @@ fun AlbumPageContent(
  */
 @Composable
 private fun AlbumMoreMenu(
-    expanded: Boolean,
-    onDismiss: () -> Unit,
+    state: com.ikko.aura.ui.components.GlassMenuState,
     isFavorite: Boolean,
     onFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -321,34 +321,31 @@ private fun AlbumMoreMenu(
     onDeleteFromLibrary: () -> Unit,
 ) {
     var confirmRemoveDownloads by remember { mutableStateOf(false) }
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-        shape = AuraMenu.Shape,
-        border = AuraMenu.rimStroke,
-        shadowElevation = 0.dp,
-        tonalElevation = 0.dp,
-    ) {
-        MoreItem(if (isFavorite) CupertinoIcons.StarFilled else CupertinoIcons.Star, if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris") { onDismiss(); onFavorite() }
-        HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
-        MoreItem(CupertinoIcons.PlaylistAdd, "Ajouter à la playlist") { onDismiss(); onAddToPlaylist() }
-        MoreItem(CupertinoIcons.Queue, "Lire ensuite") { onDismiss(); onPlayNext() }
+    // The design's album menu (760 px wide, the page's colour at 30 %).
+    com.ikko.aura.ui.components.DesignMenu(state = state, width = 304.dp, shade = 0.30f) {
+        val go: (() -> Unit) -> () -> Unit = { action -> { state.close(); action() } }
+        com.ikko.aura.ui.components.DesignMenuRow(
+            if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris",
+            go(onFavorite),
+            icon = if (isFavorite) CupertinoIcons.StarFilled else CupertinoIcons.Star,
+        )
+        com.ikko.aura.ui.components.DesignMenuRow("Ajouter à la playlist", go(onAddToPlaylist), icon = CupertinoIcons.PlaylistAdd)
+        com.ikko.aura.ui.components.DesignMenuRow("Lire ensuite", go(onPlayNext), icon = CupertinoIcons.Queue)
+        com.ikko.aura.ui.components.DesignMenuDivider()
         if (streamed != null) {
-            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
             if (downloadedAll) {
-                MoreItem(CupertinoIcons.Close, "Supprimer le téléchargement") { onDismiss(); confirmRemoveDownloads = true }
+                com.ikko.aura.ui.components.DesignMenuRow("Supprimer le téléchargement", go { confirmRemoveDownloads = true }, icon = CupertinoIcons.Close)
             } else {
-                MoreItem(CupertinoIcons.ArrowDownCircle, "Télécharger l'album") { onDismiss(); streamed.onDownloadAlbum() }
+                com.ikko.aura.ui.components.DesignMenuRow("Télécharger l'album", go { streamed.onDownloadAlbum() }, icon = CupertinoIcons.ArrowDownCircle)
             }
-            MoreItem(
-                if (streamed.kept) CupertinoIcons.Delete else CupertinoIcons.Add,
+            com.ikko.aura.ui.components.DesignMenuRow(
                 if (streamed.kept) "Supprimer de la bibliothèque" else "Ajouter à la bibliothèque",
-                tint = if (streamed.kept) DANGER else null,
-            ) { onDismiss(); streamed.onToggleKeep() }
+                go { streamed.onToggleKeep() },
+                icon = if (streamed.kept) CupertinoIcons.Delete else CupertinoIcons.Add,
+                danger = streamed.kept,
+            )
         } else {
-            HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp))
-            MoreItem(CupertinoIcons.Delete, "Supprimer de la bibliothèque", tint = DANGER) { onDismiss(); onDeleteFromLibrary() }
+            com.ikko.aura.ui.components.DesignMenuRow("Supprimer de la bibliothèque", go(onDeleteFromLibrary), icon = CupertinoIcons.Delete, danger = true)
         }
     }
     if (confirmRemoveDownloads && streamed != null) {
@@ -362,21 +359,6 @@ private fun AlbumMoreMenu(
     }
 }
 
-/** The delete rows' colour in the design's menus. */
-private val DANGER = Color(0xFFFF8AA8)
-
-@Composable
-private fun MoreItem(icon: ImageVector, label: String, tint: Color? = null, onClick: () -> Unit) {
-    // As drawn: 42 dp rows with 18 dp corners, an 18 dp icon, the label in bold 15 sp; the delete row in a soft red.
-    val ink = tint ?: Color.White
-    DropdownMenuItem(
-        text = { Text(label, color = ink, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
-        leadingIcon = { Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) },
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 13.dp),
-        modifier = Modifier.padding(horizontal = 5.dp).height(42.dp).clip(RoundedCornerShape(18.dp)),
-    )
-}
 
 /**
  * What turns the background behind this page into an album page: the aurora shows through at the top,
@@ -474,6 +456,7 @@ private fun AlbumHeader(
     onFavorite: () -> Unit,
     onMore: () -> Unit,
     moreMenu: @Composable () -> Unit = {},
+    moreAnchor: Modifier = Modifier,
     downloadSlot: @Composable () -> Unit = {},
     hasDownload: Boolean = false,
 ) {
@@ -554,7 +537,7 @@ private fun AlbumHeader(
                     modifier = Modifier.size(18.dp),
                 )
             }
-            Box {
+            Box(moreAnchor) {
                 CircleAction(onClick = onMore) {
                     Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(18.dp))
                 }

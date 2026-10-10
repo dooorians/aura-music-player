@@ -2,6 +2,11 @@ package com.ikko.aura.ui.screens.playlist
 
 import com.ikko.aura.ui.components.listTopBlur
 import com.ikko.aura.ui.components.AuraMenu
+import com.ikko.aura.ui.components.DesignMenu
+import com.ikko.aura.ui.components.DesignMenuDivider
+import com.ikko.aura.ui.components.DesignMenuRow
+import com.ikko.aura.ui.components.glassMenuAnchor
+import com.ikko.aura.ui.components.rememberGlassMenuState
 import com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -101,7 +106,7 @@ fun PlaylistScreen(
     playlistDetailViewModel: PlaylistDetailViewModel = hiltViewModel(),
 ) {
     val detail by playlistDetailViewModel.detail.collectAsStateWithLifecycle()
-    var menuExpanded by remember { mutableStateOf(false) }
+    val menuState = rememberGlassMenuState()
     var renaming by remember { mutableStateOf(false) }
     val nowPlaying by remember(playerViewModel) {
         playerViewModel.uiState.map { it.currentTrack?.id to it.isPlaying }.distinctUntilChanged()
@@ -221,42 +226,23 @@ fun PlaylistScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             // Favoris is kept: no renaming or deleting it, so no menu.
-                            if (!isFavorites) Box {
-                                CircleAction(onClick = { menuExpanded = true }) {
+                            if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
+                                CircleAction(onClick = { menuState.open() }) {
                                     Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
                                 }
-                                DropdownMenu(
-                                    expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false },
-                                    containerColor = AuraMenu.tint().copy(alpha = 0.97f),
-                                    shape = AuraMenu.Shape,
-                                    border = AuraMenu.rimStroke,
-                                    shadowElevation = 0.dp,
-                                    tonalElevation = 0.dp,
-                                ) {
-                                    // As drawn: 42 dp rows, 18 dp corners, an 18 dp icon, bold 15 sp; the delete one in a soft red.
-                                    val rowModifier = Modifier.padding(horizontal = 5.dp).height(42.dp).clip(RoundedCornerShape(18.dp))
-                                    DropdownMenuItem(
-                                        text = { Text("Renommer", fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, color = Color.White) },
-                                        leadingIcon = { Icon(CupertinoIcons.Pencil, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp)) },
-                                        onClick = { menuExpanded = false; renaming = true },
-                                        contentPadding = PaddingValues(horizontal = 13.dp),
-                                        modifier = rowModifier,
-                                    )
-                                    androidx.compose.material3.HorizontalDivider(
-                                        color = Color.White.copy(alpha = 0.12f),
-                                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 3.dp),
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Supprimer la playlist", fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF8AA8)) },
-                                        leadingIcon = { Icon(CupertinoIcons.Delete, contentDescription = null, tint = Color(0xFFFF8AA8), modifier = Modifier.size(18.dp)) },
-                                        onClick = {
-                                            menuExpanded = false
+                                // The design's playlist menu (600 px wide, the page's colour at 24 %).
+                                DesignMenu(state = menuState, width = 240.dp, shade = 0.24f) {
+                                    DesignMenuRow("Renommer", { menuState.close(); renaming = true }, icon = CupertinoIcons.Pencil)
+                                    DesignMenuDivider()
+                                    DesignMenuRow(
+                                        "Supprimer la playlist",
+                                        {
+                                            menuState.close()
                                             playlistDetailViewModel.delete()
                                             navController.popBackStack()
                                         },
-                                        contentPadding = PaddingValues(horizontal = 13.dp),
-                                        modifier = rowModifier,
+                                        icon = CupertinoIcons.Delete,
+                                        danger = true,
                                     )
                                 }
                             }
