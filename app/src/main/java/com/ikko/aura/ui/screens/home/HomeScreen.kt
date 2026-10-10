@@ -246,8 +246,8 @@ fun HomeScreen(
                                 style = face.copy(fontSize = designSp(40f), lineHeight = designSp(48f), fontWeight = FontWeight.ExtraBold, color = ink.on),
                             )
                         }
-                        FrostedCircleButton(onClick = { playerViewModel.playShuffled(selected.content.tracks) }, size = u * 112f) {
-                            Icon(CupertinoIcons.Shuffle, contentDescription = "Lecture aléatoire", tint = accent, modifier = Modifier.size(u * 44f))
+                        FrostedCircleButton(onClick = { playerViewModel.playShuffled(selected.content.tracks) }, size = u * 112f, scrim = 0.34f) {
+                            Icon(CupertinoIcons.Shuffle, contentDescription = "Lecture aléatoire", tint = Color.White, modifier = Modifier.size(u * 44f))
                         }
                     }
                 }

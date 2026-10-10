@@ -77,13 +77,16 @@ fun FrostedCircleButton(
     onClick: () -> Unit,
     size: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
+    /** A dark veil over the glass, for a button that must stand out of a bright, same-hued background. */
+    scrim: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     androidx.compose.foundation.layout.Box(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .frosted(CircleShape)
+            .frosted(CircleShape, rim = if (scrim > 0f) 0.5f else 0.28f)
+            .then(if (scrim > 0f) Modifier.background(Color.Black.copy(alpha = scrim)) else Modifier)
             .clickable(onClick = onClick),
         contentAlignment = androidx.compose.ui.Alignment.Center,
     ) { content() }
