@@ -1,5 +1,7 @@
 package com.ikko.aura.ui.screens.home
 
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -117,9 +119,14 @@ fun HomeScreen(
     // A copy of its own: a playlist opened from this card shows the same colours, and each page clears only what it set
     // (by identity), or this page leaving would wipe the playlist's.
     val palette = remember(selected?.id) { paletteOf(selected).let { com.ikko.aura.ui.components.ImmersivePalette(it.base, it.blobs) } }
+    // Shown = Home is the page on screen: the tabs route, and its tab in front. Coming back from a playlist makes it true
+    // again, so the mood's colours replace what that page left (the playing track's), instead of waiting for a tab change.
+    val backEntry by navController.currentBackStackEntryAsState()
+    val onTabs = rememberUpdatedState(backEntry?.destination?.route == AuraDestination.Tabs.route)
     LaunchedEffect(palette) {
-        snapshotFlow { (motion?.p ?: 0f) < 0.5f }.collect { shown ->
-            if (shown) slot.value = palette else if (slot.value === palette) slot.value = null
+        // Also watches the slot: a page that is leaving (the playlist) may still write to it a moment after Home is back.
+        snapshotFlow { (onTabs.value && (motion?.p ?: 0f) < 0.5f) to slot.value }.collect { (shown, current) ->
+            if (shown) { if (current !== palette) slot.value = palette } else if (current === palette) slot.value = null
         }
     }
     DisposableEffect(palette) { onDispose { if (slot.value === palette) slot.value = null } }
