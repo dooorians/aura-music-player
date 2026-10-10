@@ -87,6 +87,7 @@ class PlayerViewModel @Inject constructor(
     private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
     private val listeningRecorder: com.ikko.aura.reco.ListeningRecorder,
     private val recommendations: com.ikko.aura.reco.RecommendationEngine,
+    private val albumResolver: com.ikko.aura.source.StreamedAlbumResolver,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -116,6 +117,9 @@ class PlayerViewModel @Inject constructor(
     private var originalQueueKeys: List<Long> = emptyList()
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
+
+    /** The album page of a streamed song, looked up when the song does not carry its album (see [com.ikko.aura.source.StreamedAlbumResolver]). */
+    suspend fun streamedAlbumRouteOf(track: Track): String? = albumResolver.routeOf(track)
 
     /** Whether the song playing is one the listener liked (the player's heart, which feeds the recommendations). */
     val isLiked: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(

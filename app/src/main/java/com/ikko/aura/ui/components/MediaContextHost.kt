@@ -119,11 +119,16 @@ fun MediaContextHost(
             download = (shown as? LibraryContextTarget.TrackTarget)?.track?.id?.let { downloads[it] },
             onDownload = { (shown as? LibraryContextTarget.TrackTarget)?.track?.let { playerViewModel.downloadStreamed(listOf(it)) } },
             onRemoveDownload = { (shown as? LibraryContextTarget.TrackTarget)?.track?.let { playerViewModel.removeDownloads(listOf(it)) } },
-            streamedHasAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.remoteAlbumId != null,
+            // Any streamed song: one that does not carry its album has it looked up by name when asked.
+            streamedHasAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.let(YtmLibrary::isStreamed) == true,
             onOpenAlbum = {
-                val streamedAlbum = (shown as? LibraryContextTarget.TrackTarget)?.track?.streamedAlbumRoute()
-                if (streamedAlbum != null) {
-                    navController.navigate(streamedAlbum)
+                val streamedTrack = (shown as? LibraryContextTarget.TrackTarget)?.track?.takeIf(YtmLibrary::isStreamed)
+                if (streamedTrack != null) {
+                    scope.launch {
+                        val route = playerViewModel.streamedAlbumRouteOf(streamedTrack)
+                        if (route != null) navController.navigate(route)
+                        else android.widget.Toast.makeText(context, "Album introuvable", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                     return@MediaContextSheet
                 }
                 val albumId = (shown as? LibraryContextTarget.TrackTarget)?.track?.albumId

@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -232,6 +233,8 @@ fun NowPlayingScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
     val isLiked by viewModel.isLiked.collectAsStateWithLifecycle()
+    val albumScope = androidx.compose.runtime.rememberCoroutineScope()
+    val albumContext = androidx.compose.ui.platform.LocalContext.current
     val positionMs by viewModel.positionMs.collectAsStateWithLifecycle()
     val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
 
@@ -575,8 +578,12 @@ fun NowPlayingScreen(
                         val playing = uiState.currentTrack
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
-                                // A streamed song's album is the source's, and only known if it came through one.
-                                playing.streamedAlbumRoute()?.let { navController.navigate(it) }
+                                // A streamed song's album is the source's: the one it came through, or else the one found by its name.
+                                albumScope.launch {
+                                    val route = viewModel.streamedAlbumRouteOf(playing)
+                                    if (route != null) navController.navigate(route)
+                                    else android.widget.Toast.makeText(albumContext, "Album introuvable", android.widget.Toast.LENGTH_SHORT).show()
+                                }
                             } else {
                                 navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
                             }
