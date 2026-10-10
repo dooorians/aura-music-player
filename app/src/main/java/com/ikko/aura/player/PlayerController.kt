@@ -283,7 +283,7 @@ class PlayerController @Inject constructor(
         // the Media3 call afterwards has to be on the main thread.
         val bytes = withContext(Dispatchers.Default) {
             ByteArrayOutputStream().use { stream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
                 stream.toByteArray()
             }
         }

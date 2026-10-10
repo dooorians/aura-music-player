@@ -131,6 +131,20 @@ class RecommendationEngine @Inject constructor(
         dao.removeItems(listOf(track.id))
     }
 
+    /** The ids of the songs the listener liked: the heart in the player. */
+    val likedTrackIds: Flow<Set<String>> = dao.observeFeedback().map { rows ->
+        rows.filter { it.kind == FeedbackKind.LIKE.name }.mapTo(HashSet()) { it.subject }
+    }
+
+    /** A like: a strong, lasting sign of taste — its artist and the song itself weigh in the profile from the next renewal. */
+    suspend fun like(track: Track, context: String?) {
+        dao.removeFeedback(FeedbackKind.DISLIKE.name, track.id)
+        dao.removeFeedback(FeedbackKind.HIDE.name, track.id)
+        dao.putFeedback(FeedbackEntity(FeedbackKind.LIKE.name, track.id, track.artist, track.title, System.currentTimeMillis(), context))
+    }
+
+    suspend fun unlike(track: Track) = dao.removeFeedback(FeedbackKind.LIKE.name, track.id)
+
     /** "Je n'aime pas": this song is never proposed again, and its artist is nudged down in [context], not excluded. */
     suspend fun dislike(track: Track, context: String?) = answer(FeedbackKind.DISLIKE, track, context)
 

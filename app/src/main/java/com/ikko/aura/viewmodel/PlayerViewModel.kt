@@ -86,6 +86,7 @@ class PlayerViewModel @Inject constructor(
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
     private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
     private val listeningRecorder: com.ikko.aura.reco.ListeningRecorder,
+    private val recommendations: com.ikko.aura.reco.RecommendationEngine,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -115,6 +116,21 @@ class PlayerViewModel @Inject constructor(
     private var originalQueueKeys: List<Long> = emptyList()
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
+
+    /** Whether the song playing is one the listener liked (the player's heart, which feeds the recommendations). */
+    val isLiked: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(
+        _uiState.map { it.currentTrack?.id }.distinctUntilChanged(),
+        recommendations.likedTrackIds,
+    ) { id, liked -> id != null && id in liked }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Likes the song playing, or takes the like back. The playlist it was started from counts as its context. */
+    fun toggleLike() {
+        val track = _uiState.value.currentTrack ?: return
+        viewModelScope.launch {
+            if (isLiked.value) recommendations.unlike(track) else recommendations.like(track, listeningContext)
+        }
+    }
 
     /** Isolated from [uiState] so only the composables that display the seek bar and lyrics subscribe. */
     private val _positionMs = MutableStateFlow(0L)
@@ -735,8 +751,26 @@ class PlayerViewModel @Inject constructor(
                     albumTheme = palette?.theme ?: AlbumTheme.Neutral,
                 )
             }
-            bitmap?.let { playerController.updateItemArtwork(track.id, it) }
+            // The notification's and lock screen's cover is not the palette's 192 px picture (which made it soft whatever the
+            // source): it is read at its own size, and cut to a square — a video's 16:9 frame holds its art in the middle.
+            val cover = AlbumArtCache.load(
+                context = appContext,
+                uri = artworkUri,
+                targetSizePx = NOTIFICATION_COVER_PX,
+                cacheKey = track.albumId.toString(),
+                shrink = true,
+            ) ?: bitmap
+            cover?.let { playerController.updateItemArtwork(track.id, squared(it)) }
         }
+    }
+
+    /** [source] cut to the square at its centre (itself when it already is one). */
+    private fun squared(source: Bitmap): Bitmap {
+        if (source.width == source.height) return source
+        val side = minOf(source.width, source.height)
+        return runCatching {
+            Bitmap.createBitmap(source, (source.width - side) / 2, (source.height - side) / 2, side, side)
+        }.getOrDefault(source)
     }
 
     private class CoverPalette(val mesh: List<Color>, val primary: Color, val theme: AlbumTheme)
@@ -785,6 +819,9 @@ class PlayerViewModel @Inject constructor(
          * too, and does not need more.
          */
         private const val PALETTE_SIZE_PX = 192
+
+        /** What the notification's cover is read at: the largest the system draws it (a lock screen's, full width). */
+        private const val NOTIFICATION_COVER_PX = 1024
 
         /**
          * Long enough that a flick through the queue never runs it, and — since the backdrop

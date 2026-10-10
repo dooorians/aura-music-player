@@ -346,7 +346,7 @@ class PlaybackService : MediaSessionService() {
          * on the lock screen, where the same bitmap is blurred across the wallpaper, it is what
          * keeps that from looking soft.
          */
-        private const val NOTIFICATION_ART_MAX_PX = 512
+        private const val NOTIFICATION_ART_MAX_PX = 1024
 
         private val AUDIO_ATTRIBUTES = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)

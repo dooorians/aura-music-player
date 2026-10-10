@@ -356,22 +356,34 @@ object AlbumArtCache {
             file.setLastModified(System.currentTimeMillis())
             file.readBytes()
         } else {
-            val connection = java.net.URL(uri.toString()).openConnection() as java.net.HttpURLConnection
-            open.set(connection)
-            // Cancelled before the connection was published: the callback had nothing to close.
-            if (cancelled()) {
-                connection.disconnect()
-                throw java.io.IOException("cancelled")
-            }
-            try {
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 15_000
-                connection.inputStream.use { it.readBytes() }.also { fetched ->
-                    runCatching { file.writeBytes(fetched); trimWebCovers(dir) }
+            // The address as given, then — for a video's thumbnail, whose best size is not made for every video — the
+            // smaller ones, the first that answers. What is kept is kept under the address that was asked for.
+            val addresses = listOf(uri.toString()) + com.ikko.aura.source.ytm.YtmImages.fallbacks(uri.toString())
+            var fetched: ByteArray? = null
+            var failure: Throwable? = null
+            for (address in addresses) {
+                val connection = java.net.URL(address).openConnection() as java.net.HttpURLConnection
+                open.set(connection)
+                // Cancelled before the connection was published: the callback had nothing to close.
+                if (cancelled()) {
+                    connection.disconnect()
+                    throw java.io.IOException("cancelled")
                 }
-            } finally {
-                connection.disconnect()
+                try {
+                    connection.connectTimeout = 10_000
+                    connection.readTimeout = 15_000
+                    fetched = connection.inputStream.use { it.readBytes() }
+                    break
+                } catch (e: java.io.IOException) {
+                    failure = e
+                    if (cancelled()) throw e
+                } finally {
+                    connection.disconnect()
+                }
             }
+            val got = fetched ?: throw (failure ?: java.io.IOException("no cover"))
+            runCatching { file.writeBytes(got); trimWebCovers(dir) }
+            got
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

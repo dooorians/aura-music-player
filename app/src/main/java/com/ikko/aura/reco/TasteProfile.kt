@@ -251,6 +251,7 @@ object TasteProfileBuilder {
             val age = ageDays(fb.atMs)
             when (fb.kind) {
                 FeedbackKind.LIKE -> {
+                    know(fb.title, fb.artist)
                     credit(fb.artist, emptyList(), fb.title, W_LIKE, age)
                     evidence += W_LIKE
                     seedWeights.merge(fb.subject, SeedTrack(fb.title, fb.artist, W_LIKE, fb.subject)) { a, b -> SeedTrack(a.title, a.artist, a.weight + b.weight, a.trackId) }

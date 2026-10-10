@@ -231,6 +231,7 @@ fun NowPlayingScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
+    val isLiked by viewModel.isLiked.collectAsStateWithLifecycle()
     val positionMs by viewModel.positionMs.collectAsStateWithLifecycle()
     val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
 
@@ -566,6 +567,8 @@ fun NowPlayingScreen(
                     queueIndex = uiState.queueIndex,
                     isFavorite = uiState.isFavorite,
                     onFavoriteToggle = viewModel::toggleFavorite,
+                    isLiked = isLiked,
+                    onLikeToggle = viewModel::toggleLike,
                     automixEnabled = uiState.automixEnabled,
                     onAutomixToggle = viewModel::toggleAutomix,
                     onOpenAlbum = { albumId ->
@@ -1027,6 +1030,8 @@ private fun HeroPanel(
     onOpenArtist: (Long) -> Unit,
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
+    isLiked: Boolean,
+    onLikeToggle: () -> Unit,
     automixEnabled: Boolean,
     onAutomixToggle: () -> Unit,
 ) {
@@ -1110,6 +1115,8 @@ private fun HeroPanel(
                     PlayerToolbar(
                         automixEnabled = automixEnabled,
                         onAutomixToggle = onAutomixToggle,
+                        isLiked = isLiked,
+                        onLikeToggle = onLikeToggle,
                         isFavorite = isFavorite,
                         onFavoriteToggle = onFavoriteToggle,
                         modifier = Modifier.offset(y = designUnit() * -8f),
@@ -1462,6 +1469,8 @@ private fun PlayerRoundButton(
 private fun PlayerToolbar(
     automixEnabled: Boolean,
     onAutomixToggle: () -> Unit,
+    isLiked: Boolean,
+    onLikeToggle: () -> Unit,
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1482,6 +1491,20 @@ private fun PlayerToolbar(
                 active = automixEnabled,
                 contentDescription = "Automix",
                 tint = if (automixEnabled) accent else accent.copy(alpha = 0.75f),
+                modifier = Modifier.size(u * 44f),
+            )
+        }
+        // The like: tells the recommendations "more of this" (kept on the device); it is not the favourite, which is a playlist.
+        Box(
+            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onLikeToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            FillableIcon(
+                outline = CupertinoIcons.Heart,
+                filled = CupertinoIcons.HeartFilled,
+                active = isLiked,
+                contentDescription = if (isLiked) "Je n'aime plus" else "J'aime",
+                tint = if (isLiked) accent else accent.copy(alpha = 0.9f),
                 modifier = Modifier.size(u * 44f),
             )
         }
