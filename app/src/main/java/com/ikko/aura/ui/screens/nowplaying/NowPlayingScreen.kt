@@ -1,5 +1,10 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.slideOutVertically
@@ -122,12 +127,11 @@ import com.ikko.aura.ui.components.backdrop.backdrops.LayerBackdrop
 import com.ikko.aura.ui.components.LocalAuraBackdrop
 import com.ikko.aura.ui.components.AlbumArtCache
 import androidx.compose.ui.graphics.asImageBitmap
-import com.ikko.aura.ui.components.AURORA_PIXELS
 import com.ikko.aura.ui.components.AURORA_H
-import com.ikko.aura.ui.components.AURORA_W
-import com.ikko.aura.ui.components.neutralArt
-import com.ikko.aura.ui.components.AuroraRenderer
 import com.ikko.aura.ui.components.AlbumTheme
+import com.ikko.aura.ui.components.albumThemeFromBitmap
+import com.ikko.aura.ui.components.designSp
+import com.ikko.aura.ui.components.designUnit
 import com.ikko.aura.ui.components.auraMenuSurface
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SweepLyricLine
@@ -163,9 +167,7 @@ private val ButtonShape = RoundedCornerShape(20.dp)
 private val ArtShape = RoundedCornerShape(14.dp)
 private val ChipShape = RoundedCornerShape(50)
 
-private val SCREEN_PADDING = 14.dp
-/** How far down the screen the cover reaches before it has melted into the flat colour: about to the progress bar. */
-private const val COVER_HEIGHT_FRACTION = 0.58f
+private val SCREEN_PADDING = 16.dp
 
 /** The gap between the groups of the player's controls: the bar and its lyric, the transport, the utility row. */
 private val GROUP_GAP = 6.dp
@@ -174,10 +176,9 @@ private val HERO_ART_SIZE = 120.dp
 /**
  * The touch area of the playback controls, made for a thumb: as tall as the glyphs' neighbourhood allows, side by side with no
  * gap between them, and reaching down to the bottom edge. The extra is mostly *above* the glyphs, because that is where the
- * finger lands. The glyphs themselves sit where they always did, [TRANSPORT_GLYPH_CENTER] above the row's bottom.
+ * finger lands. The glyphs sit 69 design px above the row's bottom, as drawn.
  */
 private val TRANSPORT_HEIGHT = 96.dp
-private val TRANSPORT_GLYPH_CENTER = 40.dp
 
 /**
  * How much further up the row's top edge is than it was (56 dp tall, 12 dp clear below it). The things above it are drawn
@@ -391,7 +392,10 @@ fun NowPlayingScreen(
             }
         }
     }
-    CompositionLocalProvider(LocalGlassSettle provides settle) {
+    val playerTint = remember(uiState.albumTheme.solid) {
+        androidx.compose.ui.graphics.lerp(uiState.albumTheme.solid, Color.Black, 0.5f).copy(alpha = 0.34f)
+    }
+    CompositionLocalProvider(LocalGlassSettle provides settle, LocalPlayerGlassTint provides playerTint) {
     Box(
         Modifier
             .fillMaxSize()
@@ -531,23 +535,24 @@ fun NowPlayingScreen(
         ) {
             // Where the sound goes, top left, and the queue, top right: under the status bar (the scaffold keeps the
             // inset), at the page margins, over the cover's dark fade.
+            // At 110 design px from the top, as drawn (the column starts under the status bar, and 10 dp lower).
+            val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = SCREEN_PADDING - 8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = designUnit() * 40f)
+                    .offset(y = designUnit() * 110f - statusTop - 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                UtilityIcon(
+                PlayerRoundButton(
                     icon = CupertinoIcons.Headphones,
                     contentDescription = "Sortie audio : ${uiState.audioOutput.deviceName ?: uiState.audioOutput.type.label()}",
-                    active = false,
                     onClick = { showOutputPicker = true },
-                    glyphSize = 22.dp,
                 )
-                UtilityIcon(
+                PlayerRoundButton(
                     icon = CupertinoIcons.Queue,
                     contentDescription = "Ouvrir la file d'attente",
-                    active = false,
                     onClick = { navController.navigate(AuraDestination.Queue.route) },
-                    glyphSize = 22.dp,
                 )
             }
 
@@ -611,7 +616,7 @@ fun NowPlayingScreen(
 
             // 8 dp less on the sides: the shuffle and repeat glyphs sit ~13 dp inside their 48 dp touch areas, so they then
             // line up with the page margin.
-            Box(Modifier.padding(horizontal = SCREEN_PADDING - 8.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.padding(horizontal = designUnit() * 40f), contentAlignment = Alignment.Center) {
                 TransportRow(
                     isPlaying = uiState.isPlaying,
                     shuffleEnabled = uiState.shuffleEnabled,
@@ -732,17 +737,15 @@ private fun List<LyricLine>.currentLineAt(positionMs: Long): LyricLine? =
     lastOrNull { it.timeMs <= positionMs }
 
 /**
- * The player's ground: the album pages' aurora across the whole screen, with the cover over its top, dissolving into it —
- * reaching about to the progress bar. The aurora is the app's own (see [AuroraRenderer]), drawn once as a still picture
- * for the cover playing, with the same veil the live background has.
+ * The player's ground, the "F" immersive one: the cover across the top, melting into the record's flat colour, with soft
+ * pools of the cover's own colours under the controls and a grain over it all (see [bakeGround]). Drawn once as a still
+ * picture per record.
  *
- * What the player's glass looks through: the picture playing is recorded into the shared glass backdrop, so the buttons
- * refract exactly what is drawn behind them.
+ * Nothing in the player looks through glass: the buttons' frosted look is drawn over this picture (tint, gradient, rim),
+ * not blurred from it, so the ground is not recorded for them.
  *
- * The next track's picture is made ahead of time, while this one plays, so a change of track finds it ready: the new
- * picture is then at once the recorded one, and the old one is drawn over it, outside the recording, and dissolves away.
- * Drawn that way the glass runs its work once for the change rather than on every frame of the fade — it looks through
- * the new picture a few hundred milliseconds early, under a tint and a blur, which nobody can see.
+ * The next track's picture is made ahead of time, while this one plays, so a change of track finds it ready; the old one
+ * dissolves away over the new.
  */
 @Composable
 private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color, recordForGlass: Boolean) {
@@ -785,14 +788,6 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color, re
         outgoing?.let { old ->
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) { GroundLayer(old) }
         }
-        // Keeps the clock and the battery readable over a pale cover.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                // Reaches below the status bar over the row of icons too, so they read on a pale cover.
-                .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp)
-                .background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.5f), 0.6f to Color.Black.copy(alpha = 0.25f), 1f to Color.Transparent)),
-        )
     }
 }
 
@@ -833,56 +828,136 @@ private suspend fun loadGround(context: android.content.Context, track: Track, w
     return GroundPicture(baked.asImageBitmap()).also { groundCache.put(key, it) }
 }
 
+/**
+ * The "F" immersive ground, composed once into one image (design measures, 1080 px wide):
+ *  - the flat deep colour of the record;
+ *  - the cover, square across the top and bleeding off it ([GROUND_COVER_TOP] px);
+ *  - the cover melting into that colour (a long eight-stop fade from 300 to 1060 px);
+ *  - six large soft pools of the cover's own colours in the lower half, the glow the controls sit on;
+ *  - a dark fade at the very top, for the clock and the first row of buttons;
+ *  - a fine grain over everything.
+ * The pools are drawn as radial gradients (a disc blurred by 110 px, which is what the design draws), so there is no blur
+ * to run at draw time.
+ */
 private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bitmap?, w: Int, h: Int): android.graphics.Bitmap {
     val out = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(out)
-    val smooth = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    val smooth = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val u = w / 1080f
+    // Taller screens than the design's 1240 keep the lower half's measures from the bottom, so the pools stay under the controls.
+    val extra = h / u - 1240f
 
-    // The aurora, filling the screen, then the veil it is always drawn with, for the white type that sits on it.
-    val aurora = stillAurora(art)
-    canvas.drawBitmap(aurora, null, android.graphics.Rect(0, 0, w, h), smooth)
-    val veil = android.graphics.Paint().apply {
+    val look = groundLook(art)
+    canvas.drawColor(look.solid)
+
+    // The cover, centre-cropped to a square of the screen's width.
+    if (cover != null) {
+        val side = minOf(cover.width, cover.height)
+        val src = android.graphics.Rect((cover.width - side) / 2, (cover.height - side) / 2, (cover.width + side) / 2, (cover.height + side) / 2)
+        val top = GROUND_COVER_TOP * u
+        canvas.drawBitmap(cover, src, android.graphics.RectF(0f, top, w.toFloat(), top + w.toFloat()), smooth)
+    }
+
+    // The melt into the flat colour.
+    val fadeTop = 300f * u
+    val fadeBottom = 1060f * u
+    val c = look.solid
+    fun withAlpha(a: Float) = (c and 0x00FFFFFF) or ((a * 255f).toInt().coerceIn(0, 255) shl 24)
+    val fade = android.graphics.Paint().apply {
         shader = android.graphics.LinearGradient(
-            0f, 0f, 0f, h.toFloat(),
-            intArrayOf(0x1A000000, 0x33000000, 0x6B000000), floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP,
+            0f, fadeTop, 0f, fadeBottom,
+            intArrayOf(withAlpha(0f), withAlpha(0.08f), withAlpha(0.22f), withAlpha(0.45f), withAlpha(0.70f), withAlpha(0.88f), withAlpha(0.97f), withAlpha(1f)),
+            floatArrayOf(0f, 0.15f, 0.30f, 0.45f, 0.60f, 0.75f, 0.90f, 1f),
+            android.graphics.Shader.TileMode.CLAMP,
         )
     }
-    canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), veil)
+    canvas.drawRect(0f, fadeTop, w.toFloat(), fadeBottom, fade)
+    // Everything below the fade is the flat colour (a taller screen than the design's).
+    val flat = android.graphics.Paint().apply { color = c }
+    canvas.drawRect(0f, fadeBottom, w.toFloat(), h.toFloat(), flat)
 
-    // The cover across the top, cropped to fill, then erased from the bottom up.
-    if (cover != null) {
-        val coverH = (h * COVER_HEIGHT_FRACTION).toInt()
-        val layer = canvas.saveLayer(0f, 0f, w.toFloat(), coverH.toFloat(), null)
-        val scale = maxOf(w.toFloat() / cover.width, coverH.toFloat() / cover.height)
-        val dw = cover.width * scale
-        val dh = cover.height * scale
-        val dst = android.graphics.RectF((w - dw) / 2f, (coverH - dh) / 2f, (w + dw) / 2f, (coverH + dh) / 2f)
-        canvas.drawBitmap(cover, null, dst, smooth)
-        val erase = android.graphics.Paint().apply {
-            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
-            shader = android.graphics.LinearGradient(
-                0f, 0f, 0f, coverH.toFloat(),
-                intArrayOf(-1, -1, 0x9EFFFFFF.toInt(), 0x24FFFFFF, 0x00FFFFFF),
-                floatArrayOf(0f, 0.30f, 0.55f, 0.80f, 1f), android.graphics.Shader.TileMode.CLAMP,
+    // The pools of light: left, top, size, opacity, in design px.
+    val pools = arrayOf(
+        floatArrayOf(-290f, 410f, 820f, 0.85f),
+        floatArrayOf(600f, 460f, 760f, 0.80f),
+        floatArrayOf(90f, 610f, 900f, 0.75f),
+        floatArrayOf(-310f, 830f, 800f, 0.90f),
+        floatArrayOf(600f, 840f, 800f, 0.90f),
+        floatArrayOf(240f, 930f, 640f, 0.50f),
+    )
+    pools.forEachIndexed { i, p ->
+        val size = p[2] * u
+        val cx = (p[0] + p[2] / 2f) * u
+        val cy = (p[1] + extra + p[2] / 2f) * u
+        val r = size / 2f
+        val reach = r + 110f * u
+        val colour = look.pools[i % look.pools.size]
+        fun a(f: Float) = (colour and 0x00FFFFFF) or ((p[3] * f * 255f).toInt().coerceIn(0, 255) shl 24)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                cx, cy, reach,
+                intArrayOf(a(1f), a(0.96f), a(0.55f), a(0.14f), a(0f)),
+                floatArrayOf(0f, (r - 70f * u) / reach, r / reach, (r + 55f * u) / reach, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
             )
         }
-        canvas.drawRect(0f, 0f, w.toFloat(), coverH.toFloat(), erase)
-        canvas.restoreToCount(layer)
+        canvas.drawCircle(cx, cy, reach, paint)
     }
+
+    // The dark fade at the top: the clock, the battery and the first row of buttons read over any cover.
+    val scrim = android.graphics.Paint().apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 0f, 260f * u, 0x6B000000, 0x00000000, android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRect(0f, 0f, w.toFloat(), 260f * u, scrim)
+
+    // The grain, overlaid at 14 %.
+    val grain = android.graphics.Paint().apply {
+        shader = android.graphics.BitmapShader(grainTile, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
+        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.OVERLAY)
+        alpha = (0.14f * 255f).toInt()
+    }
+    canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), grain)
     return out
 }
 
-/** The aurora of a cover as one still picture, the way the app's background makes it (see [AuroraRenderer]). */
-private fun stillAurora(art: android.graphics.Bitmap?): android.graphics.Bitmap {
-    val renderer = AuroraRenderer(art ?: neutralArt(AlbumTheme.Neutral))
-    renderer.render(AURORA_STILL_S)
-    val pixels = IntArray(AURORA_PIXELS) { i ->
-        (0xFF shl 24) or
-            ((renderer.outR[i] shr 8).coerceIn(0, 255) shl 16) or
-            ((renderer.outG[i] shr 8).coerceIn(0, 255) shl 8) or
-            (renderer.outB[i] shr 8).coerceIn(0, 255)
+/** A fixed tile of grey noise, repeated over the ground. */
+private val grainTile: android.graphics.Bitmap by lazy {
+    val rnd = java.util.Random(11)
+    val px = IntArray(256 * 256) { val v = rnd.nextInt(256); (0xFF shl 24) or (v shl 16) or (v shl 8) or v }
+    android.graphics.Bitmap.createBitmap(px, 256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+}
+
+private class GroundLook(val solid: Int, val pools: IntArray)
+
+/**
+ * The flat colour of the record and the colours its pools of light are made of, from the cover itself: the pools are its
+ * own swatches (the most present first), kept deep enough that white type reads on them, and the flat colour is the
+ * cover's overall hue taken dark — the one the rest of the app rests on. A cover with no colour gets a grey-blue.
+ */
+private fun groundLook(art: android.graphics.Bitmap?): GroundLook {
+    val theme = art?.let { albumThemeFromBitmap(it, 0) } ?: AlbumTheme.Neutral
+    val solid = theme.solid.toArgb()
+    val swatches = art?.let {
+        runCatching {
+            androidx.palette.graphics.Palette.from(it).maximumColorCount(24).resizeBitmapArea(96 * 96).generate().swatches
+        }.getOrNull()
+    }.orEmpty()
+        .filter { s -> FloatArray(3).also { androidx.core.graphics.ColorUtils.colorToHSL(s.rgb, it) }.let { it[1] > 0.18f && it[2] in 0.08f..0.92f } }
+        .sortedByDescending { it.population }
+    fun tone(rgb: Int, lightness: Float): Int {
+        val hsl = FloatArray(3)
+        androidx.core.graphics.ColorUtils.colorToHSL(rgb, hsl)
+        hsl[1] = hsl[1].coerceIn(0.35f, 0.72f)
+        hsl[2] = lightness
+        return androidx.core.graphics.ColorUtils.HSLToColor(hsl)
     }
-    return android.graphics.Bitmap.createBitmap(pixels, AURORA_W, AURORA_H, android.graphics.Bitmap.Config.ARGB_8888)
+    val base = swatches.map { it.rgb }.ifEmpty { listOf(solid) }
+    // Alternating mid and deep tones of the cover's colours, as the design's pools alternate teal, blue, plum, red.
+    val lightness = floatArrayOf(0.25f, 0.31f, 0.22f, 0.20f, 0.27f, 0.36f)
+    val pools = IntArray(6) { i -> tone(base[i % base.size], lightness[i]) }
+    return GroundLook(solid, pools)
 }
 
 /**
@@ -928,8 +1003,8 @@ private const val GROUND_COVER_PX = 1080
 /** The size a cover is read at to make its aurora: it is scaled to 64 px and blurred, so no more is needed. */
 private const val AURORA_ART_PX = 192
 
-/** Where in its slow drift the still aurora is taken: any moment of it is the same kind of picture. */
-private const val AURORA_STILL_S = 12f
+/** Where the cover's square starts, in design px: it bleeds off the top, as the design draws it. */
+private const val GROUND_COVER_TOP = -70f
 
 /** Cover, title and artist — the mockup's dominant block. */
 @Composable
@@ -968,20 +1043,23 @@ private fun HeroPanel(
                 contentAlignment = Alignment.BottomStart,
                 label = "hero-label",
             ) { (_, shown) ->
-                // The star is centred on the whole block, so it sits between the title and the artist whether the title
-                // takes one line or two; the names take the width the star leaves them.
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // The names at the left, the toolbar (Automix, favourite) at the right, its top at the title's.
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(designUnit() * 25f)) {
                     Column(Modifier.weight(1f)) {
-                        // Three destinations from one block: the cover opens the lyrics, the title
-                        // opens the album it is on, the artist opens the artist. Each is the thing
-                        // the words already name, so nothing needs a chevron to say so.
+                        // Three destinations from one block: the title opens the album it is on, the artist opens the artist.
+                        // Each is the thing the words already name, so nothing needs a chevron to say so.
                         Text(
                             text = shown?.title ?: "Aucun titre",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 24.sp,
-                            lineHeight = 27.sp,
-                            color = rememberPlayerAccent(),
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    Color.Black.copy(alpha = 0.35f), Offset(0f, 4f), 24f,
+                                ),
+                            ),
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = designSp(60f),
+                            lineHeight = designSp(68f),
+                            letterSpacing = designSp(60f * -0.02f),
+                            color = Color.White,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
@@ -996,11 +1074,17 @@ private fun HeroPanel(
                         )
                         Text(
                             text = shown?.artist ?: "—",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = rememberPlayerAccent().copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.3f), Offset(0f, 3f), 16f),
+                            ),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = designSp(38f),
+                            lineHeight = designSp(46f),
+                            color = rememberPlayerAccent().copy(alpha = 0.8f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
+                                .padding(top = designUnit() * 6f)
                                 .clip(RoundedCornerShape(6.dp))
                                 .then(
                                     if (shown == null) {
@@ -1011,24 +1095,13 @@ private fun HeroPanel(
                                 ),
                         )
                     }
-                    // Automix, then the favourite, at the right of the block. Nudged out 8 dp: the glyphs sit ~13 dp inside
-                    // their 48 dp touch areas, so the last one then lines up with the page margin the progress bar ends on.
-                    UtilityIcon(
-                        icon = CupertinoIcons.AutoAwesome,
-                        contentDescription = "Automix",
-                        active = automixEnabled,
-                        onClick = onAutomixToggle,
-                        glyphSize = 23.dp,
+                    PlayerToolbar(
+                        automixEnabled = automixEnabled,
+                        onAutomixToggle = onAutomixToggle,
+                        isFavorite = isFavorite,
+                        onFavoriteToggle = onFavoriteToggle,
+                        modifier = Modifier.offset(y = designUnit() * -8f),
                     )
-                    Box(Modifier.offset(x = 8.dp)) {
-                        UtilityIcon(
-                            icon = CupertinoIcons.Star,
-                            filledIcon = CupertinoIcons.StarFilled,
-                            contentDescription = "Favori",
-                            active = isFavorite,
-                                            onClick = onFavoriteToggle,
-                        )
-                    }
                 }
             }
         }
@@ -1048,8 +1121,10 @@ private fun TransportRow(
     onRepeatCycle: () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
-    // Shuffle and repeat flank the three main controls, smaller than them (they are modes, not actions), spread over the
-    // width with equal gaps. Five touch areas of 48-76 dp take under 300 dp of the ~400 available, so nothing is squeezed.
+    val u = designUnit()
+    // As drawn: the glyphs' centre line 69 design px above the row's foot; shuffle and repeat in 100 px areas, previous and
+    // next in 120, the frosted play button 136 across — spread over the width with equal gaps.
+    val glyphCenter = u * 69f
     Row(
         modifier = Modifier.fillMaxWidth().height(TRANSPORT_HEIGHT),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1060,19 +1135,26 @@ private fun TransportRow(
                 contentDescription = "Lecture aléatoire",
                 active = shuffleEnabled,
                 onClick = onShuffleToggle,
-                touchWidth = 56.dp,
-                touchHeight = TRANSPORT_GLYPH_CENTER * 2,
+                glyphSize = u * 44f,
+                touchWidth = u * 100f,
+                touchHeight = glyphCenter * 2,
+                dot = true,
             )
         }
         TransportTile(
-            weight = 1f,
+            width = u * 120f,
+            glyphCenter = glyphCenter,
+            glyphSize = u * 64f,
             icon = CupertinoIcons.SkipPrevious,
             contentDescription = "Précédent",
             skipDirection = -1,
             onClick = onPrevious,
         )
         TransportTile(
-            weight = 1.15f,
+            width = u * 136f,
+            glyphCenter = glyphCenter,
+            glyphSize = u * 64f,
+            framed = true,
             icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
             playing = isPlaying,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
@@ -1082,7 +1164,9 @@ private fun TransportRow(
             },
         )
         TransportTile(
-            weight = 1f,
+            width = u * 120f,
+            glyphCenter = glyphCenter,
+            glyphSize = u * 64f,
             icon = CupertinoIcons.SkipNext,
             contentDescription = "Suivant",
             skipDirection = 1,
@@ -1094,8 +1178,10 @@ private fun TransportRow(
                 contentDescription = "Répéter",
                 active = repeatMode != RepeatMode.OFF,
                 onClick = onRepeatCycle,
-                touchWidth = 56.dp,
-                touchHeight = TRANSPORT_GLYPH_CENTER * 2,
+                glyphSize = u * 44f,
+                touchWidth = u * 100f,
+                touchHeight = glyphCenter * 2,
+                dot = true,
             )
         }
     }
@@ -1112,7 +1198,10 @@ private fun FlankIcon(content: @Composable () -> Unit) {
 
 @Composable
 private fun RowScope.TransportTile(
-    weight: Float,
+    width: Dp,
+    /** How far above the row's foot the glyph's centre line is. */
+    glyphCenter: Dp,
+    glyphSize: Dp,
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
@@ -1121,6 +1210,8 @@ private fun RowScope.TransportTile(
     skipDirection: Int = 0,
     /** For the play / pause tile: whether it is playing. The glyph then morphs between the two instead of swapping. */
     playing: Boolean? = null,
+    /** The frosted round button behind the glyph (the play button). */
+    framed: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1149,7 +1240,7 @@ private fun RowScope.TransportTile(
     Box(
         contentAlignment = Alignment.BottomCenter,
         modifier = Modifier
-            .weight(weight)
+            .width(width)
             .fillMaxHeight()
             .clip(ButtonShape)
             .clickable(
@@ -1158,12 +1249,21 @@ private fun RowScope.TransportTile(
                 onClick = onClick,
             ),
     ) {
-        val glyphModifier = Modifier.padding(bottom = TRANSPORT_GLYPH_CENTER - 17.dp).size(34.dp)
+        if (framed) {
+            // The button the glyph sits in: 136 design px across, centred on the glyph.
+            Box(
+                Modifier
+                    .padding(bottom = glyphCenter - width / 2)
+                    .size(width)
+                    .playerFrosted(CircleShape),
+            )
+        }
+        val glyphModifier = Modifier.padding(bottom = glyphCenter - glyphSize / 2).size(glyphSize)
         // The halo is drawn behind the glyph, centred on it, about twice its size.
         Box(
             modifier = glyphModifier.drawBehind {
                 val a = halo.value
-                if (a > 0.002f) drawCircle(Color.White.copy(alpha = a), radius = size.minDimension * 1.3f / 2f * 1.45f)
+                if (a > 0.002f) drawCircle(Color.White.copy(alpha = a), radius = size.minDimension * 1.3f / 2f * 1.0f)
             },
             contentAlignment = Alignment.Center,
         ) {
@@ -1223,6 +1323,106 @@ private fun RowScope.TransportTile(
 
 
 
+/** The dark wash under the player's frosted buttons: the record's flat colour, taken darker, at about a third. */
+private val LocalPlayerGlassTint = androidx.compose.runtime.staticCompositionLocalOf { Color(0x52081824) }
+
+/**
+ * The design's frosted button, drawn over the ground (nothing is blurred: the player's ground is a still picture):
+ * a soft shadow, a dark wash, a white gradient from 22 % to 8 %, a rim at 28 % and a light line along the top edge.
+ */
+@Composable
+private fun Modifier.playerFrosted(shape: androidx.compose.ui.graphics.Shape): Modifier {
+    val u = designUnit()
+    val tint = LocalPlayerGlassTint.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val rim = with(density) { (u * 1.5f).toPx() }
+    val line = with(density) { (u * 2f).toPx() }
+    return this
+        .androidx_shadow(u * 10f, shape)
+        .clip(shape)
+        .background(tint)
+        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))))
+        .drawWithContent {
+            drawContent()
+            val outline = shape.createOutline(size, layoutDirection, this)
+            drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = rim * 2f))
+            clipRect(bottom = line * 2f) {
+                drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = line * 2f))
+            }
+        }
+}
+
+private fun Modifier.androidx_shadow(elevation: Dp, shape: androidx.compose.ui.graphics.Shape): Modifier =
+    this.shadow(elevation, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.22f), spotColor = Color.Black.copy(alpha = 0.22f))
+
+/** A round frosted button of the design: [size] across, its glyph [glyph] across, in the player's accent. */
+@Composable
+private fun PlayerRoundButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val u = designUnit()
+    Box(
+        modifier = modifier
+            .size(u * 112f)
+            .playerFrosted(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
+    }
+}
+
+/** The title's two actions in one frosted capsule — Automix, then the favourite — split by a hairline, as drawn. */
+@Composable
+private fun PlayerToolbar(
+    automixEnabled: Boolean,
+    onAutomixToggle: () -> Unit,
+    isFavorite: Boolean,
+    onFavoriteToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val u = designUnit()
+    val accent = rememberPlayerAccent()
+    Row(
+        modifier = modifier
+            .height(u * 112f)
+            .playerFrosted(CircleShape)
+            .padding(horizontal = u * 6f),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onAutomixToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            FillableIcon(
+                outline = CupertinoIcons.AutoAwesome,
+                filled = CupertinoIcons.AutoAwesome,
+                active = automixEnabled,
+                contentDescription = "Automix",
+                tint = if (automixEnabled) accent else accent.copy(alpha = 0.75f),
+                modifier = Modifier.size(u * 44f),
+            )
+        }
+        Box(Modifier.width(u * 1.5f).height(u * 44f).background(Color.White.copy(alpha = 0.28f)))
+        Box(
+            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onFavoriteToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            FillableIcon(
+                outline = CupertinoIcons.Star,
+                filled = CupertinoIcons.StarFilled,
+                active = isFavorite,
+                contentDescription = "Favori",
+                tint = if (isFavorite) accent else accent.copy(alpha = 0.9f),
+                modifier = Modifier.size(u * 44f),
+            )
+        }
+    }
+}
+
 @Composable
 private fun UtilityIcon(
     icon: ImageVector,
@@ -1236,6 +1436,8 @@ private fun UtilityIcon(
     /** The touch area (the glyph is centred in it). */
     touchWidth: Dp = 48.dp,
     touchHeight: Dp = 48.dp,
+    /** A small dot under the glyph while the mode is on (shuffle, repeat), as drawn. */
+    dot: Boolean = false,
 ) {
     Box(
         modifier = Modifier
@@ -1249,9 +1451,17 @@ private fun UtilityIcon(
             filled = filledIcon,
             active = active,
             contentDescription = contentDescription,
-            tint = if (active) activeTint else rememberPlayerAccent().copy(alpha = 0.55f),
+            tint = if (active) activeTint else rememberPlayerAccent().copy(alpha = 0.64f),
             modifier = Modifier.size(glyphSize),
         )
+        if (dot && active) {
+            Box(
+                Modifier
+                    .offset(y = designUnit() * 38f)
+                    .size(designUnit() * 8f)
+                    .background(activeTint, CircleShape),
+            )
+        }
     }
 }
 
