@@ -1,5 +1,7 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.toArgb
@@ -395,7 +397,8 @@ fun NowPlayingScreen(
     val playerTint = remember(uiState.albumTheme.solid) {
         androidx.compose.ui.graphics.lerp(uiState.albumTheme.solid, Color.Black, 0.5f).copy(alpha = 0.34f)
     }
-    CompositionLocalProvider(LocalGlassSettle provides settle, LocalPlayerGlassTint provides playerTint) {
+    val groundPicture = remember { androidx.compose.runtime.mutableStateOf<GroundPicture?>(null) }
+    CompositionLocalProvider(LocalGlassSettle provides settle, LocalPlayerGlassTint provides playerTint, LocalGroundPicture provides groundPicture) {
     Box(
         Modifier
             .fillMaxSize()
@@ -548,11 +551,13 @@ fun NowPlayingScreen(
                     icon = CupertinoIcons.Headphones,
                     contentDescription = "Sortie audio : ${uiState.audioOutput.deviceName ?: uiState.audioOutput.type.label()}",
                     onClick = { showOutputPicker = true },
+                    left = true,
                 )
                 PlayerRoundButton(
                     icon = CupertinoIcons.Queue,
                     contentDescription = "Ouvrir la file d'attente",
                     onClick = { navController.navigate(AuraDestination.Queue.route) },
+                    left = false,
                 )
             }
 
@@ -781,8 +786,9 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color, re
         loadGround(context, nextTrack, groundW, groundH)
     }
 
-    // Nothing in the player looks through glass any more, so the ground is no longer recorded for it: that recording was a
-    // second pass over the whole picture for a backdrop nobody samples.
+    // The two round buttons at the top take their blurred backdrop from the picture itself (see PlayerRoundButton).
+    val holder = LocalGroundPicture.current
+    androidx.compose.runtime.SideEffect { if (holder != null && holder.value !== current) holder.value = current }
     Box(Modifier.fillMaxSize().background(solid)) {
         current?.let { GroundLayer(it) }
         outgoing?.let { old ->
@@ -1325,6 +1331,9 @@ private fun RowScope.TransportTile(
 /** The dark wash under the player's frosted buttons: the record's flat colour, taken darker, at about a third. */
 private val LocalPlayerGlassTint = androidx.compose.runtime.staticCompositionLocalOf { Color(0x52081824) }
 
+/** The ground picture now showing, so the two round buttons can look through to a blurred piece of it. */
+private val LocalGroundPicture = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableState<GroundPicture?>?> { null }
+
 /**
  * The design's frosted button, drawn over the ground (nothing is blurred: the player's ground is a still picture):
  * a soft shadow, a dark wash, a white gradient from 22 % to 8 %, a rim at 28 % and a light line along the top edge.
@@ -1343,38 +1352,106 @@ private fun Modifier.playerFrosted(shape: androidx.compose.ui.graphics.Shape): M
         .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))))
         .drawWithContent {
             drawContent()
-            val outline = shape.createOutline(size, layoutDirection, this)
-            drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = rim * 2f))
-            clipRect(bottom = line * 2f) {
-                drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = line * 2f))
-            }
+            drawGlassRim(shape, rim, line)
         }
+}
+
+/** The rim at 28 % all round, and a light line along the top that fades out down the sides instead of being cut. */
+private fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.drawGlassRim(
+    shape: androidx.compose.ui.graphics.Shape,
+    rim: Float,
+    line: Float,
+) {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    drawOutline(outline, Color.White.copy(alpha = 0.26f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = rim * 2f))
+    drawOutline(
+        outline,
+        Brush.verticalGradient(
+            0f to Color.White.copy(alpha = 0.42f),
+            0.22f to Color.White.copy(alpha = 0.14f),
+            0.5f to Color.Transparent,
+            startY = 0f, endY = size.height,
+        ),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(width = line * 2f),
+    )
 }
 
 private fun Modifier.androidx_shadow(elevation: Dp, shape: androidx.compose.ui.graphics.Shape): Modifier =
     this.shadow(elevation, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.22f), spotColor = Color.Black.copy(alpha = 0.22f))
 
-/** A round frosted button of the design: [size] across, its glyph [glyph] across, in the player's accent. */
+/**
+ * A round frosted button of the design, 112 across, its glyph 44: what is behind it is the ground's own picture, blurred
+ * by 26 px and saturated 1.6 times (the design's backdrop-filter), under the dark wash, the white gradient, the rim and the
+ * light along the top. Only these two buttons look through; the picture they take is the one at their place, drawn behind
+ * them, so nothing is recorded.
+ */
 @Composable
 private fun PlayerRoundButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
+    left: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val u = designUnit()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val metrics = androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics
+    val picture = LocalGroundPicture.current?.value
+    val diameter = u * 112f
+    val sizePx = with(density) { diameter.roundToPx() }
+    val unitPx = metrics.widthPixels / 1080f
+    // Where the button sits on the screen, as drawn: 40 px from its edge, 110 from the top.
+    val originX = if (left) (40f * unitPx).toInt() else metrics.widthPixels - (40f * unitPx).toInt() - sizePx
+    val originY = (110f * unitPx).toInt()
+    val blur = remember(unitPx) {
+        val blurEffect = android.graphics.RenderEffect.createBlurEffect(26f * unitPx, 26f * unitPx, android.graphics.Shader.TileMode.CLAMP)
+        val saturate = android.graphics.RenderEffect.createColorFilterEffect(
+            android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(1.6f) }),
+            blurEffect,
+        )
+        saturate.asComposeRenderEffect()
+    }
+    val tint = LocalPlayerGlassTint.current
+    val rimPx = with(density) { (u * 1.5f).toPx() }
+    val linePx = with(density) { (u * 2f).toPx() }
     Box(
         modifier = modifier
-            .size(u * 112f)
-            .playerFrosted(CircleShape)
+            .size(diameter)
+            .androidx_shadow(u * 10f, CircleShape)
+            .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+        if (picture != null) {
+            Box(
+                Modifier
+                    .layout { measurable, _ ->
+                        val placeable = measurable.measure(
+                            androidx.compose.ui.unit.Constraints.fixed(metrics.widthPixels, metrics.heightPixels),
+                        )
+                        layout(sizePx, sizePx) { placeable.place(-originX, -originY) }
+                    }
+                    .graphicsLayer { renderEffect = blur }
+                    .drawBehind {
+                        drawImage(picture.baked, dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()))
+                    },
+            )
+        }
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(tint)
+                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))))
+                .drawWithContent {
+                    drawContent()
+                    drawGlassRim(CircleShape, rimPx, linePx)
+                },
+        )
         Icon(icon, contentDescription = contentDescription, tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
     }
 }
 
-/** The title's two actions in one frosted capsule — Automix, then the favourite — split by a hairline, as drawn. */
+/** The title's two actions, Automix then the favourite: the glyphs alone, on the ground. */
 @Composable
 private fun PlayerToolbar(
     automixEnabled: Boolean,
@@ -1386,10 +1463,7 @@ private fun PlayerToolbar(
     val u = designUnit()
     val accent = rememberPlayerAccent()
     Row(
-        modifier = modifier
-            .height(u * 112f)
-            .playerFrosted(CircleShape)
-            .padding(horizontal = u * 6f),
+        modifier = modifier.height(u * 112f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -1405,7 +1479,6 @@ private fun PlayerToolbar(
                 modifier = Modifier.size(u * 44f),
             )
         }
-        Box(Modifier.width(u * 1.5f).height(u * 44f).background(Color.White.copy(alpha = 0.28f)))
         Box(
             Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onFavoriteToggle),
             contentAlignment = Alignment.Center,
