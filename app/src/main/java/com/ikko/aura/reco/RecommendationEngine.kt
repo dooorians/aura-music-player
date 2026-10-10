@@ -170,6 +170,6 @@ class RecommendationEngine @Inject constructor(
 
     private companion object {
         /** Bumped when the rules that choose songs change in a way that makes earlier playlists wrong. */
-        const val RULES_VERSION = 2
+        const val RULES_VERSION = 4
     }
 }

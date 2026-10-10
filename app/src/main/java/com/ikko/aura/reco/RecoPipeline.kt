@@ -44,8 +44,11 @@ class RecoPipeline(
     /** Diagnostics only: what was asked and found. Never carries anything the listener did not already have on the device. */
     private val log: (String) -> Unit = {},
 ) {
-    /** Most specific first: a song fits the narrowest playlist it can, the broad ones take what is left. */
-    private val order = listOf(RecoKind.NEW, RecoKind.ENERGY, RecoKind.NIGHT, RecoKind.CHILL, RecoKind.STYLE, RecoKind.DISCOVERY, RecoKind.DAILY)
+    /**
+     * Most specific first: a song fits the narrowest playlist it can, the broad ones take what is left. Discovery comes
+     * before style because strangers are what is scarce: style has the listener's own artists to draw on.
+     */
+    private val order = listOf(RecoKind.NEW, RecoKind.ENERGY, RecoKind.NIGHT, RecoKind.CHILL, RecoKind.DISCOVERY, RecoKind.STYLE, RecoKind.DAILY)
 
     suspend fun refresh(requested: Set<RecoKind>? = null, force: Boolean = false): RunResult {
         val now = clock()
@@ -105,6 +108,14 @@ class RecoPipeline(
             )
         }
 
+        // Entries a source lists beside a song may be clips or talks: those with a tie to the listener are asked about
+        // first, so the songs among them are known — with their album and artists — before anything is chosen.
+        lookUp(
+            pool.filter { it.sourceId == "ytm" && !it.confirmedSong && Eligibility.excluded(it, ctxBase) == null }
+                .sortedByDescending { tieOf(it, profile) }.take(MAX_SONG_CHECKS),
+            sourcesById, checked,
+        )
+
         val used = HashSet<String>()
         // Songs a source refused, that are not songs, or that the listener has (found out by asking): out of every playlist.
         val rejected = HashSet<String>()
@@ -140,7 +151,11 @@ class RecoPipeline(
     private fun applied(c: Candidate, v: Verification?): Candidate {
         if (v == null) return c
         val release = v.release?.takeIf { it.reliability != DateReliability.UNKNOWN }
+        // The page of an official release names who the song is by, collaborations included: better than a channel's name.
+        val artists = v.artists.filter { it.isNotBlank() }
         return c.copy(
+            artist = if (artists.isNotEmpty()) artists.first() else c.artist,
+            extraCredits = if (artists.size > 1) (c.extraCredits + artists.drop(1)).distinct() else c.extraCredits,
             album = if (c.album.isBlank() && !v.album.isNullOrBlank()) v.album else c.album,
             release = if (release != null && rank(release) > rank(c.release)) release else c.release,
             tags = (c.tags + v.tags).distinct(),
@@ -204,5 +219,6 @@ class RecoPipeline(
 
     private companion object {
         const val MAX_DATE_LOOKUPS = 24
+        const val MAX_SONG_CHECKS = 60
     }
 }

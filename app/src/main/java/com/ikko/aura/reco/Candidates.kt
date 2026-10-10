@@ -18,6 +18,8 @@ data class Verification(
     val album: String? = null,
     /** True: the page is an auto-generated song (not a video, a clip or a talk). Null: not told. */
     val isSong: Boolean? = null,
+    /** The artists the page names, first the primary one; empty when it does not. */
+    val artists: List<String> = emptyList(),
 )
 
 /** A place recommendations can be found: a search, and where it has one, a "similar to" and a check. */
