@@ -135,9 +135,44 @@ class PlaylistRepository @Inject constructor(
         return id
     }
 
-    /** Which Home card ("disc", "top", "style") this playlist is the weekly list of, or null if it is not one. */
+    /**
+     * Replaces the playlist kept for [key] with [tracks] now — a recommendation renewal — creating it if it is gone.
+     * Only the playlist's rows change; nothing that is playing is touched.
+     */
+    suspend fun replaceAutoPlaylist(key: String, name: String, tracks: List<Track>, nowMs: Long): Long {
+        val known = settingsStore.autoPlaylist(key)
+        val alive = known != null && playlistDao.playlistExists(known.first) > 0
+        val id = if (alive) known!!.first else createPlaylist(name)
+        playlistDao.replaceTracks(id, tracks.mapIndexed { i, t -> PlaylistTrackEntity(id, t.id, i, nowMs) })
+        settingsStore.setAutoPlaylist(key, id, nowMs)
+        return id
+    }
+
+    /** The id of the playlist kept for [key], or null if there is none (or it was deleted). */
+    suspend fun autoPlaylistId(key: String): Long? =
+        settingsStore.autoPlaylist(key)?.first?.takeIf { playlistDao.playlistExists(it) > 0 }
+
+    /** Takes [trackIds] out of the playlists Aura keeps (a blocked artist's songs, a song the listener hid). */
+    suspend fun removeFromAutoPlaylists(trackIds: Collection<String>) {
+        if (trackIds.isEmpty()) return
+        for (key in AUTO_KEYS) {
+            val id = autoPlaylistId(key) ?: continue
+            trackIds.forEach { playlistDao.removeTrackFromPlaylist(id, it) }
+        }
+    }
+
+    /** Every entry of every playlist but Favoris and the ones Aura keeps: what the listener put somewhere on purpose. */
+    suspend fun userPlaylistEntries(): List<PlaylistTrackEntity> {
+        val auto = AUTO_KEYS.mapNotNull { autoPlaylistId(it) }.toSet()
+        return playlistDao.allEntries().filter { it.playlistId != FAVORITES_PLAYLIST_ID && it.playlistId !in auto }
+    }
+
+    suspend fun favoriteEntries(): List<PlaylistTrackEntity> =
+        playlistDao.allEntries().filter { it.playlistId == FAVORITES_PLAYLIST_ID }
+
+    /** Which Home card ("disc", "top", "style"…) this playlist is the list of, or null if it is not one. */
     suspend fun autoKeyOf(playlistId: Long): String? =
-        listOf("disc", "top", "style", "night", "energy", "new", "chill").firstOrNull { settingsStore.autoPlaylist(it)?.first == playlistId }
+        AUTO_KEYS.firstOrNull { settingsStore.autoPlaylist(it)?.first == playlistId }
 
     suspend fun createPlaylist(name: String): Long =
         playlistDao.insertPlaylist(PlaylistEntity(name = name, createdAtMs = System.currentTimeMillis()))
@@ -161,3 +196,6 @@ class PlaylistRepository @Inject constructor(
 }
 
 private const val AUTO_PLAYLIST_PERIOD_MS = 7L * 24 * 60 * 60 * 1000
+
+/** The cards that have a playlist of their own. */
+private val AUTO_KEYS = listOf("disc", "top", "style", "night", "energy", "new", "chill", "daily")

@@ -119,10 +119,22 @@ class YtmLibrary @Inject constructor(
 
     /** Whether a song's source is on: YouTube Music by its own switch, an added source by its own. */
     private fun offered(key: String, ytmOn: Boolean, others: Set<String>): Boolean =
-        if (key.startsWith("${YTM.value}:")) ytmOn else key.substringBefore(':') in others
+        if (key.startsWith("${YTM.value}:")) ytmOn
+        // JioSaavn has no switch of its own (it is always there): a recommended song kept by a playlist stays listed.
+        else if (key.startsWith("jiosaavn:")) true
+        else key.substringBefore(':') in others
 
     private fun trackOf(row: CatalogTrackEntity): Track =
-        if (!row.key.startsWith("${YTM.value}:")) {
+        if (row.key.startsWith("jiosaavn:")) {
+            val songId = row.key.substringAfter(':')
+            Track(
+                id = row.key, title = row.title, artist = row.artist, album = row.album, artistId = 0L,
+                albumId = com.ikko.aura.source.jiosaavn.jioSaavnAlbumId("", songId),
+                artworkUri = row.artworkUrl.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
+                contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(songId).build(),
+                durationMs = row.durationMs, bitrateKbps = 320, sampleRateHz = 44100, bitDepth = 16,
+            )
+        } else if (!row.key.startsWith("${YTM.value}:")) {
             com.ikko.aura.source.remote.RemoteTracks.trackOf(
                 row.key, row.title, row.artist, row.durationMs, row.artworkUrl,
                 row.albumRef.ifEmpty { null }, row.album.ifEmpty { null },

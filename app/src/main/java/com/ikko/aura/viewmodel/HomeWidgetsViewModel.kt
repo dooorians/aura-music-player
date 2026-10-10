@@ -69,7 +69,19 @@ class HomeWidgetsViewModel @Inject constructor(
     ytmLibrary: YtmLibrary,
     private val playlistRepository: PlaylistRepository,
     private val settingsStore: SettingsStore,
+    private val recommendations: com.ikko.aura.reco.RecommendationEngine,
 ) : ViewModel() {
+
+    init {
+        // Renewals that are due run when the app is opened; and at once when the listener turns the switch on.
+        viewModelScope.launch {
+            recommendations.consent.collect { on -> if (on) recommendations.launchRefreshIfDue() }
+        }
+    }
+
+    /** Whether a renewal is running, and a manual renewal of everything. */
+    val recoRefreshing: StateFlow<Boolean> = recommendations.refreshing
+    fun refreshRecommendations() { viewModelScope.launch { recommendations.refreshNow() } }
 
     val profileImageUri: StateFlow<String?> = settingsStore.profileImageUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -107,6 +119,9 @@ class HomeWidgetsViewModel @Inject constructor(
         playlistRepository.playlists,
         settingsStore.homeCardOrder,
         settingsStore.homeCardHidden,
+        recommendations.items,
+        recommendations.consent,
+        recommendations.status,
     ) { values ->
         @Suppress("UNCHECKED_CAST") val tracks = values[0] as List<Track>
         @Suppress("UNCHECKED_CAST") val albums = values[1] as List<Album>
@@ -119,6 +134,9 @@ class HomeWidgetsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST") val playlists = values[8] as List<PlaylistSummary>
         @Suppress("UNCHECKED_CAST") val order = values[9] as List<String>
         @Suppress("UNCHECKED_CAST") val hidden = values[10] as Set<String>
+        @Suppress("UNCHECKED_CAST") val recoItems = values[11] as Map<String, List<com.ikko.aura.reco.RecoItem>>
+        val recoConsent = values[12] as Boolean
+        @Suppress("UNCHECKED_CAST") val recoStatus = values[13] as Map<String, com.ikko.aura.reco.RecoStatus>
 
         // Streamed songs count as the library's own once played or kept, as on the old Home.
         // Streamed songs count only as kept ones (not everything ever played from a source), and only the downloaded among
@@ -141,6 +159,25 @@ class HomeWidgetsViewModel @Inject constructor(
         val albumsById = allAlbums.associateBy { it.id }
         val ranked = CARDS.sortedBy { spec -> order.indexOf(spec.id).let { if (it < 0) Int.MAX_VALUE else it } }
         val built = ranked.mapNotNull { spec ->
+                // The seven recommended playlists: what the engine made from external sources, when the listener agreed
+                // to it and there is something; the selection from the library (below) otherwise.
+                val generated = if (recoConsent && com.ikko.aura.reco.RecoKind.ofKey(spec.id) != null) recoItems[spec.id].orEmpty() else emptyList()
+                if (generated.isNotEmpty()) {
+                    val tracks = generated.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }
+                    val playlistId = playlistRepository.autoPlaylistId(spec.id)
+                    val updatedAt = recoStatus[spec.id]?.generatedAtMs ?: 0L
+                    val kicker = if (updatedAt > 0) "Mis à jour le " + java.time.Instant.ofEpochMilli(updatedAt)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .format(java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.FRENCH))
+                    else spec.kicker
+                    return@mapNotNull ForYouCard(
+                        spec.id, spec.ambience, spec.heading, kicker, artistsOf(tracks),
+                        WidgetContent(
+                            title = spec.heading, subtitle = null, artwork = emptyList(), tracks = tracks.take(MIX_SIZE), hue = 0f,
+                            openRoute = playlistId?.let { AuraDestination.PlaylistPattern.route(it.toString()) },
+                        ),
+                    )
+                }
                 var content = if (spec.pick != null) {
                     val tracks = spec.pick.invoke(data).take(MIX_SIZE)
                     WidgetContent(title = spec.heading, subtitle = null, artwork = emptyList(), tracks = tracks, hue = 0f)

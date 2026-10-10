@@ -85,8 +85,15 @@ class PlayerViewModel @Inject constructor(
     private val playlistRepository: com.ikko.aura.data.playlist.PlaylistRepository,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
     private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
+    private val listeningRecorder: com.ikko.aura.reco.ListeningRecorder,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /**
+     * The recommended playlist (its [com.ikko.aura.reco.RecoKind.key]) the queue was started from, if it was: a skip
+     * made in "Nuit" is evidence about "Nuit", not about the listener's taste in general.
+     */
+    private var listeningContext: String? = null
 
     private var paletteJob: Job? = null
 
@@ -144,6 +151,17 @@ class PlayerViewModel @Inject constructor(
             // rather than queueIndex: queueIndex is set synchronously by playQueue() before this
             // first fires for real, so comparing against it would also skip that genuine event.
             if (track?.id == _uiState.value.currentTrack?.id) return
+            // The song just left: how much of it was heard, and how it was left.
+            _uiState.value.currentTrack?.let { left ->
+                val transition = when (reason) {
+                    Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> com.ikko.aura.reco.Transition.AUTO
+                    Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> com.ikko.aura.reco.Transition.USER_SKIP
+                    Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> com.ikko.aura.reco.Transition.QUEUE_REPLACED
+                    Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> com.ikko.aura.reco.Transition.REPEAT
+                    else -> com.ikko.aura.reco.Transition.UNKNOWN
+                }
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, transition, listeningContext)
+            }
             _uiState.update {
                 it.copy(
                     currentTrack = track,
@@ -254,6 +272,12 @@ class PlayerViewModel @Inject constructor(
         val track = _uiState.value.queue.getOrNull(index) ?: return
         val state = _uiState.value
         if (track.id == state.currentTrack?.id && index == state.queueIndex) return
+        // The change was not announced by the listener's callback (two players during a mix): how the song was left is not known.
+        if (track.id != state.currentTrack?.id) {
+            state.currentTrack?.let { left ->
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.UNKNOWN, listeningContext)
+            }
+        }
         _uiState.update {
             it.copy(
                 currentTrack = track,
@@ -398,8 +422,9 @@ class PlayerViewModel @Inject constructor(
      */
     fun removeDownloads(tracks: List<Track>) = unkeepStreamed(tracks)
 
-    fun playQueue(tracks: List<Track>, startIndex: Int, shuffle: Boolean = false) {
+    fun playQueue(tracks: List<Track>, startIndex: Int, shuffle: Boolean = false, context: String? = null) {
         if (tracks.isEmpty()) return
+        listeningContext = context
         rememberStreamed(tracks)
         originalQueue = tracks
         val keys = entryKeys.fresh(tracks.size)
@@ -437,10 +462,10 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun playShuffled(tracks: List<Track>, startIndex: Int? = null) {
+    fun playShuffled(tracks: List<Track>, startIndex: Int? = null, context: String? = null) {
         if (tracks.isEmpty()) return
         val start = startIndex?.takeIf { it in tracks.indices } ?: tracks.indices.random()
-        playQueue(tracks, start, shuffle = true)
+        playQueue(tracks, start, shuffle = true, context = context)
     }
 
     fun togglePlayPause() = playerController.togglePlayPause()

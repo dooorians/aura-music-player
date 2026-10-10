@@ -106,6 +106,8 @@ fun PlaylistScreen(
     playlistDetailViewModel: PlaylistDetailViewModel = hiltViewModel(),
 ) {
     val detail by playlistDetailViewModel.detail.collectAsStateWithLifecycle()
+    val reco by playlistDetailViewModel.reco.collectAsStateWithLifecycle()
+    val recoRefreshing by playlistDetailViewModel.refreshing.collectAsStateWithLifecycle()
     val menuState = rememberGlassMenuState()
     var renaming by remember { mutableStateOf(false) }
     val nowPlaying by remember(playerViewModel) {
@@ -192,6 +194,42 @@ fun PlaylistScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            // A recommended playlist says when it was made, and can be made again now: the listener's
+                            // answers and the profile are kept.
+                            reco?.let { page ->
+                                val updated = if (page.updatedAtMs > 0) {
+                                    "Mis à jour le " + java.time.Instant.ofEpochMilli(page.updatedAtMs)
+                                        .atZone(java.time.ZoneId.systemDefault())
+                                        .format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH))
+                                } else "Pas encore mis à jour"
+                                Row(
+                                    modifier = Modifier.padding(top = com.ikko.aura.ui.components.designUnit() * 10f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 20f),
+                                ) {
+                                    Text(
+                                        text = updated + if (page.status == "kept") " · sources indisponibles, liste conservée" else "",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = com.ikko.aura.ui.components.designSp(30f),
+                                        lineHeight = com.ikko.aura.ui.components.designSp(36f),
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.weight(1f, fill = false),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = if (recoRefreshing) "Mise à jour…" else "Actualiser",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = com.ikko.aura.ui.components.designSp(30f),
+                                        lineHeight = com.ikko.aura.ui.components.designSp(36f),
+                                        color = Color.White,
+                                        modifier = Modifier
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .clickable(enabled = !recoRefreshing) { playlistDetailViewModel.refresh() }
+                                            .padding(horizontal = com.ikko.aura.ui.components.designUnit() * 6f, vertical = com.ikko.aura.ui.components.designUnit() * 6f),
+                                    )
+                                }
+                            }
                         }
                         if (renaming) {
                             RenameField(
@@ -205,9 +243,9 @@ fun PlaylistScreen(
                             horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 25f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) })
+                            ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks, context = autoKey) })
                             PlayAllButton(
-                                onClick = { playerViewModel.playQueue(current.tracks, 0) },
+                                onClick = { playerViewModel.playQueue(current.tracks, 0, context = autoKey) },
                                 label = "Lire",
                                 modifier = Modifier.weight(1f),
                                 inkOverride = com.ikko.aura.ui.components.immersiveInkOfKey(autoKey),
@@ -255,7 +293,7 @@ fun PlaylistScreen(
                         isCurrent = nowPlaying.first == track.id,
                         isPlaying = nowPlaying.second,
                         accent = accent,
-                        onClick = { playerViewModel.playQueue(current.tracks, index) },
+                        onClick = { playerViewModel.playQueue(current.tracks, index, context = autoKey) },
                         onLongClick = { menu.show(track) },
                         leading = {
                             AlbumArt(
@@ -267,9 +305,20 @@ fun PlaylistScreen(
                                 cacheKey = track.albumId.toString(),
                             )
                         },
+                        extraLine = reco?.reasons?.get(track.id),
                         trailing = {
+                            if (reco != null) {
+                                RecoRowMenu(
+                                    track = track,
+                                    onDislike = { playlistDetailViewModel.dislike(track) },
+                                    onKnown = { playlistDetailViewModel.markKnown(track) },
+                                    onHide = { playlistDetailViewModel.hide(track) },
+                                    onBlock = { playlistDetailViewModel.blockArtist(track.artist) },
+                                )
+                            } else {
                             IconButton(onClick = { playlistDetailViewModel.removeTrack(track.id) }, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 88f)) {
                                 Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = Color.White.copy(alpha = 0.78f), modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 36f))
+                            }
                             }
                         },
                     )
@@ -338,6 +387,37 @@ private fun UnavailableTrackRow(entry: UnavailableEntry, onRemove: () -> Unit) {
         }
         IconButton(onClick = onRemove) {
             Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary)
+        }
+    }
+}
+
+/**
+ * The listener's answers about a recommended song, in the app's own menu: "Je n'aime pas" (this song is not proposed
+ * again; its artist is nudged down in this playlist only), "Déjà connu" (not a rejection), "Masquer" and blocking the
+ * artist (every playlist, collaborations included).
+ */
+@Composable
+private fun RecoRowMenu(
+    track: Track,
+    onDislike: () -> Unit,
+    onKnown: () -> Unit,
+    onHide: () -> Unit,
+    onBlock: () -> Unit,
+) {
+    val state = rememberGlassMenuState()
+    androidx.compose.foundation.layout.Box(Modifier.glassMenuAnchor(state)) {
+        IconButton(onClick = { state.open() }, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 88f)) {
+            Icon(
+                CupertinoIcons.MoreVertical, contentDescription = "Plus d'options",
+                tint = Color.White.copy(alpha = 0.78f), modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 40f),
+            )
+        }
+        DesignMenu(state = state, width = 260.dp, shade = 0.24f) {
+            DesignMenuRow("Je n'aime pas", { state.close(); onDislike() }, icon = CupertinoIcons.Close)
+            DesignMenuRow("Déjà connu", { state.close(); onKnown() }, icon = CupertinoIcons.Check)
+            DesignMenuRow("Masquer ce titre", { state.close(); onHide() }, icon = CupertinoIcons.Delete)
+            DesignMenuDivider()
+            DesignMenuRow("Bloquer ${track.artist.take(24)}", { state.close(); onBlock() }, icon = CupertinoIcons.Person, danger = true)
         }
     }
 }

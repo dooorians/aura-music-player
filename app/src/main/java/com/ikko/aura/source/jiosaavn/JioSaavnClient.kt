@@ -43,6 +43,18 @@ class JioSaavnClient @Inject constructor() {
         }.getOrElse { emptyList() }
     }
 
+    /** Songs the catalogue lists as close to [songId] (its "reco" endpoint); a failure is thrown, not read as "none". */
+    suspend fun recommendationsOrThrow(songId: String): List<RawSongItem> = withContext(Dispatchers.IO) {
+        val urlString = "$baseUrl?__call=reco.getreco&_format=json&_marker=0&api_version=4&ctx=android&pid=${java.net.URLEncoder.encode(songId, "UTF-8")}"
+        val root = json.parseToJsonElement(executeRequest(urlString))
+        val array = when (root) {
+            is JsonArray -> root
+            is JsonObject -> root.values.firstOrNull { it is JsonArray } as? JsonArray
+            else -> null
+        } ?: return@withContext emptyList()
+        array.mapNotNull { runCatching { json.decodeFromJsonElement(RawSongItem.serializer(), it) }.getOrNull() }
+    }
+
     suspend fun getStreamUrl(saavnSongId: String): SaavnStream? = withContext(Dispatchers.IO) {
         runCatching {
             val urlString = "$baseUrl?__call=song.getDetails&_format=json&_marker=0&api_version=4&ctx=android&pids=$saavnSongId"

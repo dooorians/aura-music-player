@@ -65,6 +65,16 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
+
+    /** One transaction: the playlist is never seen empty or half-filled between the two steps. */
+    @androidx.room.Transaction
+    suspend fun replaceTracks(playlistId: Long, entries: List<PlaylistTrackEntity>) {
+        clearPlaylistTracks(playlistId)
+        entries.forEach { insertPlaylistTrack(it) }
+    }
+
+    @Query("SELECT * FROM playlist_tracks")
+    suspend fun allEntries(): List<PlaylistTrackEntity>
 }
 
 @Database(
@@ -77,8 +87,13 @@ interface PlaylistDao {
         TrackBindingEntity::class,
         YtmDownloadEntity::class,
         SourceConfigEntity::class,
+        com.ikko.aura.reco.ListenEntity::class,
+        com.ikko.aura.reco.FeedbackEntity::class,
+        com.ikko.aura.reco.HistoryEntity::class,
+        com.ikko.aura.reco.RecoItemEntity::class,
+        com.ikko.aura.reco.RecoStateEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -88,6 +103,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun catalogDao(): CatalogDao
     abstract fun downloadDao(): DownloadDao
     abstract fun sourceConfigDao(): SourceConfigDao
+    abstract fun recoDao(): com.ikko.aura.reco.RecoDao
 }
 
 /**

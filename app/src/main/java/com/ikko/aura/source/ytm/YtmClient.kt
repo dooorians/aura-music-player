@@ -46,6 +46,16 @@ data class YtmAlbum(val ref: YtmAlbumRef, val songs: List<YtmSong>)
 /** One page of search results, and the key to the next one if there is one. */
 data class YtmPage(val songs: List<YtmSong>, val next: Page?)
 
+/** What a song's own page says that a search result does not: whether it can be played, and when it was released. */
+data class YtmDetails(
+    /** True: an audio stream exists. False: the page says the song cannot be played. */
+    val playable: Boolean,
+    /** From the "Released on:" line of an official release's description; null when the page has none. */
+    val releasedOn: java.time.LocalDate?,
+    val category: String?,
+    val tags: List<String>,
+)
+
 /** An audio-only stream address and when it stops working. */
 data class YtmStream(val url: String, val mimeType: String, val expiresAtMs: Long)
 
@@ -89,6 +99,7 @@ class YtmClient @Inject constructor(
     private val albumMemo = Memo<List<YtmAlbumRef>>()
     private val artistMemo = Memo<List<YtmArtistRef>>()
     private val albumPageMemo = Memo<YtmAlbum>()
+    private val infoMemo = Memo<StreamInfo>()
 
     /** Initialises the extractor and opens the connection, so the first real search does not pay for either. */
     fun warmUp() {
@@ -226,6 +237,58 @@ class YtmClient @Inject constructor(
         return YtmStream(served, pick.format!!.mimeType, expiry).also { streams[videoId] = it }
     }
 
+    private fun infoOf(videoId: String): StreamInfo {
+        check(isEnabled()) { "YouTube Music is off" }
+        infoMemo.get(videoId)?.let { return it }
+        ensureInit()
+        return infoMemo.put(videoId, StreamInfo.getInfo("https://www.youtube.com/watch?v=$videoId"))
+    }
+
+    /**
+     * What the page of [videoId] says. A song that is gone, private or blocked reads as not playable; a network failure
+     * throws, so a caller does not take "could not ask" for "cannot be played".
+     */
+    fun details(videoId: String): YtmDetails {
+        val info = try {
+            infoOf(videoId)
+        } catch (e: org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException) {
+            return YtmDetails(playable = false, releasedOn = null, category = null, tags = emptyList())
+        }
+        val playable = info.audioStreams.any { it.deliveryMethod.name == "PROGRESSIVE_HTTP" && it.format?.mimeType?.startsWith("audio/") == true }
+        val description = runCatching { info.description?.content }.getOrNull().orEmpty()
+        val released = RELEASED_ON.find(description)?.groupValues?.get(1)?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+        return YtmDetails(playable, released, runCatching { info.category }.getOrNull(), runCatching { info.tags }.getOrNull().orEmpty())
+    }
+
+    /**
+     * What YouTube lists beside [videoId] ("up next"): songs, not clips or sessions. A song is taken when it is on an
+     * auto-generated "- Topic" channel, on a verified artist's own channel, or titled "Artist - Song" by that artist's
+     * channel; the artist is then the channel's name. Anything that reads as a video — "Official Music Video", "Live
+     * Lounge", a lyric video — is left out. Empty when the page has nothing of the kind.
+     */
+    fun related(videoId: String): List<YtmSong> {
+        val info = infoOf(videoId)
+        return info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { item ->
+            val id = videoIdOf(item.url) ?: return@mapNotNull null
+            val seconds = item.duration
+            if (seconds !in 60..900) return@mapNotNull null
+            if (VIDEO_LIKE.containsMatchIn(item.name)) return@mapNotNull null
+            val uploader = item.uploaderName.orEmpty()
+            val artist = uploader.removeSuffix(" - Topic").replace(Regex("(?i)vevo$"), "").trim()
+            if (artist.isEmpty()) return@mapNotNull null
+            val cover = YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url)
+            val topic = uploader.endsWith(" - Topic", ignoreCase = true)
+            // "Artist - Song": the part before the dash must be the channel's artist.
+            val parts = item.name.split(" - ", limit = 2)
+            val dashed = parts.size == 2 && parts[0].trim().equals(artist, ignoreCase = true)
+            when {
+                dashed -> YtmSong(id, parts[1].trim(), artist, seconds * 1000, cover)
+                topic || item.isUploaderVerified -> YtmSong(id, item.name, artist, seconds * 1000, cover)
+                else -> null
+            }
+        }
+    }
+
     /** The address stopped working before its time: forget it so the next [stream] asks again. */
     fun invalidate(videoId: String) {
         streams.remove(videoId)
@@ -258,6 +321,11 @@ class YtmClient @Inject constructor(
 
     private companion object {
         val EXPIRE = Regex("[?&]expire=(\\d+)")
+        val RELEASED_ON = Regex("Released on:\\s*(\\d{4}-\\d{2}-\\d{2})")
+        val VIDEO_LIKE = Regex(
+            "(?i)\\b(?:official (?:music |lyric )?video|music video|lyric video|live lounge|live (?:at|from|on|session)|visuali[sz]er|" +
+                "reaction|tutorial|interview|trailer|behind the scenes|full album|karaoke|cover)\\b",
+        )
         val PLAYLIST_ID = Regex("[?&]list=([\\w-]+)")
         const val MAX_ALBUM_PAGES = 3
         const val MEMO_SIZE = 24

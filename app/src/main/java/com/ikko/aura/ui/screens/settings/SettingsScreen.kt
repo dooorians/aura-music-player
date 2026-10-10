@@ -186,6 +186,9 @@ fun SettingsScreen(
                 )
             }
 
+            item { SectionLabel("Recommandations") }
+            item { RecommendationSettings() }
+
             item { SectionLabel("Sources") }
             item {
                 SettingsSwitchRow(
@@ -581,5 +584,116 @@ private fun <T> SettingsChoiceDialog(
                 }
             }
         }
+    }
+}
+
+/**
+ * The recommendations' settings. The switch is the consent to send artist and song names, drawn from what is played, to
+ * the sources the listener uses: off, nothing is sent and the seven playlists are made from the library alone.
+ */
+@Composable
+private fun RecommendationSettings() {
+    val vm: com.ikko.aura.viewmodel.RecoSettingsViewModel = hiltViewModel()
+    val consent by vm.consent.collectAsStateWithLifecycle()
+    val blocked by vm.blocked.collectAsStateWithLifecycle()
+    val seeds by vm.seeds.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    var showBlocked by remember { mutableStateOf(false) }
+    var showSeeds by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
+
+    Column {
+        SettingsSwitchRow(
+            title = "Recommandations personnalisées",
+            subtitle = "Cherche de nouveaux titres sur les sources que tu utilises (YouTube Music, JioSaavn, tes serveurs) pour " +
+                "Découverte, Dans ton style, Mix du jour, Ça bouge, Nouveautés, Chill et Nuit. Des noms d'artistes et de titres tirés " +
+                "de ce que tu écoutes sont envoyés à ces sources ; ton profil reste sur l'appareil. Désactivé, rien n'est envoyé et " +
+                "ces playlists viennent de ta bibliothèque.",
+            checked = consent,
+            onCheckedChange = vm::setConsent,
+        )
+        SettingsActionRow(
+            title = "Artistes bloqués",
+            subtitle = if (blocked.isEmpty()) "Aucun. Bloque un artiste depuis une playlist recommandée"
+            else "${blocked.size} artiste${if (blocked.size > 1) "s" else ""}, exclus des sept playlists, featurings compris",
+            trailing = null,
+            onClick = { showBlocked = true },
+        )
+        SettingsActionRow(
+            title = "Artistes que tu aimes",
+            subtitle = if (seeds.isEmpty()) "Aucun. Indique-en pour aider les recommandations à démarrer"
+            else seeds.joinToString(", "),
+            trailing = null,
+            onClick = { showSeeds = true },
+        )
+        if (consent) {
+            SettingsActionRow(
+                title = "Actualiser maintenant",
+                subtitle = if (refreshing) "Mise à jour en cours…" else "Refait les sept playlists, sans effacer ce qui a été appris",
+                trailing = null,
+                onClick = { if (!refreshing) vm.refresh() },
+            )
+        }
+        SettingsActionRow(
+            title = "Réinitialiser le profil",
+            subtitle = "Oublie les écoutes enregistrées, les « je n'aime pas » et l'historique des propositions. Les artistes bloqués sont gardés",
+            trailing = null,
+            onClick = { confirmReset = true },
+        )
+    }
+
+    if (showBlocked) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showBlocked = false },
+            title = { Text("Artistes bloqués") },
+            text = {
+                if (blocked.isEmpty()) Text("Aucun artiste bloqué.") else Column {
+                    blocked.forEach { artist ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(artist.name, modifier = Modifier.weight(1f))
+                            androidx.compose.material3.TextButton(onClick = { vm.unblock(artist.key) }) { Text("Débloquer") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { showBlocked = false }) { Text("Fermer") } },
+        )
+    }
+    if (showSeeds) {
+        var text by remember { mutableStateOf(seeds.joinToString(", ")) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showSeeds = false },
+            title = { Text("Artistes que tu aimes") },
+            text = {
+                Column {
+                    Text("Sépare les noms par une virgule. Ils servent de point de départ tant que ton historique est court.")
+                    androidx.compose.material3.OutlinedTextField(
+                        value = text, onValueChange = { text = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        placeholder = { Text("Rina Sawayama, Grimes") },
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    vm.setSeeds(text.split(',', ';', '\n').map { it.trim() }.filter { it.isNotEmpty() })
+                    showSeeds = false
+                }) { Text("Enregistrer") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { showSeeds = false }) { Text("Annuler") } },
+        )
+    }
+    if (confirmReset) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Réinitialiser le profil ?") },
+            text = { Text("Les écoutes enregistrées, tes « je n'aime pas » et l'historique des propositions sont effacés. Ta bibliothèque, tes favoris, tes playlists et les artistes bloqués ne changent pas.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmReset = false; vm.reset() }) { Text("Réinitialiser") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmReset = false }) { Text("Annuler") } },
+        )
     }
 }

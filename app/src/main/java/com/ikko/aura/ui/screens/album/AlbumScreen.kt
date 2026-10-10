@@ -638,6 +638,8 @@ internal fun AlbumTrackRow(
     leading: (@Composable () -> Unit)? = null,
     /** An album page keeps its rows inset 12 dp inside the page margin (the highlight then fills the margin); 0 aligns them on it. */
     inset: Dp = 0.dp,
+    /** A line under the artist: why a recommended song is in the playlist. */
+    extraLine: String? = null,
 ) {
     // "Wild And Alone (feat. PinkPantheress)" is the title and its credit run together; the page
     // sets them apart, the credit small beneath the title.
@@ -702,6 +704,16 @@ internal fun AlbumTrackRow(
                     fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f),
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (extraLine != null) {
+                Text(
+                    text = extraLine,
+                    fontSize = com.ikko.aura.ui.components.designSp(28f), lineHeight = com.ikko.aura.ui.components.designSp(34f),
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
