@@ -37,19 +37,19 @@ fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {})
     val onHome = motion.p < 0.5f
     val accent = rememberPlayerAccent(onDarkGlass = true, followPage = false)
     val pressed = remember { Animatable(1f) }
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(22.2.dp)
     LiquidGlassPanel(
         shape = shape,
-        tint = Color(0xFF080C1C),
-        tintAlpha = 0.4f,
-        blurRadiusDp = 16f,
+        tint = Color.White,
+        tintAlpha = 0.16f,
+        blurRadiusDp = 9.6f,
         dropShadow = false,
         edge = false,
         lensScale = 0f,
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .width(56.dp)
-            .height(64.dp)
+            .width(52.dp)
+            .height(58.5.dp)
             // The same life as the mini player beside it: stretched by the pages' speed, pressed in under the finger.
             .graphicsLayer {
                 val w = if (motion.reduceMotion) 0f
@@ -85,7 +85,7 @@ fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {})
             imageVector = if (onHome) CupertinoIcons.LibraryStack else CupertinoIcons.House,
             contentDescription = if (onHome) "Bibliothèque" else "Accueil",
             tint = accent,
-            modifier = Modifier.size(24.dp).align(Alignment.Center),
+            modifier = Modifier.size(20.7.dp).align(Alignment.Center),
         )
     }
 }

@@ -1,5 +1,12 @@
 package com.ikko.aura.ui.screens.library
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.border
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.toArgb
+import com.ikko.aura.ui.theme.LocalSearchOpener
+import com.ikko.aura.ui.components.frosted
 import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.ui.theme.AuraMotion
 import androidx.compose.animation.togetherWith
@@ -171,7 +178,7 @@ fun LibraryScreen(
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     // The header folds away with the status bar's height included: the page runs under the bar (see HomeScreen),
     // so once folded the list goes on up beneath it and melts into it. At rest the list starts where it did.
-    val headerHeight = statusBarTop + HEADER_RELATIVE_HEIGHT
+    val headerHeight = com.ikko.aura.ui.components.designUnit() * 424f
     val headerHeightPx = with(density) { headerHeight.toPx() }
     var headerOffsetPx by rememberCollapseOffset()
     // Same rule as the top nav row: collapse while scrolling down, and only come back once the
@@ -266,13 +273,15 @@ fun LibraryScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(0, headerOffsetPx.roundToInt()) }
-                    .padding(top = statusBarTop),
+                    .offset { IntOffset(0, headerOffsetPx.roundToInt()) },
             ) {
                 LibraryHeader(
                     statusBarTop = statusBarTop,
                     countText = countText,
                     sortMenu = sortMenu,
+                    filter = uiState.filter,
+                    onFilter = libraryViewModel::setFilter,
+                    onSearch = LocalSearchOpener.current,
                     onSmartShuffle = {
                         scope.launch {
                             val queue = libraryViewModel.smartShuffle()
@@ -392,56 +401,103 @@ private fun LibraryHeader(
     countText: String,
     sortMenu: GlassMenuState,
     onSmartShuffle: () -> Unit,
+    filter: LibraryFilter,
+    onFilter: (LibraryFilter) -> Unit,
+    onSearch: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(HEADER_RELATIVE_HEIGHT)
-            // Moves with its page, like the headers of the other pages: it used to trail behind it, which on a
-            // fast swipe left it lagging and then catching up — a bounce of its own the other pages do not have.
-            .padding(horizontal = PAGE_MARGIN),
-    ) {
-        // Two texts stacked in one box, each placed by its own baseline from the top of the header, so the
-        // title's baseline is at 89 dp and the count's at 111 dp whatever their line heights.
-        CoverText(
-            text = "Bibliothèque",
-            style = LibraryTypography.PageTitle,
-            maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = TITLE_RELATIVE_BASELINE),
-        )
-        CoverText(
-            text = countText,
-            style = LibraryTypography.PageCount,
-            alpha = 0.66f,
-            maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).paddingFromBaseline(top = COUNT_RELATIVE_BASELINE),
-        )
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                // The discs' centre sits level with the middle of the title's capitals.
-                .padding(top = TITLE_RELATIVE_BASELINE - 10.6.dp - HEADER_BUTTON / 2),
-            horizontalArrangement = Arrangement.spacedBy(HEADER_BUTTON_GAP),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Each in a capsule of its own (they used to share one): the same glass buttons as before.
-            AuraIconGroup(light = 80f) {
-                AuraGroupIcon(onClick = onSmartShuffle, size = HEADER_BUTTON) {
-                    Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire intelligent", modifier = Modifier.size(24.dp))
+    // The "F" header of the design: the title and the count, a frosted toolbar (search, shuffle, sort) at the right, then the
+    // four views as chips. Laid out in the design's pixels (1080 px wide = the phone's width).
+    val u = com.ikko.aura.ui.components.designUnit()
+    val accent = com.ikko.aura.ui.components.rememberPlayerAccent()
+    val face = androidx.compose.ui.text.TextStyle(fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, color = Color.White)
+    val chipInk = remember(accent) {
+        val hsl = FloatArray(3)
+        androidx.core.graphics.ColorUtils.colorToHSL(accent.toArgb(), hsl)
+        Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], (hsl[1] * 0.5f).coerceAtMost(0.5f), 0.16f)))
+    }
+    Column(Modifier.fillMaxWidth().padding(top = u * 128f, start = u * 40f, end = u * 40f)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(verticalArrangement = Arrangement.spacedBy(u * 10f), modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                    "Bibliothèque",
+                    style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(66f), lineHeight = com.ikko.aura.ui.components.designSp(76f),
+                        fontWeight = FontWeight.ExtraBold, letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f)),
+                    maxLines = 1,
+                )
+                Text(
+                    countText,
+                    style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
+                        fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.78f)),
+                    maxLines = 1,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .offset(y = u * -18f)
+                    .height(u * 112f)
+                    .shadow(u * 14f, CircleShape, ambientColor = Color.Black.copy(alpha = 0.2f), spotColor = Color.Black.copy(alpha = 0.2f))
+                    .clip(CircleShape)
+                    .frosted(CircleShape)
+                    .padding(horizontal = u * 6f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ToolbarButton(u, onSearch) { Icon(CupertinoIcons.Search, "Rechercher", tint = accent, modifier = Modifier.size(u * 44f)) }
+                Box(Modifier.width(u * 1.5f).height(u * 44f).background(Color.White.copy(alpha = 0.28f)))
+                ToolbarButton(u, onSmartShuffle) { Icon(CupertinoIcons.Shuffle, "Lecture aléatoire", tint = accent, modifier = Modifier.size(u * 44f)) }
+                Box(Modifier.width(u * 1.5f).height(u * 44f).background(Color.White.copy(alpha = 0.28f)))
+                ToolbarButton(u, sortMenu::open, Modifier.glassMenuAnchor(sortMenu)) {
+                    Icon(CupertinoIcons.Sort, "Trier", tint = accent, modifier = Modifier.size(u * 44f))
                 }
             }
-            AuraIconGroup(light = 80f) {
-                // The menu grows out of this button: it tells the menu where it is, and empties while the menu is out.
-                AuraGroupIcon(
-                    onClick = sortMenu::open,
-                    modifier = Modifier.glassMenuAnchor(sortMenu),
-                    size = HEADER_BUTTON,
+        }
+        Row(Modifier.padding(top = u * 36f), horizontalArrangement = Arrangement.spacedBy(u * 12f)) {
+            listOf(
+                LibraryFilter.TRACKS to "Titres",
+                LibraryFilter.ALBUMS to "Albums",
+                LibraryFilter.ARTISTS to "Artistes",
+                LibraryFilter.PLAYLISTS to "Playlists",
+            ).forEach { (f, label) ->
+                val on = f == filter
+                Box(
+                    Modifier
+                        .height(u * 88f)
+                        .clip(CircleShape)
+                        .then(
+                            if (on) Modifier.background(Color.White)
+                            else Modifier
+                                .background(Color.White.copy(alpha = 0.14f))
+                                .border(u * 1.5f, Color.White.copy(alpha = 0.24f), CircleShape),
+                        )
+                        .clickable { onFilter(f) }
+                        .padding(horizontal = u * 44f),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(CupertinoIcons.Sort, contentDescription = "Trier", modifier = Modifier.size(24.dp))
+                    Text(
+                        label,
+                        style = face.copy(
+                            fontSize = com.ikko.aura.ui.components.designSp(38f), lineHeight = com.ikko.aura.ui.components.designSp(46f),
+                            fontWeight = if (on) FontWeight.ExtraBold else FontWeight.Bold,
+                            color = if (on) chipInk else Color.White,
+                        ),
+                        maxLines = 1,
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ToolbarButton(
+    u: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier.width(u * 104f).height(u * 100f).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 @Composable
@@ -466,7 +522,7 @@ private fun TrackList(
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(// Rows carry 4 dp of their own: taken off, the covers sit on the title's line.
-            start = PAGE_MARGIN - 4.dp, end = INDEX_GUTTER, top = 8.dp, bottom = listBottomPadding() + 12.dp),
+            start = com.ikko.aura.ui.components.designUnit() * 40f - 4.dp, end = INDEX_GUTTER, top = 0.dp, bottom = listBottomPadding() + 12.dp),
             horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else 8.dp),
             verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else 0.dp),
         ) {
@@ -510,13 +566,13 @@ private fun AlbumGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                start = PAGE_MARGIN,
+                start = com.ikko.aura.ui.components.designUnit() * 40f,
                 end = INDEX_GUTTER,
                 top = if (isList) 8.dp else 0.dp,
                 bottom = listBottomPadding() + 12.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else if (columns == 2) 12.dp else 10.dp),
-            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else if (columns == 2) 14.dp else 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else com.ikko.aura.ui.components.designUnit() * 25f),
+            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else com.ikko.aura.ui.components.designUnit() * 40f),
         ) {
             itemsIndexed(albums, key = { _, album -> album.id }) { index, album ->
                 if (isList) {
@@ -526,39 +582,48 @@ private fun AlbumGrid(
                         onLongClick = { onAlbumLongPress(album) },
                     )
                 } else {
-                    Column {
-                        SquircleCard(
-                            modifier = Modifier
+                    // The "F" grid: square covers with 32 px corners and a hairline rim, then the title and the artist, in design px.
+                    val u = com.ikko.aura.ui.components.designUnit()
+                    val coverShape = androidx.compose.foundation.shape.RoundedCornerShape(u * 32f)
+                    val face = androidx.compose.ui.text.TextStyle(fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, color = Color.White)
+                    Column(verticalArrangement = Arrangement.spacedBy(u * 14f)) {
+                        Box(
+                            Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(1f),
-                            onClick = { navController.navigate(album.route()) },
-                            onLongClick = { onAlbumLongPress(album) },
+                                .aspectRatio(1f)
+                                .clip(coverShape)
+                                .combinedClickable(
+                                    onClick = { navController.navigate(album.route()) },
+                                    onLongClick = { onAlbumLongPress(album) },
+                                ),
                         ) {
                             AlbumArt(
                                 uri = album.artworkUri,
                                 contentDescription = album.title,
+                                shape = coverShape,
                                 modifier = Modifier.fillMaxSize(),
                                 targetSizeDp = if (columns == 2) 260.dp else 180.dp,
                                 cacheKey = album.id.toString(),
                             )
+                            Box(Modifier.fillMaxSize().border(u * 1.5f, Color.White.copy(alpha = 0.1f), coverShape))
                         }
-                        Text(
-                            text = album.title,
-                            style = if (columns == 2) LibraryTypography.AlbumTitle.copy(fontSize = 15.sp, lineHeight = 19.sp) else LibraryTypography.AlbumTitle,
-                            color = Color.White,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = if (columns == 2) 10.dp else 9.dp),
-                        )
-                        CoverText(
-                            text = album.artist,
-                            style = if (columns == 2) LibraryTypography.AlbumArtist.copy(fontSize = 13.sp) else LibraryTypography.AlbumArtist,
-                            alpha = 0.72f,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Column {
+                            Text(
+                                text = album.title,
+                                style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(38f), lineHeight = com.ikko.aura.ui.components.designSp(46f), fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = album.artist,
+                                style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
+                                    fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.78f)),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }

@@ -248,46 +248,18 @@ private fun TileSurface(
         modifier = modifier
             // The swell is outside the clip, so the clip, the fill and the rim all grow together.
             .glassPressLayer(press)
-            // The design's soft shadow (0 10 30 at 28 %), under the button and outside its clip.
-            .then(
-                if (tone == ButtonTone.Primary) Modifier else Modifier.shadow(
-                    elevation = 7.dp,
-                    shape = shape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.28f),
-                    spotColor = Color.Black.copy(alpha = 0.34f),
-                ),
-            )
             .clip(shape)
-            .drawBehind {
+            .then(
                 if (tone == ButtonTone.Primary) {
-                    drawRect(fill)
-                    if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+                    Modifier.drawBehind {
+                        drawRect(fill)
+                        if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
+                    }
                 } else {
-                    // The design's frosted button: white from 22 % at the top to 10 % at the bottom over the page, a 0.6 dp
-                    // rim at 24 %, and a 0.8 dp light line along the top edge at 28 %.
-                    drawRect(
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.22f),
-                            1f to Color.White.copy(alpha = 0.10f),
-                        ),
-                    )
-                    if (tint != null) drawRect(tint().copy(alpha = TINT_ALPHA))
-                    val outline = shape.createOutline(size, layoutDirection, this)
-                    drawOutline(outline, Color.White.copy(alpha = 0.24f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
-                    // The light line along the top fades out down the sides instead of being cut: strongest at the very top,
-                    // gone by a third of the button's height.
-                    drawOutline(
-                        outline,
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.34f),
-                            0.34f to Color.White.copy(alpha = 0f),
-                            startY = 0f, endY = size.height,
-                        ),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2.dp.toPx()),
-                    )
-                }
-            }
+                    // The design's frosted button (see Frosted.kt): its gradient, rim and light line over a blur of the background.
+                    Modifier.frosted(shape as androidx.compose.foundation.shape.CornerBasedShape)
+                },
+            )
             .then(if (tone == ButtonTone.Primary) Modifier.glassEdge(shape) else Modifier)
             .glassPressGlow(press)
             .semantics { role = Role.Button }

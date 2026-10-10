@@ -298,6 +298,7 @@ fun cardAmbienceOf(key: String): CardAmbience? = when (key) {
     "top" -> CardAmbience.ENERGIE
     "style", "new" -> CardAmbience.NOUVEAUTES
     "night" -> CardAmbience.NUIT
+    "chill" -> CardAmbience.CHILL
     "energy" -> CardAmbience.ENERGIE
     else -> null
 }

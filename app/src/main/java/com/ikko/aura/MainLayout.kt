@@ -596,6 +596,7 @@ fun MainLayout() {
     LaunchedEffect(Unit) { runCatching { fontResolver.preload(com.ikko.aura.ui.theme.AuraFontFamily) } }
     // What the mini player refracts: the page itself, recorded once per frame and shared.
     val pillBackdrop = rememberLayerBackdrop()
+    val immersiveBackdrop = rememberLayerBackdrop()
     val pageMotion = rememberPageMotion(AuraDestination.topLevelRoutes.size)
 
     val capsule = remember { TabCapsuleState() }
@@ -616,6 +617,8 @@ fun MainLayout() {
     val coverColors = com.ikko.aura.ui.theme.rememberCoverColors(backdrop.theme.hue)
     // Set by a page that is lit with colours of its own; the playing track's are used otherwise.
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
+    // The palette a page that is lit with one of its own asks the background for (Home's moods, an album, a card's playlist).
+    val immersivePage = remember { mutableStateOf<com.ikko.aura.ui.components.ImmersivePalette?>(null) }
     var albumAuroraTheme by remember { mutableStateOf<AlbumTheme?>(null) }
     LaunchedEffect(pageTheme.value) {
         pageTheme.value?.let { albumAuroraTheme = it }
@@ -715,6 +718,8 @@ fun MainLayout() {
             LocalAuraBackdrop provides glassBackdrop,
             LocalSearchOpener provides ::openSearch,
             LocalPageTheme provides pageTheme,
+            com.ikko.aura.ui.components.LocalImmersivePalette provides immersivePage,
+            com.ikko.aura.ui.components.LocalImmersiveBackdrop provides immersiveBackdrop,
             com.ikko.aura.ui.theme.LocalCoverColors provides coverColors,
             LocalPageMotion provides pageMotion,
             // The page darkens as the card rises over it and lightens as it sinks — tied to the card rather
@@ -882,6 +887,26 @@ fun MainLayout() {
                 .graphicsLayer { }
                 .layerBackdrop(pillBackdrop, enabled = pageBackdropNeeded),
         ) {
+        // The F background, inside the recorded page so that the mini player's glass blurs it too. Out on the player's own
+        // screens (they have their grounds), and in again as they leave.
+        val immersiveAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (currentRoute in AuraDestination.fullScreenRoutes) 0f else 1f,
+            animationSpec = tween(160),
+            label = "immersive-alpha",
+        )
+        if (immersiveAlpha > 0f) {
+            val playing = backdrop.theme
+            val derived = remember(playing) {
+                val neutral = playing === AlbumTheme.Neutral || playing.hue == null
+                val (h, s) = com.ikko.aura.ui.components.hueAndSaturation(playing.accent)
+                com.ikko.aura.ui.components.immersiveFromCover(if (neutral) null else h, s, dark = true)
+            }
+            com.ikko.aura.ui.components.ImmersiveBackground(
+                palette = immersivePage.value ?: derived,
+                alpha = immersiveAlpha,
+                pictureModifier = Modifier.layerBackdrop(immersiveBackdrop),
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1133,6 +1158,8 @@ fun MainLayout() {
             fun capsuleAlpha(): Float {
                 val isTabs = currentRoute == AuraDestination.Tabs.route
                 val isNowPlaying = currentRoute == AuraDestination.NowPlaying.route
+                // The "F" design has no tab capsule: the library's own header carries its views and its toolbar.
+                if (CAPSULE_HIDDEN) return 0f
                 return searchClear(searchPull.value, !searchOpen) * when {
                     !isTabs && !isNowPlaying -> 0f
                     // The route is the player's but its card has not been claimed yet: the first frames of an
@@ -1285,7 +1312,7 @@ fun MainLayout() {
                                 alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                             }
                             .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 14.8.dp, vertical = 6.dp),
                     )
                 }
             }
@@ -1354,7 +1381,7 @@ private fun PlayerPillHost(
     CompositionLocalProvider(LocalAuraBackdrop provides backdrop) {
         androidx.compose.foundation.layout.Row(
             modifier = modifier,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(7.4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
         FloatingPlayerPill(
@@ -1516,4 +1543,5 @@ private class TopRoundedClip(private val radius: Float) : androidx.compose.ui.gr
 }
 
 /** Where the capsule is parked while it is not shown: far enough below the screen to be touched by nothing. */
+private const val CAPSULE_HIDDEN = true
 private const val CAPSULE_PARKED_PX = 20_000f

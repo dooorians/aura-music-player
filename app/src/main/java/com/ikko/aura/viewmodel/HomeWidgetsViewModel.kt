@@ -185,22 +185,26 @@ class HomeWidgetsViewModel @Inject constructor(
         const val MIX_SIZE = 30
         const val FOUR_MIN_MS = 4L * 60_000L
         const val THREE_MIN_MS = 3L * 60_000L
+        // The six moods of the design, in its order, then the three the app already had.
         val CARDS = listOf(
             Spec("fav", WidgetKind.FAVORITE_ALBUMS, CardAmbience.FAVORIS, "Favoris", "Fait pour toi"),
             Spec("disc", WidgetKind.REDISCOVER, CardAmbience.DECOUVERTE, "Découverte", "À redécouvrir", weekly = true),
-            Spec("top", WidgetKind.TOP_PLAYED, CardAmbience.ENERGIE, "Les plus écoutés", "Ce que tu écoutes le plus", weekly = true),
-            Spec("daily", WidgetKind.DAILY_MIX, CardAmbience.NUIT, "Mix du jour", "Ambiance du moment"),
-            Spec("style", WidgetKind.FOR_YOU, CardAmbience.NOUVEAUTES, "Dans ton style", "D'après tes écoutes", weekly = true),
-            // Chosen from what the files say (their length, their year), not from guesses about how they sound.
-            Spec("night", null, CardAmbience.NUIT, "Nuit", "Des titres longs, pour la soirée", weekly = true) { d ->
-                d.allTracks.filter { it.durationMs >= FOUR_MIN_MS }.sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
-            },
-            Spec("energy", null, CardAmbience.ENERGIE, "Énergique", "Courts et directs", weekly = true) { d ->
-                d.allTracks.filter { it.durationMs in 1L until THREE_MIN_MS }.sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
-            },
-            Spec("new", null, CardAmbience.NOUVEAUTES, "Nouveautés", "Les plus récents de ta bibliothèque", weekly = true) { d ->
+            Spec("new", null, CardAmbience.NOUVEAUTES, "Nouveautés", "Fait pour toi", weekly = true) { d ->
                 d.allTracks.filter { it.year > 0 }.sortedWith(compareByDescending<Track> { it.year }.thenBy { HomeWidgetRules.dailyRank(it.id, d.day) })
             },
+            // Chosen from what the files say (their length), not from guesses about how they sound.
+            Spec("energy", null, CardAmbience.ENERGIE, "Ça bouge !", "Ambiance du moment", weekly = true) { d ->
+                d.allTracks.filter { it.durationMs in 1L until THREE_MIN_MS }.sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
+            },
+            Spec("chill", null, CardAmbience.CHILL, "Chill", "Ambiance du moment", weekly = true) { d ->
+                d.allTracks.filter { it.durationMs in THREE_MIN_MS until FOUR_MIN_MS }.sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
+            },
+            Spec("night", null, CardAmbience.NUIT, "Nuit", "Ambiance du moment", weekly = true) { d ->
+                d.allTracks.filter { it.durationMs >= FOUR_MIN_MS }.sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
+            },
+            Spec("top", WidgetKind.TOP_PLAYED, CardAmbience.ENERGIE, "Les plus écoutés", "Ce que tu écoutes le plus", weekly = true),
+            Spec("daily", WidgetKind.DAILY_MIX, CardAmbience.NUIT, "Mix du jour", "Ambiance du moment"),
+            Spec("style", WidgetKind.FOR_YOU, CardAmbience.FAVORIS, "Dans ton style", "D'après tes écoutes", weekly = true),
         )
     }
 }
