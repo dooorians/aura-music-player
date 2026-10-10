@@ -70,6 +70,20 @@ import com.ikko.aura.viewmodel.rememberAlbumTracks
 /** What each mood writes in: the ink of its selected chip and of its white button, and the tint of its subtitle (FHome*). */
 private class Ink(val on: Color, val soft: Color)
 
+private fun inkOf(card: ForYouCard?) = when (card?.id) {
+    "top" -> Ink(Color(0xFF4A3000), Color(0xFFFFF0B8))
+    "daily" -> Ink(Color(0xFF0C3A08), Color(0xFFDDF8B8))
+    "style" -> Ink(Color(0xFF5A0414), Color(0xFFFFD0D6))
+    else -> inkOf(card?.ambience ?: CardAmbience.FAVORIS)
+}
+
+private fun paletteOf(card: ForYouCard?) = when (card?.id) {
+    "top" -> com.ikko.aura.ui.components.ImmersivePalettes.Or
+    "daily" -> com.ikko.aura.ui.components.ImmersivePalettes.Vert
+    "style" -> com.ikko.aura.ui.components.ImmersivePalettes.Cramoisi
+    else -> immersiveOfAmbience(card?.ambience ?: CardAmbience.FAVORIS)
+}
+
 private fun inkOf(ambience: CardAmbience) = when (ambience) {
     CardAmbience.FAVORIS -> Ink(Color(0xFF1D1450), Color(0xFFD8CDFC))
     CardAmbience.DECOUVERTE -> Ink(Color(0xFF0A1F6B), Color(0xFFD2E6FF))
@@ -97,14 +111,14 @@ fun HomeScreen(
     var organizing by remember { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected: ForYouCard? = state.cards.firstOrNull { it.id == selectedId } ?: state.cards.firstOrNull()
-    val ink = inkOf(selected?.ambience ?: CardAmbience.FAVORIS)
+    val ink = inkOf(selected)
     val accent = rememberPlayerAccent()
     val face = TextStyle(fontFamily = AuraFontFamily, color = Color.White)
 
     // The page's background is the mood's — only while Home is the page showing.
     val slot = LocalImmersivePalette.current
     val motion = LocalPageMotion.current
-    val palette = immersiveOfAmbience(selected?.ambience ?: CardAmbience.FAVORIS)
+    val palette = paletteOf(selected)
     LaunchedEffect(palette) {
         snapshotFlow { (motion?.p ?: 0f) < 0.5f }.collect { shown ->
             if (shown) slot.value = palette else if (slot.value == palette) slot.value = null
