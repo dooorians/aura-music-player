@@ -583,11 +583,11 @@ internal fun ActionRow(
 }
 
 @Composable
-internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier: Modifier = Modifier) {
+internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier: Modifier = Modifier, inkOverride: Color? = null) {
     // The white capsule stays white; its text and icon take the accent's hue, deepened: the pale accent the other
     // controls wear would not read on white.
     val accent = rememberPlayerAccent()
-    val ink = remember(accent) {
+    val ink = inkOverride ?: remember(accent) {
         val hsl = FloatArray(3)
         androidx.core.graphics.ColorUtils.colorToHSL(accent.toArgb(), hsl)
         Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], hsl[1].coerceIn(0.45f, 0.85f), 0.28f)))

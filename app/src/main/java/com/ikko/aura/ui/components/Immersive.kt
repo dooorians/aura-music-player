@@ -94,6 +94,34 @@ fun immersiveOfAmbience(ambience: com.ikko.aura.data.home.CardAmbience): Immersi
     com.ikko.aura.data.home.CardAmbience.NUIT -> ImmersivePalettes.Nuit
 }
 
+/** The palette of a Home card by its id / its automatic playlist's key: the same on Home and on the playlist's page. */
+fun immersiveOfKey(key: String?): ImmersivePalette? = when (key) {
+    "fav" -> ImmersivePalettes.Favoris
+    "disc" -> ImmersivePalettes.Decouverte
+    "new" -> ImmersivePalettes.Nouveautes
+    "energy" -> ImmersivePalettes.Energie
+    "chill" -> ImmersivePalettes.Chill
+    "night" -> ImmersivePalettes.Nuit
+    "top" -> ImmersivePalettes.Or
+    "daily" -> ImmersivePalettes.Vert
+    "style" -> ImmersivePalettes.Cramoisi
+    else -> null
+}
+
+/** The ink of the white "Lire" button on a card's page, by the same key (matches Home's). */
+fun immersiveInkOfKey(key: String?): Color? = when (key) {
+    "fav" -> Color(0xFF1D1450)
+    "disc" -> Color(0xFF0A1F6B)
+    "new" -> Color(0xFF7A0B4A)
+    "energy" -> Color(0xFF6B2204)
+    "chill" -> Color(0xFF04423D)
+    "night" -> Color(0xFF08122E)
+    "top" -> Color(0xFF4A3000)
+    "daily" -> Color(0xFF0C3A08)
+    "style" -> Color(0xFF5A0414)
+    else -> null
+}
+
 /** What a page that is lit with a palette of its own (Home's moods, an album, a card's playlist) tells the background. */
 val LocalImmersivePalette = compositionLocalOf<androidx.compose.runtime.MutableState<ImmersivePalette?>> {
     mutableStateOf(null)

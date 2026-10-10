@@ -77,12 +77,8 @@ private fun inkOf(card: ForYouCard?) = when (card?.id) {
     else -> inkOf(card?.ambience ?: CardAmbience.FAVORIS)
 }
 
-private fun paletteOf(card: ForYouCard?) = when (card?.id) {
-    "top" -> com.ikko.aura.ui.components.ImmersivePalettes.Or
-    "daily" -> com.ikko.aura.ui.components.ImmersivePalettes.Vert
-    "style" -> com.ikko.aura.ui.components.ImmersivePalettes.Cramoisi
-    else -> immersiveOfAmbience(card?.ambience ?: CardAmbience.FAVORIS)
-}
+private fun paletteOf(card: ForYouCard?) =
+    com.ikko.aura.ui.components.immersiveOfKey(card?.id) ?: immersiveOfAmbience(card?.ambience ?: CardAmbience.FAVORIS)
 
 private fun inkOf(ambience: CardAmbience) = when (ambience) {
     CardAmbience.FAVORIS -> Ink(Color(0xFF1D1450), Color(0xFFD8CDFC))
@@ -118,13 +114,15 @@ fun HomeScreen(
     // The page's background is the mood's — only while Home is the page showing.
     val slot = LocalImmersivePalette.current
     val motion = LocalPageMotion.current
-    val palette = paletteOf(selected)
+    // A copy of its own: a playlist opened from this card shows the same colours, and each page clears only what it set
+    // (by identity), or this page leaving would wipe the playlist's.
+    val palette = remember(selected?.id) { paletteOf(selected).let { com.ikko.aura.ui.components.ImmersivePalette(it.base, it.blobs) } }
     LaunchedEffect(palette) {
         snapshotFlow { (motion?.p ?: 0f) < 0.5f }.collect { shown ->
-            if (shown) slot.value = palette else if (slot.value == palette) slot.value = null
+            if (shown) slot.value = palette else if (slot.value === palette) slot.value = null
         }
     }
-    DisposableEffect(palette) { onDispose { if (slot.value == palette) slot.value = null } }
+    DisposableEffect(palette) { onDispose { if (slot.value === palette) slot.value = null } }
 
     com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         if (organizing) {

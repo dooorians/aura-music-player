@@ -130,7 +130,10 @@ fun PlaylistScreen(
     }
     // The "F" page is lit by blurred blobs: the weekly card's own mood when it is one, else the page's default (player-lit).
     val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
-    val immersivePalette = remember(ambience) { ambience?.let { com.ikko.aura.ui.components.immersiveOfAmbience(it) } }
+    val immersivePalette = remember(autoKey, ambience) {
+        (com.ikko.aura.ui.components.immersiveOfKey(autoKey) ?: ambience?.let { com.ikko.aura.ui.components.immersiveOfAmbience(it) })
+            ?.let { com.ikko.aura.ui.components.ImmersivePalette(it.base, it.blobs) }
+    }
     DisposableEffect(immersivePalette) {
         immersive.value = immersivePalette
         onDispose { if (immersive.value === immersivePalette) immersive.value = null }
@@ -207,6 +210,7 @@ fun PlaylistScreen(
                                 onClick = { playerViewModel.playQueue(current.tracks, 0) },
                                 label = "Lire",
                                 modifier = Modifier.weight(1f),
+                                inkOverride = com.ikko.aura.ui.components.immersiveInkOfKey(autoKey),
                             )
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
