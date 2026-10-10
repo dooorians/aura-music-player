@@ -67,6 +67,22 @@ object ArtistNames {
         }
     }
 
+    /**
+     * Whether two artist keys can be the same artist written differently: equal, or one is the other's first words
+     * ("rebecca" on a channel branded with a first name, "rebecca black" in the tags of the files). The shorter name
+     * must be long enough ([MIN_ALIAS]) that "lisa" is not taken for "lisa ono".
+     */
+    fun compatible(a: String, b: String): Boolean {
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (a == b) return true
+        val (short, long) = if (a.length <= b.length) a to b else b to a
+        return short.length >= MIN_ALIAS && long.startsWith("$short ")
+    }
+
+    fun anyCompatible(a: Collection<String>, b: Collection<String>): Boolean = a.any { x -> b.any { y -> compatible(x, y) } }
+
+    private const val MIN_ALIAS = 5
+
     /** A name for the artist field of a source whose uploader is a channel ("Rina Sawayama - Topic", "RinaSawayamaVEVO"). */
     fun cleanChannel(name: String): String =
         name.trim().replace(TOPIC, "").replace(Regex("(?i)\\s*vevo$"), "").trim()

@@ -67,7 +67,7 @@ class RecoStoreImpl @Inject constructor(
     }
 
     override suspend fun localIndex(): TrackIdentity.Index =
-        TrackIdentity.Index(libraryTracks().map { TrackIdentity.Entry(it.title, it.artist, it.durationMs) })
+        TrackIdentity.Index(libraryTracks().map { TrackIdentity.Entry(it.title, it.artist, it.durationMs, album = it.album) })
 
     override suspend fun blockedArtists(): Set<String> =
         dao.allFeedback().filter { it.kind == FeedbackKind.BLOCK_ARTIST.name }.mapTo(HashSet()) { it.subject }

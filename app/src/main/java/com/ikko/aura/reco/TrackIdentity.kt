@@ -55,14 +55,20 @@ object TrackIdentity {
     fun sameLength(a: Long, b: Long, toleranceMs: Long = 6_000L): Boolean = a <= 0 || b <= 0 || abs(a - b) <= toleranceMs
 
     /** One entry of a library, reduced to what matching needs. */
-    class Entry(val title: String, val artist: String, val durationMs: Long, extraCredits: List<String> = emptyList()) {
+    class Entry(val title: String, val artist: String, val durationMs: Long, extraCredits: List<String> = emptyList(), val album: String = "") {
         val titleKey: String = titleKey(title)
         val credits: Set<String> = ArtistNames.creditsOf(artist, title, extraCredits).toSet()
+        /** The album as compared; blank for no album, or the placeholder a source puts when it does not know. */
+        val albumKey: String = if (album.isBlank() || album.equals("YouTube Music", ignoreCase = true)) "" else baseKey(album)
     }
 
     /** The songs the listener already has: a candidate that matches any of them is not a discovery. */
     class Index(entries: Collection<Entry>) {
         private val byTitle: Map<String, List<Entry>> = entries.filter { it.titleKey.isNotEmpty() }.groupBy { it.titleKey }
+
+        /** Album key → the artists credited on that album in the library. */
+        private val byAlbum: Map<String, Set<String>> = entries.filter { it.albumKey.isNotEmpty() }
+            .groupBy { it.albumKey }.mapValues { (_, list) -> list.flatMapTo(HashSet()) { it.credits } }
 
         val size: Int = entries.size
 
@@ -71,15 +77,25 @@ object TrackIdentity {
             val same = byTitle[candidate.titleKey] ?: return false
             return same.any { e ->
                 sameLength(e.durationMs, candidate.durationMs) && (
-                    e.credits.any { it in candidate.credits } ||
+                    ArtistNames.anyCompatible(e.credits, candidate.credits) ||
                         // "Artist - Title" kept in the title field of a file with no artist tag.
                         e.credits.isEmpty() || candidate.credits.isEmpty()
                     )
             }
         }
 
-        /** Whether the listener has songs by [artistKey]. */
-        fun hasArtist(artistKey: String): Boolean = artists.contains(artistKey)
+        /**
+         * Whether the listener has the album [album] by one of [credits]: the same album under the same artist (or an
+         * alias of it), whichever of its songs they have. A song of an album they own is not a discovery.
+         */
+        fun hasAlbum(album: String, credits: Collection<String>): Boolean {
+            if (album.isBlank() || album.equals("YouTube Music", ignoreCase = true)) return false
+            val artistsOnAlbum = byAlbum[baseKey(album)] ?: return false
+            return artistsOnAlbum.isEmpty() || ArtistNames.anyCompatible(artistsOnAlbum, credits)
+        }
+
+        /** Whether the listener has songs by [artistKey] (or by an artist that is the same under another spelling). */
+        fun hasArtist(artistKey: String): Boolean = artistKey in artists || artists.any { ArtistNames.compatible(it, artistKey) }
 
         private val artists: Set<String> = entries.flatMapTo(HashSet()) { it.credits }
     }

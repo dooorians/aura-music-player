@@ -14,6 +14,10 @@ data class Verification(
     val playable: Boolean?,
     val release: Release? = null,
     val tags: List<String> = emptyList(),
+    /** The album the song's page names, when it does. */
+    val album: String? = null,
+    /** True: the page is an auto-generated song (not a video, a clip or a talk). Null: not told. */
+    val isSong: Boolean? = null,
 )
 
 /** A place recommendations can be found: a search, and where it has one, a "similar to" and a check. */
@@ -37,7 +41,10 @@ interface CandidateSource {
 /** What is asked of the sources to find candidates for a profile. */
 sealed class RecoQuery {
     abstract val text: String
-    data class ByArtist(val artist: String, val affinity: Double) : RecoQuery() { override val text get() = artist }
+    /** Songs by [artist]; [suffix] steers the source's ranking ("new song" surfaces recent releases) without changing who it is about. */
+    data class ByArtist(val artist: String, val affinity: Double, val suffix: String = "") : RecoQuery() {
+        override val text get() = if (suffix.isEmpty()) artist else "$artist $suffix"
+    }
     data class SimilarTo(val title: String, val artist: String, val affinity: Double) : RecoQuery() { override val text get() = "$artist $title" }
     data class ByGenre(val genre: String, val share: Double) : RecoQuery() { override val text get() = genre }
     data class ByMood(val term: String, val mood: Mood) : RecoQuery() { override val text get() = term }
@@ -68,6 +75,9 @@ object QueryPlan {
         profile.seeds.filter { s -> ArtistNames.split(s.artist).firstOrNull()?.let { it !in blocked } == true }
             .filter { s -> perArtist.merge(ArtistNames.split(s.artist).first(), 1, Int::plus)!! <= 2 }
             .take(8).forEach { s -> out += RecoQuery.SimilarTo(s.title, s.artist, profile.creditAffinity(ArtistNames.split(s.artist)).coerceAtLeast(0.3)) }
+        // The recent releases of the artists played the most: asked for by name, as a search for "<artist>" alone answers
+        // with their best-known songs, which are rarely their newest.
+        if (RecoKind.NEW in kinds) artists.take(8).forEach { k -> out += RecoQuery.ByArtist(profile.nameOf(k), profile.affinity(k), "new song") }
         if (RecoKind.DISCOVERY in kinds || RecoKind.DAILY in kinds) {
             // Only genres that say something: a tag like "Music" or "Other" is not a taste, and a one-word catch-all asks
             // the source for whatever it ranks first.
@@ -116,7 +126,7 @@ object CandidateGatherer {
                 queries.map { q ->
                     async {
                         when (q) {
-                            is RecoQuery.ByArtist -> run(source) { source.search(q.artist, Provenance(ProvKind.ARTIST, q.artist, q.affinity)) }
+                            is RecoQuery.ByArtist -> run(source) { source.search(q.text, Provenance(ProvKind.ARTIST, q.artist, q.affinity)) }
                             is RecoQuery.SimilarTo -> run(source) { source.related(q.title, q.artist, Provenance(ProvKind.RELATED_TRACK, q.artist, q.affinity)) }
                             is RecoQuery.ByGenre -> run(source) { source.search(q.genre, Provenance(ProvKind.GENRE, q.genre, q.share.coerceIn(0.3, 0.9))) }
                             is RecoQuery.ByMood -> run(source) { source.search(q.term, Provenance(ProvKind.MOOD_QUERY, q.term, 0.0, q.mood)) }

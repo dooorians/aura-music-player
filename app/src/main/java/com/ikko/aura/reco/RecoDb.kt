@@ -125,6 +125,9 @@ interface RecoDao {
     @Query("DELETE FROM reco_items WHERE kindKey = :kindKey")
     suspend fun clearItems(kindKey: String)
 
+    @Query("DELETE FROM reco_items")
+    suspend fun clearAllItems()
+
     @Query("DELETE FROM reco_items WHERE kindKey = :kindKey AND trackId = :trackId")
     suspend fun removeItem(kindKey: String, trackId: String)
 

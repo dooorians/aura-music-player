@@ -78,6 +78,11 @@ data class Candidate(
     val playability: Playability = Playability.UNVERIFIED,
     /** The song's album on its source, when the source says. */
     val albumRef: String? = null,
+    /**
+     * Whether the source vouches that this is a song and not a video: a search for songs, an auto-generated artist
+     * channel. A "related" list mixes in clips and talks; those are false until the song's own page says otherwise.
+     */
+    val confirmedSong: Boolean = true,
 ) {
     val credits: List<String> by lazy { ArtistNames.creditsOf(artist, title, extraCredits) }
     val identity: String by lazy { TrackIdentity.key(title, artist) }

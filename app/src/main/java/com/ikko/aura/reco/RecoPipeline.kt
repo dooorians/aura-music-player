@@ -41,6 +41,8 @@ class RecoPipeline(
     private val sources: suspend () -> List<CandidateSource>,
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** Diagnostics only: what was asked and found. Never carries anything the listener did not already have on the device. */
+    private val log: (String) -> Unit = {},
 ) {
     /** Most specific first: a song fits the narrowest playlist it can, the broad ones take what is left. */
     private val order = listOf(RecoKind.NEW, RecoKind.ENERGY, RecoKind.NIGHT, RecoKind.CHILL, RecoKind.STYLE, RecoKind.DISCOVERY, RecoKind.DAILY)
@@ -75,8 +77,9 @@ class RecoPipeline(
             return RunResult(RunStatus.SOURCES_FAILED, kept = kinds)
         }
 
+        log("queries=${queries.size} candidates=${gathered.candidates.size} health=${gathered.health}")
         val sourceOrder = store.sourceOrder()
-        val hidden = store.hidden().toMutableSet()
+        val hidden = store.hidden()
         val ctxBase = RankContext(
             profile = profile,
             local = store.localIndex(),
@@ -88,27 +91,40 @@ class RecoPipeline(
             variation = variation,
             sourceOrder = sourceOrder,
         )
+        val sourcesById = live.associateBy { it.id }
+        // What each source said about a song when asked, kept for the whole renewal: a song is looked up once.
+        val checked = HashMap<String, Verification>()
         var pool = withCollabs(CandidateMerger.merge(gathered.candidates, sourceOrder), profile)
         // Dates of recent releases are not in a search result: asked for the few that could be new.
-        if (RecoKind.NEW in kinds) pool = enrichReleases(pool, live, ctxBase)
+        if (RecoKind.NEW in kinds) {
+            lookUp(pool.filter { needsDate(it, ctxBase) }.sortedByDescending { tieOf(it, profile) }.take(MAX_DATE_LOOKUPS), sourcesById, checked)
+            val seen = pool.map { applied(it, checked[it.id]) }
+            log(
+                "pool=${seen.size} dated=${seen.count { it.release.reliability == DateReliability.EXACT }} " +
+                    "recent=${seen.count { Ranker.isRecentRelease(it, ctxBase) }}",
+            )
+        }
 
-        val sourcesById = live.associateBy { it.id }
         val used = HashSet<String>()
+        // Songs a source refused, that are not songs, or that the listener has (found out by asking): out of every playlist.
+        val rejected = HashSet<String>()
         val updated = LinkedHashSet<RecoKind>()
         val kept = LinkedHashSet<RecoKind>()
         for (kind in order.filter { it in kinds }) {
-            // Songs a source refuses are dropped and replaced by the next ones, twice at most.
-            val dropped = HashSet<String>()
             var picks: List<Pick> = emptyList()
             for (attempt in 0 until 3) {
-                val ctx = if (dropped.isEmpty()) ctxBase else ctxBase.copy(hidden = hidden + dropped)
-                val checked = verifyAll(Ranker.select(kind, pool, ctx, HashSet(used)), sourcesById)
-                val bad = checked.filter { it.second.playable == false }.map { it.first.candidate.identity }
-                picks = checked.filter { it.second.playable != false }.map { (p, v) -> markVerified(p, v) }
+                val ctx = ctxBase.copy(hidden = hidden + rejected)
+                val current = pool.map { applied(it, checked[it.id]) }
+                val selected = Ranker.select(kind, current, ctx, HashSet(used))
+                lookUp(selected.map { it.candidate }, sourcesById, checked)
+                val verified = selected.map { p -> p.copy(candidate = applied(p.candidate, checked[p.candidate.id])) }
+                val bad = verified.filter { p -> !acceptable(p.candidate, checked[p.candidate.id], ctx) }
+                picks = verified - bad.toSet()
                 if (bad.isEmpty()) break
-                dropped += bad
+                rejected += bad.map { it.candidate.identity }
             }
-            if (picks.size >= Ranker.specOf(kind).minimum) {
+            // A short list is kept short rather than padded; a very short one is not worth replacing the last one with.
+            if (picks.size >= Ranker.specOf(kind).acceptable) {
                 picks.forEach { used += it.candidate.identity }
                 store.commit(kind, picks, now)
                 updated += kind
@@ -120,8 +136,59 @@ class RecoPipeline(
         return RunResult(RunStatus.UPDATED, updated, kept)
     }
 
-    private fun markVerified(p: Pick, v: Verification): Pick =
-        if (v.playable == true) p.copy(candidate = p.candidate.copy(playability = Playability.VERIFIED)) else p
+    /** The candidate as what its source said when asked adds to it: the album its page names, a stated date, a song. */
+    private fun applied(c: Candidate, v: Verification?): Candidate {
+        if (v == null) return c
+        val release = v.release?.takeIf { it.reliability != DateReliability.UNKNOWN }
+        return c.copy(
+            album = if (c.album.isBlank() && !v.album.isNullOrBlank()) v.album else c.album,
+            release = if (release != null && rank(release) > rank(c.release)) release else c.release,
+            tags = (c.tags + v.tags).distinct(),
+            confirmedSong = c.confirmedSong || v.isSong == true,
+            playability = if (v.playable == true) Playability.VERIFIED else c.playability,
+        )
+    }
+
+    private fun rank(r: Release) = when (r.reliability) { DateReliability.EXACT -> 2; DateReliability.YEAR -> 1; DateReliability.UNKNOWN -> 0 }
+
+    /**
+     * Whether a song can be offered once its source has been asked: not refused, a song and not a video, and not a
+     * song of an album (or a recording) the listener has — which the page may only reveal now.
+     */
+    private fun acceptable(c: Candidate, v: Verification?, ctx: RankContext): Boolean {
+        if (v?.playable == false) return false
+        // Of the sources, only YouTube Music mixes videos in with songs: its songs must be vouched for, by the search
+        // of songs they came from, an auto-generated channel, or the page's own description.
+        if (c.sourceId == "ytm" && !c.confirmedSong) return false
+        return Eligibility.excluded(c, ctx) == null
+    }
+
+    private fun tieOf(c: Candidate, profile: TasteProfile): Double =
+        maxOf(profile.creditAffinity(c.credits), c.provenance.maxOfOrNull { it.seedAffinity } ?: 0.0)
+
+    /** A song whose date could settle whether it is new: undated or dated this year, with a tie to the listener. */
+    private fun needsDate(c: Candidate, ctx: RankContext): Boolean =
+        (c.release.reliability == DateReliability.UNKNOWN || (c.release.reliability == DateReliability.YEAR && c.release.year >= ctx.today.year)) &&
+            Eligibility.excluded(c, ctx) == null && tieOf(c, ctx.profile) >= 0.15
+
+    /** Asks the sources about [candidates] not asked about yet, a few at a time. */
+    private suspend fun lookUp(candidates: List<Candidate>, sources: Map<String, CandidateSource>, into: MutableMap<String, Verification>) = coroutineScope {
+        val gate = Semaphore(5)
+        candidates.filter { it.id !in into }.distinctBy { it.id }.map { c ->
+            async {
+                // A source that lists a song as playable (a server's own file) needs no asking.
+                val source = sources[c.sourceId]
+                val v = when {
+                    source == null -> Verification(null)
+                    c.playability == Playability.VERIFIED && c.confirmedSong -> Verification(true)
+                    else -> gate.withPermit {
+                        try { withTimeoutOrNull(15_000L) { source.verify(c) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+                    } ?: Verification(null)
+                }
+                c.id to v
+            }
+        }.awaitAll().forEach { (id, v) -> into[id] = v }
+    }
 
     /** Songs credited with one of the listener's artists that is not their primary one: a tie worth saying. */
     private fun withCollabs(pool: List<Candidate>, profile: TasteProfile): List<Candidate> = pool.map { c ->
@@ -130,42 +197,6 @@ class RecoPipeline(
             val best = extra.maxBy { profile.affinity(it) }
             c.copy(provenance = c.provenance + Provenance(ProvKind.COLLAB, profile.nameOf(best), profile.affinity(best)))
         }
-    }
-
-    private suspend fun enrichReleases(pool: List<Candidate>, live: List<CandidateSource>, ctx: RankContext): List<Candidate> {
-        val sourcesById = live.associateBy { it.id }
-        // A year that is not this one already says the song is not new: no need to ask.
-        val toAsk = pool.filter { (it.release.reliability == DateReliability.UNKNOWN || (it.release.reliability == DateReliability.YEAR && it.release.year >= ctx.today.year)) &&
-            it.sourceId in sourcesById &&
-            Eligibility.excluded(it, ctx) == null &&
-            maxOf(ctx.profile.creditAffinity(it.credits), it.provenance.maxOfOrNull { p -> p.seedAffinity } ?: 0.0) >= 0.15 }
-            .sortedByDescending { c -> maxOf(ctx.profile.creditAffinity(c.credits), c.provenance.maxOfOrNull { it.seedAffinity } ?: 0.0) }
-            .take(MAX_DATE_LOOKUPS)
-        if (toAsk.isEmpty()) return pool
-        val answers = verifyAll(toAsk.map { Pick(it, Reason(ReasonCode.NONE), 0.0) }, sourcesById)
-            .associate { (p, v) -> p.candidate.id to v }
-        return pool.map { c ->
-            val v = answers[c.id] ?: return@map c
-            c.copy(
-                release = v.release?.takeIf { it.reliability != DateReliability.UNKNOWN } ?: c.release,
-                tags = (c.tags + v.tags).distinct(),
-                playability = if (v.playable == true) Playability.VERIFIED else c.playability,
-            )
-        }
-    }
-
-    private suspend fun verifyAll(picks: List<Pick>, sources: Map<String, CandidateSource>): List<Pair<Pick, Verification>> = coroutineScope {
-        val gate = Semaphore(4)
-        picks.map { p ->
-            async {
-                if (p.candidate.playability == Playability.VERIFIED) return@async p to Verification(true)
-                val source = sources[p.candidate.sourceId] ?: return@async p to Verification(null)
-                val v = gate.withPermit {
-                    try { withTimeoutOrNull(15_000L) { source.verify(p.candidate) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
-                } ?: Verification(null)
-                p to v
-            }
-        }.awaitAll()
     }
 
     private companion object {

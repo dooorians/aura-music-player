@@ -247,4 +247,72 @@ class RecoPipelineTest {
         assertTrue(first.isNotEmpty() && second.isNotEmpty())
         assertTrue("overlap ${first.intersect(second).size} of ${first.size}", first.intersect(second).size < first.size)
     }
+
+    @Test fun `a song of an album the listener has is dropped once its page names the album`() = runBlocking {
+        val s = store()
+        s.local = listOf(TrackIdentity.Entry("Anaheim Star", "Rebecca Black", 166_000, album = "Age of the Exhibitionist"))
+        val source = FakeSource(
+            "ytm",
+            catalogue = { (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } +
+                listOf(candidate("Speakerphone", "rebecca", id = "ytm:album-track", provenance = listOf(Provenance(ProvKind.ARTIST, "Liked Artist", 0.99)))) },
+            // A search result does not say which album a song is on; its page does.
+            verdict = { c -> if (c.id == "ytm:album-track") Verification(true, album = "Age of the Exhibitionist") else Verification(true) },
+        )
+        pipeline(s, source).refresh(force = true)
+        val ids = s.playlists.values.flatten().map { it.candidate.id }
+        assertTrue(ids.isNotEmpty())
+        assertFalse("ytm:album-track" in ids)
+    }
+
+    @Test fun `the same song as a local one under the channel's own name is not proposed`() = runBlocking {
+        val s = store()
+        s.local = listOf(TrackIdentity.Entry("Anaheim Star", "Rebecca Black", 166_000))
+        val source = FakeSource("ytm", catalogue = {
+            (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } +
+                candidate("Anaheim Star", "rebecca", id = "ytm:alias", durationMs = 166_000)
+        })
+        pipeline(s, source).refresh(force = true)
+        assertTrue(s.playlists.values.flatten().none { it.candidate.id == "ytm:alias" })
+    }
+
+    @Test fun `only songs come out of YouTube Music, not videos`() = runBlocking {
+        val s = store()
+        val source = FakeSource(
+            "ytm",
+            catalogue = {
+                (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } +
+                    // Listed beside a song by YouTube, not vouched for as a song: a talk, a clip.
+                    candidate("Why that song works", "Some Channel", id = "ytm:video", provenance = listOf(Provenance(ProvKind.ARTIST, "Liked Artist", 0.99)))
+                        .copy(confirmedSong = false) +
+                    // Listed the same way but the page is an official release.
+                    candidate("Real Song From Related", "Liked Artist 99", id = "ytm:related-song")
+                        .copy(confirmedSong = false)
+            },
+            verdict = { c ->
+                when (c.id) {
+                    "ytm:video" -> Verification(true, isSong = false)
+                    "ytm:related-song" -> Verification(true, isSong = true)
+                    else -> Verification(true)
+                }
+            },
+        )
+        pipeline(s, source).refresh(force = true)
+        val ids = s.playlists.values.flatten().map { it.candidate.id }
+        assertFalse("ytm:video" in ids)
+        assertTrue(ids.isNotEmpty())
+    }
+
+    @Test fun `an unconfirmed entry is dropped when its page cannot be read`() = runBlocking {
+        val s = store()
+        val source = FakeSource(
+            "ytm",
+            catalogue = {
+                (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } +
+                    candidate("Maybe A Video", "Liked Artist", id = "ytm:maybe").copy(confirmedSong = false)
+            },
+            verdict = { c -> if (c.id == "ytm:maybe") Verification(null) else Verification(true) },
+        )
+        pipeline(s, source).refresh(force = true)
+        assertTrue(s.playlists.values.flatten().none { it.candidate.id == "ytm:maybe" })
+    }
 }

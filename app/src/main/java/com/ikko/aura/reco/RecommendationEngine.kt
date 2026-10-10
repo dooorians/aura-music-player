@@ -53,7 +53,7 @@ class RecommendationEngine @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
-    private val pipeline = RecoPipeline(store, { sources.all() })
+    private val pipeline = RecoPipeline(store, { sources.all() }, log = { android.util.Log.d("Reco", it) })
 
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
@@ -152,5 +152,7 @@ class RecommendationEngine @Inject constructor(
         dao.clearOpinions()
         dao.clearHistory()
         dao.clearStates()
+        // What was proposed came from the profile that is gone: the playlists are made again from the next renewal.
+        dao.clearAllItems()
     }
 }

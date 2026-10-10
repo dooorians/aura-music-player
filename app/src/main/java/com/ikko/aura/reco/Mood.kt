@@ -22,8 +22,11 @@ object MoodModel {
 
     private fun words(list: String): Set<String> = list.split(' ').toSet()
 
+    /** "(feat. Vancouver Sleep Clinic)" names a person, not a mood. */
+    private val CREDIT = Regex("[(\\[]\\s*(?:feat\\.?|featuring|ft\\.?|with|avec)\\s+[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE)
+
     private fun tokens(vararg texts: String?): List<String> =
-        texts.filterNotNull().flatMap { t ->
+        texts.filterNotNull().map { it.replace(CREDIT, " ") }.flatMap { t ->
             Normalizer.normalize(t, Normalizer.Form.NFKD).replace(Regex("\\p{M}+"), "").lowercase()
                 .split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
         }

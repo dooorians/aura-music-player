@@ -25,13 +25,14 @@ data class RankContext(
     val today: LocalDate get() = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
 }
 
-enum class Exclusion { BLOCKED_ARTIST, HIDDEN, KNOWN, LOCAL_DUPLICATE, JUNK }
+enum class Exclusion { BLOCKED_ARTIST, HIDDEN, KNOWN, LOCAL_DUPLICATE, LOCAL_ALBUM, JUNK }
 
 object Eligibility {
 
     private val JUNK_TITLE = Regex(
         "\\b(?:karaoke|karaoké|8[- ]?bit|16[- ]?bit|tribute|ringtone|sonnerie|nightcore|made famous by|originally performed|" +
-            "in the style of|backing track|midi version|lullaby (?:version|rendition)|music box|full album|\\d+ hours?|hours? of)\\b|" +
+            "in the style of|backing track|midi version|lullaby (?:version|rendition)|music box|full album|\\d+ hours?|hours? of|" +
+            "clip officiel|official (?:music )?video|music video|routine|skincare|podcast|interview|episode|reaction|tutorial|vlog|unboxing|explained|breakdown|rip off)\\b|" +
             "[(\\[]\\s*(?:official\\s+)?(?:lyrics?|lyric video|music video|video|visuali[sz]er|live)\\s*[)\\]]|\\blyrics?\\b",
         RegexOption.IGNORE_CASE,
     )
@@ -57,6 +58,8 @@ object Eligibility {
         ) return Exclusion.JUNK
         if (c.identity in ctx.profile.knownTracks) return Exclusion.KNOWN
         if (ctx.local.contains(TrackIdentity.Entry(c.title, c.artist, c.durationMs, c.extraCredits))) return Exclusion.LOCAL_DUPLICATE
+        // An album the listener has: its other songs are not a discovery either.
+        if (c.album.isNotBlank() && ctx.local.hasAlbum(c.album, c.credits)) return Exclusion.LOCAL_ALBUM
         return null
     }
 }
@@ -105,7 +108,10 @@ object CandidateMerger {
 object Ranker {
 
     /** What a playlist asks of its songs and how many it wants. */
-    data class Spec(val target: Int, val minimum: Int, val maxPerArtist: Int)
+    data class Spec(val target: Int, val minimum: Int, val maxPerArtist: Int) {
+        /** The fewest songs worth replacing the previous playlist with: half of what is wanted, and three at least. */
+        val acceptable: Int get() = maxOf(3, minimum / 2)
+    }
 
     fun specOf(kind: RecoKind) = when (kind) {
         RecoKind.DAILY -> Spec(target = 30, minimum = 8, maxPerArtist = 1)
@@ -153,25 +159,38 @@ object Ranker {
         }
         scored.sortByDescending { it.score }
 
-        val picks = ArrayList<Pick>()
-        // A discovery is mostly artists the listener does not know: those they do know are a minority.
-        val maxKnownArtists = if (kind == RecoKind.DISCOVERY) (spec.target * 3 / 10) else Int.MAX_VALUE
-        var knownArtistPicks = 0
         val perArtist = HashMap<String, Int>()
         val perCluster = HashMap<String, Int>()
         val clusterCap = if (kind == RecoKind.DAILY) 4 else 6
-        for (s in scored) {
-            if (picks.size >= spec.target) break
+        fun knownArtist(c: Candidate) = c.credits.any { it in profile.knownArtists || ctx.local.hasArtist(it) }
+        fun admit(s: Scored): Boolean {
             val primary = s.c.credits.firstOrNull().orEmpty()
-            if ((perArtist[primary] ?: 0) >= spec.maxPerArtist) continue
-            if ((perCluster[s.cluster] ?: 0) >= clusterCap) continue
-            val artistKnown = s.c.credits.any { it in profile.knownArtists || ctx.local.hasArtist(it) }
-            if (artistKnown && knownArtistPicks >= maxKnownArtists) continue
-            if (artistKnown) knownArtistPicks++
-            picks += Pick(s.c, s.reason, s.score)
+            if ((perArtist[primary] ?: 0) >= spec.maxPerArtist) return false
+            if ((perCluster[s.cluster] ?: 0) >= clusterCap) return false
             perArtist.merge(primary, 1, Int::plus)
             perCluster.merge(s.cluster, 1, Int::plus)
+            return true
         }
+        val chosen = ArrayList<Scored>()
+        if (kind == RecoKind.DISCOVERY) {
+            // A discovery is mostly artists the listener does not know: those are taken first, and the ones they do
+            // know are a minority of the list (30 %), however few strangers there are.
+            val strangers = scored.filter { !knownArtist(it.c) }
+            strangers.forEach { if (chosen.size < spec.target && admit(it)) chosen += it }
+            val allowedKnown = (chosen.size * 3) / 7
+            var known = 0
+            for (s in scored.filter { knownArtist(it.c) }) {
+                if (known >= allowedKnown || chosen.size >= spec.target) break
+                if (admit(s)) { chosen += s; known++ }
+            }
+            chosen.sortByDescending { it.score }
+        } else {
+            for (s in scored) {
+                if (chosen.size >= spec.target) break
+                if (admit(s)) chosen += s
+            }
+        }
+        val picks = chosen.map { Pick(it.c, it.reason, it.score) }
         // A cold profile cannot fill a playlist honestly: fewer songs than the minimum is left to the caller, which
         // keeps the previous list rather than padding it.
         picks.forEach { used += it.candidate.identity }
@@ -212,7 +231,8 @@ object Ranker {
         val artistKnown = credits.any { it in profile.knownArtists || ctx.local.hasArtist(it) }
         val novelty = if (artistKnown) 0.3 else 1.0
         val dislike = profile.dislike(credits, kind.key)
-        val base = taste - 0.5 * dislike - historyPenalty(c, ctx) + jitter(c, ctx)
+        // A "related" entry not yet known to be a song is ranked behind the ones that are: it is checked before it is offered.
+        val base = taste - 0.5 * dislike - historyPenalty(c, ctx) + jitter(c, ctx) - if (c.confirmedSong) 0.0 else 0.1
         val cluster = prov?.seed?.let(ArtistNames::key)?.ifEmpty { null } ?: credits.firstOrNull().orEmpty()
         val seedName = prov?.seed.orEmpty()
         val artistName = credits.firstOrNull()?.let { profile.nameOf(it) }.orEmpty()
