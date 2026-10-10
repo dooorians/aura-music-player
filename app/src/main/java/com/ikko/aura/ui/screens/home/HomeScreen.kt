@@ -72,11 +72,11 @@ private class Ink(val on: Color, val soft: Color)
 
 private fun inkOf(ambience: CardAmbience) = when (ambience) {
     CardAmbience.FAVORIS -> Ink(Color(0xFF1D1450), Color(0xFFD8CDFC))
-    CardAmbience.DECOUVERTE -> Ink(Color(0xFF6E1608), Color(0xFFFFD5C6))
-    CardAmbience.NOUVEAUTES -> Ink(Color(0xFF8A0F2C), Color(0xFFFFD7DF))
-    CardAmbience.ENERGIE -> Ink(Color(0xFF7A1204), Color(0xFFFFE0C0))
+    CardAmbience.DECOUVERTE -> Ink(Color(0xFF0A1F6B), Color(0xFFD2E6FF))
+    CardAmbience.NOUVEAUTES -> Ink(Color(0xFF7A0B4A), Color(0xFFFFD2EA))
+    CardAmbience.ENERGIE -> Ink(Color(0xFF6B2204), Color(0xFFFFE6BE))
     CardAmbience.CHILL -> Ink(Color(0xFF04423D), Color(0xFFC8FFF1))
-    CardAmbience.NUIT -> Ink(Color(0xFF1D1450), Color(0xFFE0D6FF))
+    CardAmbience.NUIT -> Ink(Color(0xFF14123A), Color(0xFFD6D0FF))
 }
 
 /**
