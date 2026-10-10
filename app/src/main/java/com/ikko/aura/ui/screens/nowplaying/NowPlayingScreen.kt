@@ -131,7 +131,6 @@ import com.ikko.aura.ui.components.AlbumArtCache
 import androidx.compose.ui.graphics.asImageBitmap
 import com.ikko.aura.ui.components.AURORA_H
 import com.ikko.aura.ui.components.AlbumTheme
-import com.ikko.aura.ui.components.albumThemeFromBitmap
 import com.ikko.aura.ui.components.designSp
 import com.ikko.aura.ui.components.designUnit
 import com.ikko.aura.ui.components.auraMenuSurface
@@ -943,15 +942,22 @@ private class GroundLook(val solid: Int, val pools: IntArray)
  * cover's overall hue taken dark — the one the rest of the app rests on. A cover with no colour gets a grey-blue.
  */
 private fun groundLook(art: android.graphics.Bitmap?): GroundLook {
-    val theme = art?.let { albumThemeFromBitmap(it, 0) } ?: AlbumTheme.Neutral
-    val solid = theme.solid.toArgb()
     val swatches = art?.let {
         runCatching {
-            androidx.palette.graphics.Palette.from(it).maximumColorCount(24).resizeBitmapArea(96 * 96).generate().swatches
+            androidx.palette.graphics.Palette.from(it).maximumColorCount(24).resizeBitmapArea(64 * 64).generate().swatches
         }.getOrNull()
     }.orEmpty()
         .filter { s -> FloatArray(3).also { androidx.core.graphics.ColorUtils.colorToHSL(s.rgb, it) }.let { it[1] > 0.18f && it[2] in 0.08f..0.92f } }
         .sortedByDescending { it.population }
+    // The flat colour: the most present coloured swatch taken dark (the quick way: no aurora is rendered for it, so a
+    // change of record is not waiting on one). A cover with no colour gets a grey-blue.
+    val solid = swatches.firstOrNull()?.rgb?.let { rgb ->
+        val hsl = FloatArray(3)
+        androidx.core.graphics.ColorUtils.colorToHSL(rgb, hsl)
+        hsl[1] = hsl[1].coerceIn(0.30f, 0.60f)
+        hsl[2] = 0.16f
+        androidx.core.graphics.ColorUtils.HSLToColor(hsl)
+    } ?: 0xFF1B2230.toInt()
     fun tone(rgb: Int, lightness: Float): Int {
         val hsl = FloatArray(3)
         androidx.core.graphics.ColorUtils.colorToHSL(rgb, hsl)
@@ -1141,7 +1147,7 @@ private fun TransportRow(
                 contentDescription = "Lecture aléatoire",
                 active = shuffleEnabled,
                 onClick = onShuffleToggle,
-                glyphSize = u * 44f,
+                glyphSize = 21.dp,
                 touchWidth = u * 100f,
                 touchHeight = glyphCenter * 2,
                 dot = true,
@@ -1150,7 +1156,7 @@ private fun TransportRow(
         TransportTile(
             width = u * 120f,
             glyphCenter = glyphCenter,
-            glyphSize = u * 64f,
+            glyphSize = 34.dp,
             icon = CupertinoIcons.SkipPrevious,
             contentDescription = "Précédent",
             skipDirection = -1,
@@ -1159,7 +1165,7 @@ private fun TransportRow(
         TransportTile(
             width = u * 136f,
             glyphCenter = glyphCenter,
-            glyphSize = u * 64f,
+            glyphSize = 34.dp,
             icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
             playing = isPlaying,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
@@ -1171,7 +1177,7 @@ private fun TransportRow(
         TransportTile(
             width = u * 120f,
             glyphCenter = glyphCenter,
-            glyphSize = u * 64f,
+            glyphSize = 34.dp,
             icon = CupertinoIcons.SkipNext,
             contentDescription = "Suivant",
             skipDirection = 1,
@@ -1183,7 +1189,7 @@ private fun TransportRow(
                 contentDescription = "Répéter",
                 active = repeatMode != RepeatMode.OFF,
                 onClick = onRepeatCycle,
-                glyphSize = u * 44f,
+                glyphSize = 21.dp,
                 touchWidth = u * 100f,
                 touchHeight = glyphCenter * 2,
                 dot = true,
@@ -1529,7 +1535,7 @@ private fun UtilityIcon(
         if (dot && active) {
             Box(
                 Modifier
-                    .offset(y = designUnit() * 38f)
+                    .offset(y = 30.dp)
                     .size(designUnit() * 8f)
                     .background(activeTint, CircleShape),
             )
