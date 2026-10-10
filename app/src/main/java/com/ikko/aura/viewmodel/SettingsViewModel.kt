@@ -78,6 +78,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
     val amoledBackgroundEnabled: StateFlow<Boolean> = settingsStore.amoledBackgroundEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val pageSwitchButton: StateFlow<Boolean> = settingsStore.pageSwitchButton
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private companion object {
         const val SLEEP_TICK_MS = 20_000L
@@ -109,6 +111,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setProfileFirstName(name: String) {
         viewModelScope.launch { settingsStore.setProfileFirstName(name) }
+    }
+
+    fun setPageSwitchButton(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setPageSwitchButton(enabled) }
     }
 
     fun setAmoledBackgroundEnabled(enabled: Boolean) {

@@ -532,9 +532,9 @@ private fun AlbumHeader(
                 minHeight = u * 112f,
                 contentPadding = PaddingValues(horizontal = u * 8f),
             ) {
-                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(u * 44f))
+                Icon(CupertinoIcons.Shuffle, contentDescription = null, tint = Color.White, modifier = Modifier.size(u * 44f))
                 Spacer(Modifier.width(u * 18f))
-                Text(text = "Mélanger", fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                Text(text = "Mélanger", color = Color.White, fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
             }
             CircleAction(onClick = onFavorite) {
                 FillableIcon(
@@ -542,13 +542,13 @@ private fun AlbumHeader(
                     filled = CupertinoIcons.StarFilled,
                     active = uiState.isFavorite,
                     contentDescription = "Favori",
-                    tint = rememberPlayerAccent(),
+                    tint = Color.White,
                     modifier = Modifier.size(u * 44f),
                 )
             }
             Box(moreAnchor) {
                 CircleAction(onClick = onMore) {
-                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
+                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(u * 44f))
                 }
                 moreMenu()
             }
@@ -610,16 +610,21 @@ internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier
 @Composable
 internal fun ShuffleButton(onClick: () -> Unit) {
     CircleAction(onClick = onClick) {
-        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
+        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = Color.White, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
     }
 }
 
+/**
+ * The page's round button: frosted glass with a dark veil and a white glyph, so it stands out of a page lit with the same
+ * hue as the cover (a glyph in the cover's colour over glass of that colour was close to invisible).
+ */
 @Composable
 internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
-    // The app's own round button; as tall as the play capsule beside it.
-    AuraIconButton(onClick = onClick, size = com.ikko.aura.ui.components.designUnit() * 112f) {
-        content()
-    }
+    com.ikko.aura.ui.components.FrostedCircleButton(
+        onClick = onClick,
+        size = com.ikko.aura.ui.components.designUnit() * 112f,
+        scrim = 0.34f,
+    ) { content() }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

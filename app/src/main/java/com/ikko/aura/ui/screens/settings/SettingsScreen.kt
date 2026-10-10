@@ -166,6 +166,19 @@ fun SettingsScreen(
                     onCheckedChange = settingsViewModel::setAmoledBackgroundEnabled,
                 )
             }
+            item { SectionLabel("Navigation") }
+            item {
+                val button by settingsViewModel.pageSwitchButton.collectAsStateWithLifecycle()
+                SettingsSwitchRow(
+                    title = "Bouton Accueil / Bibliothèque",
+                    subtitle = if (button) "Un bouton à côté du lecteur passe d'une page à l'autre, sans glissement. Désactive-le pour " +
+                        "retrouver le lecteur pleine largeur et le balayage entre Accueil et Bibliothèque"
+                    else "Pas de bouton : le lecteur est pleine largeur et tu balaies de gauche à droite pour passer d'Accueil à " +
+                        "Bibliothèque. Active-le pour remettre le bouton à côté du lecteur",
+                    checked = button,
+                    onCheckedChange = settingsViewModel::setPageSwitchButton,
+                )
+            }
             item { SectionLabel("Paroles") }
             item {
                 SettingsSwitchRow(

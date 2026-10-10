@@ -139,6 +139,12 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
 
     var widthPx: Float = 1f
 
+    /**
+     * Whether the pages are swiped between (and slide when switched) or only switched, at once, by a button. Set by the
+     * navigation setting; read in the gesture and in [goTo].
+     */
+    var swipeEnabled by mutableStateOf(false)
+
     /** A row that keeps its own drags is being dragged: what it cannot use at its ends is not the pager's (see [keepsDragInRow]). */
     var rowKeepsDrag: Boolean = false
 
@@ -196,12 +202,38 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
         goTo(scope, target, pagesPerSecond)
     }
 
-    /** Home and Bibliothèque are separate pages, reached by the button and nothing else: the switch is immediate, nothing slides. */
-    fun goTo(@Suppress("UNUSED_PARAMETER") scope: kotlinx.coroutines.CoroutineScope, page: Int, initialVelocity: Float = 0f) {
+    /**
+     * Moves to [page]. With the button navigation the switch is immediate and nothing slides; with the swipe navigation it
+     * settles on a spring, whatever sent it there (a lifted finger, or the pages being put back).
+     */
+    fun goTo(scope: kotlinx.coroutines.CoroutineScope, page: Int, initialVelocity: Float = 0f) {
         stop()
-        dragging = false
-        position.floatValue = page.toFloat().coerceIn(0f, (pageCount - 1).toFloat())
-        speed.floatValue = 0f
+        if (!swipeEnabled) {
+            dragging = false
+            position.floatValue = page.toFloat().coerceIn(0f, (pageCount - 1).toFloat())
+            speed.floatValue = 0f
+            return
+        }
+        settleJob = scope.launch {
+            if (reduceMotion) {
+                position.floatValue = page.toFloat()
+                speed.floatValue = 0f
+            } else {
+                // Let go past an end, the pages come back without a bounce and without the drag's speed (which points
+                // outwards and would throw them further): a slow, even return.
+                val beyond = p < 0f || p > (pageCount - 1).toFloat()
+                animate(
+                    initialValue = p,
+                    targetValue = page.toFloat(),
+                    initialVelocity = if (beyond) 0f else initialVelocity,
+                    animationSpec = spring(
+                        if (beyond) 1f else PageMotionSpec.PAGE_DAMPING,
+                        if (beyond) PageMotionSpec.EDGE_RETURN_STIFFNESS else PageMotionSpec.PAGE_STIFFNESS,
+                        PageMotionSpec.PAGE_REST_THRESHOLD,
+                    ),
+                ) { value, _ -> position.floatValue = value }
+            }
+        }
     }
 
     internal fun setSpeed(v: Float) {
@@ -270,6 +302,15 @@ fun PagedContainer(
                 return Offset.Zero
             }
 
+            // What a row of covers could not use at its edge becomes the pages' drag (swipe navigation only).
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (state.swipeEnabled && source == NestedScrollSource.UserInput && available.x != 0f && !state.rowKeepsDrag) {
+                    state.dragBy(-available.x / state.widthPx)
+                    return Offset(available.x, 0f)
+                }
+                return Offset.Zero
+            }
+
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (state.inTransit) {
                     state.release(scope, -available.x / state.widthPx)
@@ -322,12 +363,12 @@ fun PagedContainer(
                 .fillMaxSize()
                 .onSizeChanged { state.widthPx = it.width.toFloat().coerceAtLeast(1f) }
                 .nestedScroll(connection)
-                // Off: the pages are not swiped between any more, only switched with the button (see goTo).
+                // Off with the button navigation: the pages are only switched with the button (see goTo).
                 .scrollable(
                     state = scrollableState,
                     orientation = Orientation.Horizontal,
                     flingBehavior = flingBehavior,
-                    enabled = false,
+                    enabled = state.swipeEnabled,
                 ),
         ) {
             pages.forEachIndexed { index, content ->

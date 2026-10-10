@@ -253,7 +253,7 @@ fun PlaylistScreen(
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
                                 CircleAction(onClick = { menuState.open() }) {
-                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
+                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
                                 }
                                 // The design's playlist menu (600 px wide, the page's colour at 24 %).
                                 DesignMenu(state = menuState, width = 240.dp, shade = 0.24f) {

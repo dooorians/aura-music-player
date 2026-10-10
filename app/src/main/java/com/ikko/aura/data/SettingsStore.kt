@@ -64,6 +64,12 @@ class SettingsStore @Inject constructor(
     val amoledBackgroundEnabled = setting { prefs -> prefs[amoledBackgroundKey] ?: false }
     val shuffleEnabled = setting { prefs -> prefs[shuffleKey] ?: false }
 
+    /**
+     * How Home and Bibliothèque are told apart: with a button beside the mini player (true, the default: the switch is
+     * immediate), or without one — the player at its full width and the two pages swiped between (false).
+     */
+    val pageSwitchButton = setting { prefs -> prefs[booleanPreferencesKey("nav_page_switch_button")] ?: true }
+
     /** The Home cards' order (ids, comma-separated; the ones not listed follow in their usual order) and the hidden ones. */
     val homeCardOrder = setting { prefs -> prefs[stringPreferencesKey("home_card_order")].orEmpty().split(',').filter { it.isNotBlank() } }
     val homeCardHidden = setting { prefs -> prefs[stringPreferencesKey("home_card_hidden")].orEmpty().split(',').filter { it.isNotBlank() }.toSet() }
@@ -107,6 +113,10 @@ class SettingsStore @Inject constructor(
 
     suspend fun setProfileFirstName(name: String) {
         context.settingsDataStore.edit { it[profileFirstNameKey] = name.trim() }
+    }
+
+    suspend fun setPageSwitchButton(enabled: Boolean) {
+        context.settingsDataStore.edit { it[booleanPreferencesKey("nav_page_switch_button")] = enabled }
     }
 
     suspend fun setAmoledBackgroundEnabled(enabled: Boolean) {

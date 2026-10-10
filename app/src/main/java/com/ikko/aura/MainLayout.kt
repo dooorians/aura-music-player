@@ -609,6 +609,9 @@ fun MainLayout() {
     com.ikko.aura.ui.screens.nowplaying.PlayerGroundWarmer(playerViewModel)
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val amoledBackgroundEnabled by settingsViewModel.amoledBackgroundEnabled.collectAsStateWithLifecycle()
+    // The navigation the listener chose: a button beside the mini player, or the pages swiped between.
+    val pageSwitchButton by settingsViewModel.pageSwitchButton.collectAsStateWithLifecycle()
+    androidx.compose.runtime.SideEffect { pageMotion.swipeEnabled = !pageSwitchButton }
     // Narrowed on purpose. Collecting the whole PlayerUiState here subscribed MainLayout — and so
     // the entire NavHost under it — to `positionMs`, which ticks every 500ms during playback, so
     // the whole tree recomposed four times a second while scrolling. Only the backdrop's inputs
@@ -1245,7 +1248,7 @@ fun MainLayout() {
                         backdrop = pillBackdrop,
                         enabled = pillInteractive,
                         // On every page the pill shows: it must not change shape from one page to the next.
-                        showPageSwitch = true,
+                        showPageSwitch = pageSwitchButton,
                         onPageSwitch = {
                             if (navController.currentBackStackEntry?.destination?.route != AuraDestination.Tabs.route) {
                                 navController.popBackStack(AuraDestination.Tabs.route, inclusive = false)
