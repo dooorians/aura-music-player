@@ -90,7 +90,7 @@ private fun inkOf(ambience: CardAmbience) = when (ambience) {
     CardAmbience.NOUVEAUTES -> Ink(Color(0xFF7A0B4A), Color(0xFFFFD2EA))
     CardAmbience.ENERGIE -> Ink(Color(0xFF6B2204), Color(0xFFFFE6BE))
     CardAmbience.CHILL -> Ink(Color(0xFF04423D), Color(0xFFC8FFF1))
-    CardAmbience.NUIT -> Ink(Color(0xFF14123A), Color(0xFFD6D0FF))
+    CardAmbience.NUIT -> Ink(Color(0xFF08122E), Color(0xFFC4D8FF))
 }
 
 /**
