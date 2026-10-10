@@ -619,6 +619,18 @@ fun MainLayout() {
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
     // The palette a page that is lit with one of its own asks the background for (Home's moods, an album, a card's playlist).
     val immersivePage = remember { mutableStateOf<com.ikko.aura.ui.components.ImmersivePalette?>(null) }
+    // The page's palette, kept for a moment after it is withdrawn: between two pages that are both lit with one of their own
+    // (Home and a mood's playlist) the slot is empty for a few frames of the transition, and the playing track's colours
+    // would flash through them.
+    val heldImmersive = remember { mutableStateOf<com.ikko.aura.ui.components.ImmersivePalette?>(null) }
+    LaunchedEffect(immersivePage.value) {
+        val page = immersivePage.value
+        if (page != null) heldImmersive.value = page
+        else {
+            kotlinx.coroutines.delay(IMMERSIVE_HOLD_MS)
+            heldImmersive.value = null
+        }
+    }
     var albumAuroraTheme by remember { mutableStateOf<AlbumTheme?>(null) }
     LaunchedEffect(pageTheme.value) {
         pageTheme.value?.let { albumAuroraTheme = it }
@@ -902,7 +914,7 @@ fun MainLayout() {
                 com.ikko.aura.ui.components.immersiveFromCover(if (neutral) null else h, s, dark = true)
             }
             com.ikko.aura.ui.components.ImmersiveBackground(
-                palette = immersivePage.value ?: derived,
+                palette = immersivePage.value ?: heldImmersive.value ?: derived,
                 alpha = immersiveAlpha,
                 pictureModifier = Modifier.layerBackdrop(immersiveBackdrop),
             )
@@ -1543,5 +1555,6 @@ private class TopRoundedClip(private val radius: Float) : androidx.compose.ui.gr
 }
 
 /** Where the capsule is parked while it is not shown: far enough below the screen to be touched by nothing. */
+private const val IMMERSIVE_HOLD_MS = 320L
 private const val CAPSULE_HIDDEN = true
 private const val CAPSULE_PARKED_PX = 20_000f
