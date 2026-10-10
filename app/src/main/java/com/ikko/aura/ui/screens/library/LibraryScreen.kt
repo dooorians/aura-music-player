@@ -178,7 +178,7 @@ fun LibraryScreen(
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     // The header folds away with the status bar's height included: the page runs under the bar (see HomeScreen),
     // so once folded the list goes on up beneath it and melts into it. At rest the list starts where it did.
-    val headerHeight = com.ikko.aura.ui.components.designUnit() * 424f
+    val headerHeight = com.ikko.aura.ui.components.designUnit() * 380f
     val headerHeightPx = with(density) { headerHeight.toPx() }
     var headerOffsetPx by rememberCollapseOffset()
     // Same rule as the top nav row: collapse while scrolling down, and only come back once the
@@ -428,12 +428,6 @@ private fun LibraryHeader(
                         fontWeight = FontWeight.ExtraBold, letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f)),
                     maxLines = 1,
                 )
-                Text(
-                    countText,
-                    style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
-                        fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.78f)),
-                    maxLines = 1,
-                )
             }
             Row(
                 modifier = Modifier
@@ -454,7 +448,7 @@ private fun LibraryHeader(
                 }
             }
         }
-        Row(Modifier.padding(top = u * 36f), horizontalArrangement = Arrangement.spacedBy(u * 12f)) {
+        Row(Modifier.padding(top = u * 26f), horizontalArrangement = Arrangement.spacedBy(u * 12f)) {
             listOf(
                 LibraryFilter.TRACKS to "Titres",
                 LibraryFilter.ALBUMS to "Albums",
