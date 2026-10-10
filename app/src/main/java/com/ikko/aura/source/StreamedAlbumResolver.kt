@@ -9,6 +9,8 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
@@ -28,27 +30,48 @@ class StreamedAlbumResolver @Inject constructor(private val ytm: YtmClient) {
     suspend fun routeOf(track: Track): String? {
         track.remoteAlbumId?.let { return streamedAlbumRoute(it) }
         found[track.id]?.let { return it.ifEmpty { null } }
-        val route = withContext(Dispatchers.IO) { lookUp(track) }
+        val route = lookUp(track)
+        // Only a definite answer is kept: a failed lookup (no network) is tried again at the next tap.
         found[track.id] = route.orEmpty()
         return route
     }
 
-    private fun lookUp(track: Track): String? {
-        if (!ytm.isEnabled()) return null
-        // What names the album: the song's page for a YouTube Music video, else the title the song carries.
-        val fromPage = if (track.id.startsWith("ytm:")) {
-            runCatching { ytm.details(track.id.substringAfter(':')).album }.getOrNull()
-        } else null
-        val title = fromPage?.takeIf { it.isNotBlank() }
-            ?: track.album.takeIf { it.isNotBlank() && !it.equals("YouTube Music", ignoreCase = true) && !it.equals(track.id.substringBefore(':'), ignoreCase = true) }
-            ?: return null
+    /** Starts the lookup for [track] now, so a tap on its title later finds the answer ready. Cheap when it is already known. */
+    suspend fun warm(track: Track) {
+        if (track.remoteAlbumId != null || found.containsKey(track.id)) return
+        routeOf(track)
+    }
+
+    private suspend fun lookUp(track: Track): String? = coroutineScope {
+        if (!ytm.isEnabled()) return@coroutineScope null
         val artists = ArtistNames.creditsOf(track.artist, track.title)
-        val wanted = TrackIdentity.baseKey(title)
-        val refs = runCatching { ytm.searchAlbums("$title ${track.artist}") }.getOrNull().orEmpty()
-        val best = refs.firstOrNull { ref ->
-            TrackIdentity.baseKey(ref.title) == wanted &&
-                ArtistNames.anyCompatible(artists, ArtistNames.split(ref.artist))
-        } ?: refs.firstOrNull { ref -> TrackIdentity.baseKey(ref.title) == wanted }
-        return best?.let { streamedAlbumRoute(it.id, online = true) }
+        val placeholder = track.album.isBlank() || track.album.equals("YouTube Music", ignoreCase = true) ||
+            track.album.equals(track.id.substringBefore(':'), ignoreCase = true)
+
+        fun pick(refs: List<com.ikko.aura.source.ytm.YtmAlbumRef>, albumTitle: String): String? {
+            val wanted = TrackIdentity.baseKey(albumTitle)
+            val best = refs.firstOrNull { ref ->
+                TrackIdentity.baseKey(ref.title) == wanted && ArtistNames.anyCompatible(artists, ArtistNames.split(ref.artist))
+            } ?: refs.firstOrNull { ref -> TrackIdentity.baseKey(ref.title) == wanted }
+            return best?.let { streamedAlbumRoute(it.id, online = true) }
+        }
+
+        // The slow part is the network, so what can be asked together is: the album search by the song's own name (it finds
+        // the album of a single, and of a song whose album shares its title) at the same time as the song's page, which
+        // names the album it is really on.
+        val bySong = async(Dispatchers.IO) { runCatching { ytm.searchAlbums("${track.title} ${track.artist}") }.getOrNull().orEmpty() }
+        val named = if (!placeholder) {
+            track.album
+        } else if (track.id.startsWith("ytm:")) {
+            withContext(Dispatchers.IO) { runCatching { ytm.details(track.id.substringAfter(':')).album }.getOrNull() }
+        } else null
+        if (named.isNullOrBlank()) {
+            // No name for the album: only an album that carries the song's own title can be told to be it.
+            return@coroutineScope pick(bySong.await(), track.title)
+        }
+        // Often the same list answers (an album named like its song, or an album search that already contains it).
+        pick(bySong.await(), named)?.let { return@coroutineScope it }
+        val refs = withContext(Dispatchers.IO) { runCatching { ytm.searchAlbums("$named ${track.artist}") }.getOrNull().orEmpty() }
+        pick(refs, named)
     }
 }

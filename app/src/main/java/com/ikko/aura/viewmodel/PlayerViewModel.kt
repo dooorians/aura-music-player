@@ -765,6 +765,11 @@ class PlayerViewModel @Inject constructor(
                 shrink = true,
             ) ?: bitmap
             cover?.let { playerController.updateItemArtwork(track.id, squared(it)) }
+            // While the song plays, its album page is found in the background: a tap on its title then opens at once.
+            if (YtmLibrary.isStreamed(track) && track.remoteAlbumId == null) {
+                delay(ALBUM_WARM_DELAY_MS)
+                runCatching { albumResolver.warm(track) }
+            }
         }
     }
 
@@ -834,6 +839,7 @@ class PlayerViewModel @Inject constructor(
          * swap, which is the most expensive frame the player has.
          */
         private const val PALETTE_DEBOUNCE_MS = 120L
+        private const val ALBUM_WARM_DELAY_MS = 1_500L
     }
 }
 
