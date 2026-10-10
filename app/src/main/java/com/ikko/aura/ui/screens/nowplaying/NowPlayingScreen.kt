@@ -1154,7 +1154,6 @@ private fun TransportRow(
             width = u * 136f,
             glyphCenter = glyphCenter,
             glyphSize = u * 64f,
-            framed = true,
             icon = if (isPlaying) CupertinoIcons.Pause else CupertinoIcons.Play,
             playing = isPlaying,
             contentDescription = if (isPlaying) "Pause" else "Lecture",
