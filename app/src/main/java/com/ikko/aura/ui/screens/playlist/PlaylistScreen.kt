@@ -128,6 +128,13 @@ fun PlaylistScreen(
         theme?.let { pageTheme.value = it }
         onDispose { if (pageTheme.value === theme) pageTheme.value = null }
     }
+    // The "F" page is lit by blurred blobs: the weekly card's own mood when it is one, else the page's default (player-lit).
+    val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
+    val immersivePalette = remember(ambience) { ambience?.let { com.ikko.aura.ui.components.immersiveOfAmbience(it) } }
+    DisposableEffect(immersivePalette) {
+        immersive.value = immersivePalette
+        onDispose { if (immersive.value === immersivePalette) immersive.value = null }
+    }
     val listState = rememberLazyListState()
     val accent = rememberUpdatedState(theme?.accent ?: AuraColors.TextPrimary.copy(alpha = 0.9f))
 
@@ -149,63 +156,39 @@ fun PlaylistScreen(
             }
 
             Box(Modifier.fillMaxSize()) {
-            if (theme != null) AlbumGround(ground = theme.solid, listState = listState)
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 item(key = "header") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 14.dp),
+                            .padding(start = com.ikko.aura.ui.components.designUnit() * 40f, end = com.ikko.aura.ui.components.designUnit() * 40f, top = com.ikko.aura.ui.components.designUnit() * 128f, bottom = com.ikko.aura.ui.components.designUnit() * 48f),
                     ) {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Box(
-                                modifier = Modifier.shadow(
-                                    elevation = 16.dp,
-                                    shape = ART_SHAPE,
-                                    ambientColor = Color.Black.copy(alpha = 0.45f),
-                                    spotColor = Color.Black.copy(alpha = 0.55f),
-                                ),
-                            ) {
-                                // A weekly playlist has no cover: its colours are the page's, and that is all of it.
-                                if (ambience == null) {
-                                    AlbumArt(
-                                        uri = current.tracks.firstOrNull()?.artworkUri,
-                                        contentDescription = current.name,
-                                        shape = ART_SHAPE,
-                                        modifier = Modifier.size(ART_SIZE).border(1.dp, Color.White.copy(alpha = 0.10f), ART_SHAPE),
-                                        targetSizeDp = ART_SIZE,
-                                        cacheKey = current.tracks.firstOrNull()?.albumId?.toString(),
-                                    )
-                                }
-                            }
-                            if (ambience == null) Spacer(Modifier.width(18.dp))
-                            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
-                                Text(
-                                    text = current.name,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 24.sp,
-                                    lineHeight = 28.sp,
-                                    color = AuraColors.TextPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = (if (isFavorites) "Tes favoris" else "Playlist") + " · " + meta.replace(" · ", " · "),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                    lineHeight = 16.sp,
-                                    color = Color.White.copy(alpha = 0.72f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                        Column {
+                            Text(
+                                text = current.name,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = com.ikko.aura.ui.components.designSp(80f),
+                                lineHeight = com.ikko.aura.ui.components.designSp(88f),
+                                letterSpacing = com.ikko.aura.ui.components.designSp(80f * -0.03f),
+                                color = Color.White,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = (if (isFavorites) "Tes favoris" else "Playlist") + " · " + meta,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = com.ikko.aura.ui.components.designSp(34f),
+                                lineHeight = com.ikko.aura.ui.components.designSp(42f),
+                                color = Color.White.copy(alpha = 0.78f),
+                                modifier = Modifier.padding(top = com.ikko.aura.ui.components.designUnit() * 6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         if (renaming) {
                             RenameField(
@@ -214,9 +197,9 @@ fun PlaylistScreen(
                                 onCancel = { renaming = false },
                             )
                         }
-                        Spacer(Modifier.height(15.dp))
+                        Spacer(Modifier.height(com.ikko.aura.ui.components.designUnit() * 52f))
                         if (current.tracks.isNotEmpty()) Row(
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 25f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks) })
@@ -228,7 +211,7 @@ fun PlaylistScreen(
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
                                 CircleAction(onClick = { menuState.open() }) {
-                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(20.dp))
+                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
                                 }
                                 // The design's playlist menu (600 px wide, the page's colour at 24 %).
                                 DesignMenu(state = menuState, width = 240.dp, shade = 0.24f) {
@@ -256,7 +239,7 @@ fun PlaylistScreen(
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
                             style = MaterialTheme.typography.bodyLarge,
                             color = AuraColors.TextSecondary,
-                            modifier = Modifier.padding(horizontal = PAGE_PADDING, vertical = 24.dp),
+                            modifier = Modifier.padding(horizontal = com.ikko.aura.ui.components.designUnit() * 40f, vertical = 24.dp),
                         )
                     }
                 }
@@ -274,15 +257,15 @@ fun PlaylistScreen(
                             AlbumArt(
                                 uri = track.artworkUri,
                                 contentDescription = null,
-                                shape = AuraShapes.AlbumCover,
-                                modifier = Modifier.size(48.dp),
-                                targetSizeDp = 48.dp,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(com.ikko.aura.ui.components.designUnit() * 32f),
+                                modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 130f),
+                                targetSizeDp = com.ikko.aura.ui.components.designUnit() * 130f,
                                 cacheKey = track.albumId.toString(),
                             )
                         },
                         trailing = {
-                            IconButton(onClick = { playlistDetailViewModel.removeTrack(track.id) }, modifier = Modifier.size(32.dp)) {
-                                Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = AuraColors.TextTertiary, modifier = Modifier.size(18.dp))
+                            IconButton(onClick = { playlistDetailViewModel.removeTrack(track.id) }, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 88f)) {
+                                Icon(CupertinoIcons.Delete, contentDescription = "Retirer de la playlist", tint = Color.White.copy(alpha = 0.78f), modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 36f))
                             }
                         },
                     )
@@ -291,7 +274,6 @@ fun PlaylistScreen(
                     UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
                 }
             }
-            if (theme != null) StatusBarScrim(solid = theme.solid, listState = listState)
             }
         }
     }

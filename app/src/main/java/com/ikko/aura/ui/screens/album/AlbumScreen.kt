@@ -209,6 +209,16 @@ fun AlbumPageContent(
         pageTheme.value = theme
         onDispose { if (pageTheme.value === theme) pageTheme.value = null }
     }
+    // The "F" page is lit by blurred blobs of the cover's own colours (see Immersive.kt).
+    val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
+    val immersivePalette = remember(theme) {
+        val (h, sat) = com.ikko.aura.ui.components.hueAndSaturation(theme.accent)
+        com.ikko.aura.ui.components.immersiveFromCover(h, sat, dark = true)
+    }
+    DisposableEffect(immersivePalette) {
+        immersive.value = immersivePalette
+        onDispose { if (immersive.value === immersivePalette) immersive.value = null }
+    }
 
     val accent = rememberUpdatedState(theme.accent)
     val accentSoft = rememberUpdatedState(theme.accentSoft)
@@ -221,14 +231,13 @@ fun AlbumPageContent(
             applyStatusBarInset = false,
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                AlbumGround(ground = theme.solid, listState = listState)
                 run {
 
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     item(key = "header") {
                         AlbumHeader(
@@ -292,7 +301,6 @@ fun AlbumPageContent(
                 }
 
                 }
-                StatusBarScrim(solid = theme.solid, listState = listState)
             }
         }
 
@@ -467,65 +475,66 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = PAGE_PADDING, end = PAGE_PADDING, top = statusTop + HEADER_TOP_BELOW_STATUS, bottom = 14.dp),
+            .padding(start = com.ikko.aura.ui.components.designUnit() * 40f, end = com.ikko.aura.ui.components.designUnit() * 40f, top = com.ikko.aura.ui.components.designUnit() * 128f, bottom = com.ikko.aura.ui.components.designUnit() * 24f),
     ) {
+        val u = com.ikko.aura.ui.components.designUnit()
+        val accentInk = rememberPlayerAccent()
         Row(verticalAlignment = Alignment.CenterVertically) {
             AlbumArt(
                 uri = uiState.tracks.firstOrNull()?.artworkUri,
                 contentDescription = uiState.title,
-                shape = ART_SHAPE,
-                modifier = Modifier.size(ART_SIZE),
-                targetSizeDp = ART_SIZE,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(u * 50f),
+                modifier = Modifier.size(u * 240f),
+                targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
             )
-            Spacer(Modifier.width(15.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Spacer(Modifier.width(u * 40f))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(u * 6f)) {
                 Text(
                     text = uiState.title.trim(),
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 24.sp,
-                    lineHeight = 28.sp,
-                    color = rememberPlayerAccent(),
+                    fontSize = com.ikko.aura.ui.components.designSp(66f),
+                    lineHeight = com.ikko.aura.ui.components.designSp(76f),
+                    letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f),
+                    color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
                 Text(
                     text = uiState.artist.trim(),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    lineHeight = 18.sp,
-                    // One colour for the whole header: the title is the full accent, the artist a step softer, the details softer still.
-                    color = rememberPlayerAccent().copy(alpha = 0.85f),
+                    fontSize = com.ikko.aura.ui.components.designSp(40f),
+                    lineHeight = com.ikko.aura.ui.components.designSp(48f),
+                    // The mock's artist is the cover's colour pushed toward white (#d7d3ff over a violet cover).
+                    color = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
                 Text(
                     text = meta.ifEmpty { "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}" },
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
-                    color = rememberPlayerAccent().copy(alpha = 0.72f),
+                    fontSize = com.ikko.aura.ui.components.designSp(32f),
+                    lineHeight = com.ikko.aura.ui.components.designSp(40f),
+                    color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
                 )
             }
         }
 
-        Spacer(Modifier.height(15.dp))
+        Spacer(Modifier.height(u * 40f))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(u * 25f), verticalAlignment = Alignment.CenterVertically) {
             PlayAllButton(onClick = onPlayAll, label = "Lire tout", modifier = Modifier.weight(1.15f))
             AuraButton(
                 onClick = onShuffle,
                 modifier = Modifier.weight(1f),
                 shape = CircleShape,
-                minHeight = ACTION_HEIGHT,
-                contentPadding = PaddingValues(horizontal = 8.dp),
+                minHeight = u * 112f,
+                contentPadding = PaddingValues(horizontal = u * 8f),
             ) {
-                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(text = "Mélanger", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                Icon(CupertinoIcons.Shuffle, contentDescription = null, modifier = Modifier.size(u * 44f))
+                Spacer(Modifier.width(u * 18f))
+                Text(text = "Mélanger", fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
             }
             CircleAction(onClick = onFavorite) {
                 FillableIcon(
@@ -534,12 +543,12 @@ private fun AlbumHeader(
                     active = uiState.isFavorite,
                     contentDescription = "Favori",
                     tint = rememberPlayerAccent(),
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(u * 44f),
                 )
             }
             Box(moreAnchor) {
                 CircleAction(onClick = onMore) {
-                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(18.dp))
+                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
                 }
                 moreMenu()
             }
@@ -585,16 +594,16 @@ internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier
     }
     Row(
         modifier = modifier
-            .height(PLAY_HEIGHT)
+            .height(com.ikko.aura.ui.components.designUnit() * 112f)
             .clip(CircleShape)
             .background(Color.White)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, tint = ink, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = ink, maxLines = 1)
+        Icon(CupertinoIcons.Play, contentDescription = null, tint = ink, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
+        Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 18f))
+        Text(text = label, fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, color = ink, maxLines = 1)
     }
 }
 
@@ -608,7 +617,7 @@ internal fun ShuffleButton(onClick: () -> Unit) {
 @Composable
 internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
     // The app's own round button; as tall as the play capsule beside it.
-    AuraIconButton(onClick = onClick, size = ACTION_HEIGHT) {
+    AuraIconButton(onClick = onClick, size = com.ikko.aura.ui.components.designUnit() * 112f) {
         content()
     }
 }
@@ -645,7 +654,7 @@ internal fun AlbumTrackRow(
             .fillMaxWidth()
             // The row (its press mark and the playing row's highlight) reaches HIGHLIGHT_OUTSET past the page's margin on each
             // side, with rounded corners; its content sits back on the margin, on the cover's and the buttons' line.
-            .padding(horizontal = PAGE_PADDING - HIGHLIGHT_OUTSET)
+            .padding(horizontal = com.ikko.aura.ui.components.designUnit() * 40f - HIGHLIGHT_OUTSET)
             .clip(RoundedCornerShape(ROW_RADIUS))
             .then(
                 if (isCurrent) Modifier.drawWithCache {
@@ -656,31 +665,33 @@ internal fun AlbumTrackRow(
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             // As tall as a row of an external album, whose download button (32 dp) sets its height: local rows match it.
-            .heightIn(min = 54.dp)
-            .padding(horizontal = HIGHLIGHT_OUTSET + inset, vertical = 11.dp),
+            .heightIn(min = com.ikko.aura.ui.components.designUnit() * (if (leading != null) 170f else 140f))
+            .padding(horizontal = HIGHLIGHT_OUTSET + inset),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
             leading()
-            Spacer(Modifier.width(11.dp))
-        } else Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
+            Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 30f))
+        } else Box(modifier = Modifier.width(com.ikko.aura.ui.components.designUnit() * 56f), contentAlignment = Alignment.CenterStart) {
             if (isCurrent) {
                 PlayingBars(color = currentTint, animate = isPlaying)
             } else {
                 Text(
                     text = number.toString(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = rememberPlayerAccent().copy(alpha = 0.6f),
+                    fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f), fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS),
+                    color = Color.White.copy(alpha = 0.78f),
                 )
             }
         }
+        if (leading == null) Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 24f))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = shownTitle,
-                fontSize = 15.sp,
-                lineHeight = 18.sp,
+                fontSize = com.ikko.aura.ui.components.designSp(40f),
+                lineHeight = com.ikko.aura.ui.components.designSp(48f),
                 fontWeight = FontWeight.Bold,
-                color = if (isCurrent) currentTint else rememberPlayerAccent(),
+                color = if (isCurrent) currentTint else Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -688,23 +699,26 @@ internal fun AlbumTrackRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
+                    fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f),
                     fontWeight = FontWeight.SemiBold,
-                    color = rememberPlayerAccent().copy(alpha = 0.6f),
+                    color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 24f))
         Text(
             text = formatTrackDuration(track.durationMs),
-            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS, fontSize = 12.sp),
-            color = rememberPlayerAccent().copy(alpha = if (isCurrent) 0.8f else 0.65f),
+            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
+                fontSize = com.ikko.aura.ui.components.designSp(30f), lineHeight = com.ikko.aura.ui.components.designSp(36f), fontWeight = FontWeight.SemiBold),
+            color = Color.White.copy(alpha = 0.78f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.width(com.ikko.aura.ui.components.designUnit() * 90f),
             maxLines = 1,
         )
         if (trailing != null) {
-            Spacer(Modifier.width(6.dp))
-            Box(modifier = Modifier.size(32.dp), contentAlignment = Alignment.Center) { trailing() }
+            Box(modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 88f), contentAlignment = Alignment.Center) { trailing() }
         }
     }
 }
