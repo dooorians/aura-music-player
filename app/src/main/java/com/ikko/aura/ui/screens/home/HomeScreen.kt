@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.home
 
+import com.ikko.aura.ui.components.keepsDragInRow
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.foundation.background
@@ -173,8 +174,11 @@ fun HomeScreen(
                 }
 
                 // The moods, as chips.
+                // A drag in the chips stays in the chips, at their ends too: it never turns into a page change.
+                val chipsEffect = androidx.compose.foundation.rememberOverscrollEffect()
                 LazyRow(
-                    modifier = Modifier.padding(top = u * 26f),
+                    modifier = Modifier.padding(top = u * 26f).keepsDragInRow(chipsEffect),
+                    overscrollEffect = chipsEffect,
                     contentPadding = PaddingValues(horizontal = u * 40f),
                     horizontalArrangement = Arrangement.spacedBy(u * 12f),
                 ) {
@@ -264,8 +268,10 @@ fun HomeScreen(
                         style = face.copy(fontSize = designSp(56f), lineHeight = designSp(66f), fontWeight = FontWeight.ExtraBold, letterSpacing = designSp(56f * -0.02f)),
                         modifier = Modifier.padding(top = u * 64f, start = u * 40f, end = u * 40f),
                     )
+                    val recentEffect = androidx.compose.foundation.rememberOverscrollEffect()
                     LazyRow(
-                        modifier = Modifier.padding(top = u * 28f),
+                        modifier = Modifier.padding(top = u * 28f).keepsDragInRow(recentEffect),
+                        overscrollEffect = recentEffect,
                         contentPadding = PaddingValues(horizontal = u * 40f),
                         horizontalArrangement = Arrangement.spacedBy(u * 25f),
                     ) {

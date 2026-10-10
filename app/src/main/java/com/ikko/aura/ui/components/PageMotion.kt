@@ -176,6 +176,7 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
     }
 
     fun dragBy(pages: Float) {
+        
         val last = (pageCount - 1).toFloat()
         if (!dragging) {
             // A new drag starts from where the pages are — which may be past an end, settling back.
@@ -432,18 +433,41 @@ fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect
                 return Offset.Zero
             }
 
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                state.rowKeepsDrag = false
-                return Velocity.Zero
-            }
+            override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                // The row's fling is over: nothing of it is left to turn into a page change.
                 state.rowKeepsDrag = false
                 return Velocity.Zero
             }
         }
     }
-    return nestedScroll(connection).pointerInput(effect) {
+    // A gesture that starts in the row is the row's, from the first touch to the last: the pages never see it, whether the
+    // row can still scroll or is at its end. Decided at the touch (Initial pass, before anything has been consumed), not
+    // from what the row happens to claim afterwards.
+    val guard = Modifier.pointerInput(state) {
+        var generation = 0
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                if (event.changes.any { it.pressed }) {
+                    // Any finger down on the row: the gesture is the row's until the row has finished with it.
+                    generation++
+                    state.rowKeepsDrag = true
+                } else if (state.rowKeepsDrag) {
+                    // Let go. The row's fling may still be running and, at its end, hands its leftover to the pages (a
+                    // drag that was the row's turned, a moment later, into a page change): the flag is kept until the
+                    // fling is over (see onPostFling), or after a moment if there was no fling.
+                    val mine = generation
+                    scope.launch {
+                        kotlinx.coroutines.delay(RELEASE_GRACE_MS)
+                        if (mine == generation) state.rowKeepsDrag = false
+                    }
+                }
+            }
+        }
+    }
+    return nestedScroll(connection).then(guard).pointerInput(effect) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             var total = Offset.Zero
@@ -464,3 +488,6 @@ fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect
         }
     }
 }
+
+/** How long a row keeps a gesture after the finger is up, when its fling does not end it sooner. */
+private const val RELEASE_GRACE_MS = 1200L
