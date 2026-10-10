@@ -208,7 +208,7 @@ fun PlaylistScreen(
                                     horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 20f),
                                 ) {
                                     Text(
-                                        text = updated + if (page.status == "kept") " · sources indisponibles, liste conservée" else "",
+                                        text = updated + when (page.status) { "unavailable" -> " · sources indisponibles, liste conservée"; "kept" -> " · pas assez de nouveautés, liste conservée"; else -> "" },
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = com.ikko.aura.ui.components.designSp(30f),
                                         lineHeight = com.ikko.aura.ui.components.designSp(36f),

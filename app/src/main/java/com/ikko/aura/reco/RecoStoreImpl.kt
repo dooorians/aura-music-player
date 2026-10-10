@@ -88,6 +88,9 @@ class RecoStoreImpl @Inject constructor(
     override suspend fun generatedAt(): Map<RecoKind, Long> =
         dao.states().mapNotNull { s -> RecoKind.ofKey(s.kindKey)?.let { it to s.generatedAtMs } }.toMap()
 
+    override suspend fun attemptedAt(): Map<RecoKind, Long> =
+        dao.states().mapNotNull { s -> RecoKind.ofKey(s.kindKey)?.let { it to s.attemptedAtMs } }.toMap()
+
     override suspend fun sourceOrder(): List<String> = sourceOrder.order.first()
 
     override suspend fun commit(kind: RecoKind, picks: List<Pick>, nowMs: Long) {
@@ -117,6 +120,12 @@ class RecoStoreImpl @Inject constructor(
 
     override suspend fun keep(kind: RecoKind, status: String, nowMs: Long) {
         val previous = dao.states().firstOrNull { it.kindKey == kind.key }
-        dao.putState(RecoStateEntity(kind.key, generatedAtMs = previous?.generatedAtMs ?: 0L, attemptedAtMs = nowMs, status = status))
+        dao.putState(RecoStateEntity(
+            kind.key,
+            generatedAtMs = previous?.generatedAtMs ?: 0L,
+            // No source to ask is not a try: the next opening asks again.
+            attemptedAtMs = if (status == STATUS_UNAVAILABLE) previous?.attemptedAtMs ?: 0L else nowMs,
+            status = status,
+        ))
     }
 }

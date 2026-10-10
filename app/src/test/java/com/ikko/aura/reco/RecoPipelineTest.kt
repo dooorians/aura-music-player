@@ -15,6 +15,7 @@ private class FakeStore(
     var hidden: Set<String> = emptySet(),
 ) : RecoStore {
     val generated = HashMap<RecoKind, Long>()
+    val attempted = HashMap<RecoKind, Long>()
     /** The playlists as generated: what a renewal replaces. */
     val playlists = HashMap<RecoKind, List<Pick>>()
     val kept = HashMap<RecoKind, String>()
@@ -28,13 +29,18 @@ private class FakeStore(
     override suspend fun hidden() = hidden
     override suspend fun history() = shown
     override suspend fun generatedAt() = generated
+    override suspend fun attemptedAt() = attempted
     override suspend fun sourceOrder() = listOf("local", "ytm", "jiosaavn")
     override suspend fun commit(kind: RecoKind, picks: List<Pick>, nowMs: Long) {
         playlists[kind] = picks
         generated[kind] = nowMs
+        attempted[kind] = nowMs
         picks.forEach { shown[it.candidate.identity] = nowMs }
     }
-    override suspend fun keep(kind: RecoKind, status: String, nowMs: Long) { kept[kind] = status }
+    override suspend fun keep(kind: RecoKind, status: String, nowMs: Long) {
+        kept[kind] = status
+        if (status != STATUS_UNAVAILABLE) attempted[kind] = nowMs
+    }
 }
 
 private class FakeSource(
@@ -116,7 +122,7 @@ class RecoPipelineTest {
         val result = pipeline(s, down).refresh(force = true)
         assertEquals(RunStatus.NO_SOURCE, result.status)
         assertEquals(previous, s.playlists[RecoKind.STYLE])
-        assertEquals("kept", s.kept[RecoKind.STYLE])
+        assertEquals(STATUS_UNAVAILABLE, s.kept[RecoKind.STYLE])
     }
 
     @Test fun `sources that all fail keep what was there`() = runBlocking {
@@ -325,5 +331,30 @@ class RecoPipelineTest {
         )
         pipeline(s, source).refresh(force = true)
         assertTrue(s.playlists.values.flatten().none { it.candidate.id == "ytm:session" })
+    }
+
+    @Test fun `a playlist that could not be filled is not retried at every opening`() = runBlocking {
+        val s = store()
+        val source = FakeSource("ytm", catalogue = { listOf(candidate("Only", "Liked Artist", id = "ytm:only")) })
+        pipeline(s, source).refresh(force = true)
+        assertTrue(RecoKind.STYLE in s.kept.keys || RecoKind.STYLE !in s.playlists)
+        val searches = source.searches
+        // An hour later: still due (never generated) but tried too recently.
+        val soon = pipeline(s, source, now = NOW + 3_600_000L).refresh()
+        assertEquals(RunStatus.NOTHING_DUE, soon.status)
+        assertEquals(searches, source.searches)
+        // The next day it tries again.
+        val later = pipeline(s, source, now = NOW + 24 * 3_600_000L).refresh()
+        assertTrue(later.status != RunStatus.NOTHING_DUE)
+    }
+
+    @Test fun `a network that was down is tried again at the next opening`() = runBlocking {
+        val s = store()
+        val failing = FakeSource("ytm", failing = true)
+        pipeline(s, failing).refresh()
+        val retry = FakeSource("ytm", catalogue = { (1..14).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } })
+        val result = pipeline(s, retry, now = NOW + 60_000L).refresh()
+        assertEquals(RunStatus.UPDATED, result.status)
+        assertTrue(result.updated.isNotEmpty())
     }
 }

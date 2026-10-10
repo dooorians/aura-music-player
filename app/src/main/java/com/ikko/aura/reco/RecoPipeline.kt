@@ -20,12 +20,17 @@ interface RecoStore {
     suspend fun history(): Map<String, Long>
     /** Kind → when it was last generated (0 if never). */
     suspend fun generatedAt(): Map<RecoKind, Long>
+    /** Kind → when a renewal last tried, whatever came of it (0 if never). */
+    suspend fun attemptedAt(): Map<RecoKind, Long>
     suspend fun sourceOrder(): List<String>
     /** Replaces a playlist with [picks] and records them as proposed. */
     suspend fun commit(kind: RecoKind, picks: List<Pick>, nowMs: Long)
     /** Records that an attempt left the previous playlist in place. */
     suspend fun keep(kind: RecoKind, status: String, nowMs: Long)
 }
+
+/** A renewal that found no source to ask or no answer: not counted as a try, so the next opening tries again. */
+const val STATUS_UNAVAILABLE = "unavailable"
 
 enum class RunStatus { UPDATED, NOTHING_DUE, NO_SOURCE, NO_PROFILE, SOURCES_FAILED }
 
@@ -53,14 +58,16 @@ class RecoPipeline(
     suspend fun refresh(requested: Set<RecoKind>? = null, force: Boolean = false): RunResult {
         val now = clock()
         val generated = store.generatedAt()
+        val attempted = store.attemptedAt()
         val kinds = (requested ?: RecoKind.entries.toSet()).filter { k ->
-            force || Renewal.isDue(k.cadence, generated[k] ?: 0L, now, zone)
+            // Due by its cadence — and not tried again at every opening of the app when the last try found too little.
+            force || (Renewal.isDue(k.cadence, generated[k] ?: 0L, now, zone) && now - (attempted[k] ?: 0L) >= RETRY_AFTER_MS)
         }.toSet()
         if (kinds.isEmpty()) return RunResult(RunStatus.NOTHING_DUE)
 
         val live = sources().filter { runCatching { it.available() }.getOrDefault(false) }
         if (live.isEmpty()) {
-            kinds.forEach { store.keep(it, "kept", now) }
+            kinds.forEach { store.keep(it, STATUS_UNAVAILABLE, now) }
             return RunResult(RunStatus.NO_SOURCE, kept = kinds)
         }
 
@@ -76,7 +83,7 @@ class RecoPipeline(
         val queries = QueryPlan.build(profile, kinds, variation, blocked)
         val gathered = CandidateGatherer.gather(live, queries)
         if (gathered.candidates.isEmpty()) {
-            kinds.forEach { store.keep(it, "kept", now) }
+            kinds.forEach { store.keep(it, STATUS_UNAVAILABLE, now) }
             return RunResult(RunStatus.SOURCES_FAILED, kept = kinds)
         }
 
@@ -218,6 +225,8 @@ class RecoPipeline(
     }
 
     private companion object {
+        /** After an attempt that kept the previous playlist, the next automatic one waits this long. */
+        const val RETRY_AFTER_MS = 6L * 60 * 60 * 1000
         const val MAX_DATE_LOOKUPS = 24
         const val MAX_SONG_CHECKS = 60
     }
