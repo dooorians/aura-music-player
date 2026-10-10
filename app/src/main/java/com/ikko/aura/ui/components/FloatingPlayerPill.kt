@@ -174,7 +174,8 @@ fun FloatingPlayerPill(
         animationSpec = tween(if (isPlaying) 220 else 340, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "pill-play-morph",
     )
-    val accent = rememberPlayerAccent(onDarkGlass = true, followPage = false)
+    // White, whatever the cover: the pill's glyphs and text do not take the playing track's colour.
+    val accent = Color.White
     LiquidGlassPanel(
         shape = PillShape,
         tint = PillGlassTint,

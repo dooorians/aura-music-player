@@ -35,7 +35,8 @@ fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {})
     val motion = LocalPageMotion.current ?: return
     val scope = rememberCoroutineScope()
     val onHome = motion.p < 0.5f
-    val accent = rememberPlayerAccent(onDarkGlass = true, followPage = false)
+    // White, whatever the cover: the pill's glyphs and text do not take the playing track's colour.
+    val accent = Color.White
     val pressed = remember { Animatable(1f) }
     val shape = RoundedCornerShape(16.dp)
     LiquidGlassPanel(
