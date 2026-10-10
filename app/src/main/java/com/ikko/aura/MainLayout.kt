@@ -1312,7 +1312,7 @@ fun MainLayout() {
                                 alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                             }
                             .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(horizontal = 14.8.dp, vertical = 6.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                 }
             }
@@ -1381,7 +1381,7 @@ private fun PlayerPillHost(
     CompositionLocalProvider(LocalAuraBackdrop provides backdrop) {
         androidx.compose.foundation.layout.Row(
             modifier = modifier,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(7.4.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
         FloatingPlayerPill(

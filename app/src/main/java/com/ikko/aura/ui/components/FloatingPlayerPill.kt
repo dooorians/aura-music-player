@@ -56,8 +56,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.unit.sp
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.ui.theme.AuraColors
@@ -78,23 +76,23 @@ import kotlinx.coroutines.launch
 // Corners about a quarter of the pill's height, as in the reference: a rounded rectangle, not a stadium.
 private const val RIM_STRENGTH = 0.55f
 
-private val PillShape = RoundedCornerShape(22.2.dp)
+private val PillShape = RoundedCornerShape(16.dp)
 
 // Proportions taken from iOS's mini player, scaled to this screen's width (the two are the same
 // width once the screen margins are the same fraction of it, which is what makes the ratios carry
 // over): a capsule 46dp tall, artwork 30dp, text set at 12sp.
-private val PILL_HEIGHT = 58.5.dp
-private val ART_SIZE = 46.dp
-private val ART_SHAPE = RoundedCornerShape(14.8.dp)
+private val PILL_HEIGHT = 64.dp
+private val ART_SIZE = 50.dp
+private val ART_SHAPE = RoundedCornerShape(12.dp)
 // 7 dp rather than the spec's 5: at 5 the cover's corners ran into the curve of the pill's end and were
 // clipped by it, most of all at the bottom-left, where the pill's rim highlight also lies over them.
-private val START_INSET = 6.3.dp
-private val ART_TEXT_GAP = 9.6.dp
-private val END_INSET = 12.6.dp
+private val START_INSET = 7.dp
+private val ART_TEXT_GAP = 10.dp
+private val END_INSET = 17.7.dp
 
 // The transport glyphs are drawn in a 22dp box, centred, so play and pause sit on the same axis.
-private val GLYPH_SIZE = 20.7.dp
-private val GLYPH_GAP = 16.3.dp
+private val GLYPH_SIZE = 30.dp
+private val GLYPH_GAP = 22.dp
 
 // The two glyphs are drawn apart, but the taps are not: each keeps a zone as wide as the glyph
 // plus its share of the gap on either side, and the boundary between them is the midpoint.
@@ -110,15 +108,15 @@ private val PLAY_ZONE = NEXT_ZONE + GLYPH_SIZE + GLYPH_GAP
  * of its own behind the window, out of reach of any effect — so over an empty stretch of page it is
  * clear glass with its rim, and over rows and covers it bends them.
  */
-private val PillGlassTint = Color.White
-private const val PILL_GLASS_ALPHA = 0.16f
+private val PillGlassTint = Color(0xFF080C1C)
+private const val PILL_GLASS_ALPHA = 0.4f
 
 /**
  * Deeper than the player's own 8dp: the player's panels sit over a smooth backdrop, the pill over
  * rows of text and covers, and white type on top of those has to stay readable when a pale cover
  * scrolls beneath it.
  */
-private const val PILL_BLUR_DP = 9.6f
+private const val PILL_BLUR_DP = 16f
 
 private const val HALO_MS = 720
 private const val PRESSED_SCALE = 1.045f
@@ -182,7 +180,7 @@ fun FloatingPlayerPill(
         tint = PillGlassTint,
         tintAlpha = PILL_GLASS_ALPHA,
         blurRadiusDp = PILL_BLUR_DP,
-        dropShadow = true,
+        dropShadow = false,
         edge = false,
         // No lens: it bent the pill's whole body into a grey oval on its right, as it did on the small button.
         lensScale = 0f,
@@ -377,17 +375,7 @@ fun FloatingPlayerPill(
             ,
     ) {
         // The glass's edge, lit like Apple's: bright at two corners, a hairline along the sides.
-        // The design's rim: 1.5 px at 24 %, and a 2 px light line along the top edge at 28 %.
-        val rimPx = with(androidx.compose.ui.platform.LocalDensity.current) { (designUnit() * 1.5f).toPx() }
-        Spacer(
-            Modifier.matchParentSize().clip(PillShape).drawBehind {
-                val outline = PillShape.createOutline(size, layoutDirection, this)
-                drawOutline(outline, Color.White.copy(alpha = 0.24f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = rimPx * 2f))
-                clipRect(bottom = rimPx * 2.6f) {
-                    drawOutline(outline, Color.White.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = rimPx * 2.7f))
-                }
-            },
-        )
+        Spacer(Modifier.matchParentSize().clip(PillShape).pillEdge(PillShape))
     Row(
         modifier = Modifier.fillMaxSize().padding(start = START_INSET, end = END_INSET),
         verticalAlignment = Alignment.CenterVertically,
@@ -426,7 +414,7 @@ fun FloatingPlayerPill(
             ) {
                 Text(
                     text = shown.title,
-                    style = LibraryTypography.PlayerTitle.copy(fontSize = 14.8.sp, lineHeight = 17.8.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold),
+                    style = LibraryTypography.PlayerTitle,
                     color = accent,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
@@ -435,7 +423,7 @@ fun FloatingPlayerPill(
                 )
                 Text(
                     text = shown.artist,
-                    style = LibraryTypography.PlayerArtist.copy(fontSize = 12.6.sp, lineHeight = 15.6.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    style = LibraryTypography.PlayerArtist,
                     color = accent.copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
