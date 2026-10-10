@@ -144,7 +144,10 @@ class RecoPipeline(
             album = if (c.album.isBlank() && !v.album.isNullOrBlank()) v.album else c.album,
             release = if (release != null && rank(release) > rank(c.release)) release else c.release,
             tags = (c.tags + v.tags).distinct(),
-            confirmedSong = c.confirmedSong || v.isSong == true,
+            // The page has the last word: an official release's description makes it a song, any other page is a video
+            // (a clip, a session, a talk) whatever list it was found in. Only when the page could not be read does the
+            // list it came from (a search of songs) stand.
+            confirmedSong = v.isSong ?: c.confirmedSong,
             playability = if (v.playable == true) Playability.VERIFIED else c.playability,
         )
     }
@@ -157,8 +160,8 @@ class RecoPipeline(
      */
     private fun acceptable(c: Candidate, v: Verification?, ctx: RankContext): Boolean {
         if (v?.playable == false) return false
-        // Of the sources, only YouTube Music mixes videos in with songs: its songs must be vouched for, by the search
-        // of songs they came from, an auto-generated channel, or the page's own description.
+        // Of the sources, only YouTube Music mixes videos in with songs: its songs must be vouched for, by an official
+        // release's own description, or — when the page could not be read — by the search of songs they came from.
         if (c.sourceId == "ytm" && !c.confirmedSong) return false
         return Eligibility.excluded(c, ctx) == null
     }

@@ -3,6 +3,8 @@ package com.ikko.aura.reco
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import kotlinx.coroutines.flow.first
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.ikko.aura.data.settingsDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -29,6 +31,13 @@ class RecoPreferences @Inject constructor(@param:ApplicationContext private val 
     /** Artists the listener typed in, for a profile with little to learn from. */
     val seedArtists: Flow<List<String>> = context.settingsDataStore.data
         .map { it[seedsKey].orEmpty().split('\u0000').filter(String::isNotBlank) }.distinctUntilChanged()
+
+    private val versionKey = intPreferencesKey("reco_algorithm_version")
+
+    /** The version of the selection rules the stored playlists were made with; 0 when none was. */
+    suspend fun algorithmVersion(): Int = context.settingsDataStore.data.first()[versionKey] ?: 0
+
+    suspend fun setAlgorithmVersion(v: Int) { context.settingsDataStore.edit { it[versionKey] = v } }
 
     suspend fun setConsent(on: Boolean) { context.settingsDataStore.edit { it[consentKey] = on } }
 

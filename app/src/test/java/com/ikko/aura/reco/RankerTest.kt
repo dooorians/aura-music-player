@@ -234,4 +234,16 @@ class RankerTest {
         )
         assertTrue(select(RecoKind.CHILL, listOf(farmed)).isEmpty())
     }
+
+    @Test fun `video clips are not songs`() {
+        val pool = listOf(
+            candidate("Hold The Girl (Official Music Video)", "Liked Artist"),
+            candidate("Je t'accuse (Clip officiel)", "Liked Artist"),
+            candidate("Song [MV]", "Liked Artist"),
+            candidate("Song (Dance Practice)", "Liked Artist"),
+            candidate("Song (Live Performance Video)", "Liked Artist"),
+            candidate("Real Song", "Liked Artist"),
+        )
+        assertEquals(listOf("Real Song"), select(RecoKind.STYLE, pool).map { it.candidate.title })
+    }
 }

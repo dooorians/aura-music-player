@@ -315,4 +315,15 @@ class RecoPipelineTest {
         pipeline(s, source).refresh(force = true)
         assertTrue(s.playlists.values.flatten().none { it.candidate.id == "ytm:maybe" })
     }
+
+    @Test fun `a page that is not an official release is a video even when it was found in a search of songs`() = runBlocking {
+        val s = store()
+        val source = FakeSource(
+            "ytm",
+            catalogue = { (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") } + candidate("Studio Version", "Liked Artist", id = "ytm:session") },
+            verdict = { c -> if (c.id == "ytm:session") Verification(true, isSong = false) else Verification(true, isSong = true) },
+        )
+        pipeline(s, source).refresh(force = true)
+        assertTrue(s.playlists.values.flatten().none { it.candidate.id == "ytm:session" })
+    }
 }

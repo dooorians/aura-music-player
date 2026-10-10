@@ -32,7 +32,7 @@ object Eligibility {
     private val JUNK_TITLE = Regex(
         "\\b(?:karaoke|karaoké|8[- ]?bit|16[- ]?bit|tribute|ringtone|sonnerie|nightcore|made famous by|originally performed|" +
             "in the style of|backing track|midi version|lullaby (?:version|rendition)|music box|full album|\\d+ hours?|hours? of|" +
-            "clip officiel|official (?:music )?video|music video|routine|skincare|podcast|interview|episode|reaction|tutorial|vlog|unboxing|explained|breakdown|rip off)\\b|" +
+            "clip officiel|clip|vid[ée]o ?clip|video oficial|video musical|official (?:music )?video|music video|m/?v|teaser|dance practice|performance video|making of|short film|routine|skincare|podcast|interview|episode|reaction|tutorial|vlog|unboxing|explained|breakdown|rip off)\\b|" +
             "[(\\[]\\s*(?:official\\s+)?(?:lyrics?|lyric video|music video|video|visuali[sz]er|live)\\s*[)\\]]|\\blyrics?\\b",
         RegexOption.IGNORE_CASE,
     )

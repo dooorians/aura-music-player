@@ -357,7 +357,8 @@ class YtmClient @Inject constructor(
         val EXPIRE = Regex("[?&]expire=(\\d+)")
         val RELEASED_ON = Regex("Released on:\\s*(\\d{4}-\\d{2}-\\d{2})")
         val VIDEO_LIKE = Regex(
-            "(?i)\\b(?:official (?:music |lyric )?video|music video|lyric video|live lounge|live (?:at|from|on|session)|visuali[sz]er|" +
+            "(?i)\\b(?:official (?:music |lyric )?video|music video|lyric video|clip officiel|clip|m/?v|teaser|dance practice|performance video|making of|" +
+                "short film|live lounge|live (?:at|from|on|session)|visuali[sz]er|" +
                 "reaction|tutorial|interview|trailer|behind the scenes|full album|karaoke|cover)\\b",
         )
         val PLAYLIST_ID = Regex("[?&]list=([\\w-]+)")

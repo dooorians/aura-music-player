@@ -92,9 +92,21 @@ class RecommendationEngine @Inject constructor(
         return run(kind?.let { setOf(it) }, force = true)
     }
 
+    /**
+     * Playlists made by older selection rules are not kept "because a source failed": when the rules change, what they
+     * made is discarded and made again (what was learned, and what the listener answered, stays).
+     */
+    private suspend fun ensureCurrentRules() {
+        if (prefs.algorithmVersion() == RULES_VERSION) return
+        dao.clearAllItems()
+        dao.clearStates()
+        prefs.setAlgorithmVersion(RULES_VERSION)
+    }
+
     private suspend fun run(kinds: Set<RecoKind>?, force: Boolean): RunResult = mutex.withLock {
         _refreshing.value = true
         try {
+            ensureCurrentRules()
             pipeline.refresh(kinds, force).also { android.util.Log.i("Reco", "renewal (force=$force): $it") }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -154,5 +166,10 @@ class RecommendationEngine @Inject constructor(
         dao.clearStates()
         // What was proposed came from the profile that is gone: the playlists are made again from the next renewal.
         dao.clearAllItems()
+    }
+
+    private companion object {
+        /** Bumped when the rules that choose songs change in a way that makes earlier playlists wrong. */
+        const val RULES_VERSION = 2
     }
 }
