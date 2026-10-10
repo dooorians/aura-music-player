@@ -316,9 +316,9 @@ fun LibraryScreen(
                     } else if (reduceMotion) {
                         fadeIn(tween(120)) togetherWith fadeOut(tween(90))
                     } else {
-                        // One slide, in the direction of the capsule: going right along it, the list slides
+                        // One slide, in the direction of the chips: going right along them, the list slides
                         // in from the right; going back, from the left. Both go at once, like pages.
-                        val direction = if (libraryTabIndex(to) >= libraryTabIndex(from)) 1 else -1
+                        val direction = if (chipIndex(to) >= chipIndex(from)) 1 else -1
                         val slide = tween<IntOffset>(FILTER_SLIDE_MS, easing = FastOutSlowInEasing)
                         (slideInHorizontally(slide) { it * direction } + fadeIn(tween(FILTER_SLIDE_MS / 2))) togetherWith
                             (slideOutHorizontally(slide) { -it * direction } + fadeOut(tween(FILTER_SLIDE_MS / 2)))
@@ -390,6 +390,10 @@ fun LibraryScreen(
 }
 
 /** "128 albums": the count with its noun, agreed, and the thousands set off by a narrow no-break space. */
+/** Where a view sits among the header's chips, left to right — the direction the list slides when it changes. */
+private val CHIP_ORDER = listOf(LibraryFilter.TRACKS, LibraryFilter.ALBUMS, LibraryFilter.ARTISTS, LibraryFilter.PLAYLISTS)
+private fun chipIndex(filter: LibraryFilter): Int = CHIP_ORDER.indexOf(filter).coerceAtLeast(0)
+
 private fun countLabel(count: Int, noun: String): String {
     val number = java.text.NumberFormat.getIntegerInstance(java.util.Locale.FRANCE).format(count)
     return "$number $noun" + if (count > 1) "s" else ""
@@ -456,7 +460,7 @@ private fun LibraryHeader(
                 LibraryFilter.ALBUMS to "Albums",
                 LibraryFilter.ARTISTS to "Artistes",
                 LibraryFilter.PLAYLISTS to "Playlists",
-            ).forEach { (f, label) ->
+            ).sortedBy { chipIndex(it.first) }.forEach { (f, label) ->
                 val on = f == filter
                 Box(
                     Modifier
