@@ -17,7 +17,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
@@ -147,6 +149,10 @@ private val grainBitmap: Bitmap by lazy {
     Bitmap.createBitmap(px, 128, 128, Bitmap.Config.ARGB_8888)
 }
 
+private val grainBrush: ShaderBrush by lazy {
+    ShaderBrush(BitmapShader(grainBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT))
+}
+
 /** One palette, drawn: base, blurred blobs. A layer that is still unless the palette changes, so it is rendered once. */
 @Composable
 private fun BlobLayer(palette: ImmersivePalette, modifier: Modifier = Modifier) {
@@ -207,22 +213,28 @@ fun ImmersiveBackground(
         BlobLayer(shown, Modifier.graphicsLayer { this.alpha = if (previous == null) 1f else fade.value })
         // Grain at 14 % in Overlay, then the fall-off over the bottom 340 px.
         Box(
-            Modifier.fillMaxSize().drawBehind {
-                drawRect(
-                    brush = ShaderBrush(BitmapShader(grainBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)),
-                    alpha = 0.14f,
-                    blendMode = BlendMode.Overlay,
-                )
+            Modifier.fillMaxSize().drawWithCache {
                 val k = size.width / 1080f
                 val h = 340f * k
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent, 0.6f to Color.Black.copy(alpha = 0.22f), 1f to Color.Black.copy(alpha = 0.38f),
-                        startY = size.height - h, endY = size.height,
-                    ),
-                    topLeft = Offset(0f, size.height - h),
-                    size = androidx.compose.ui.geometry.Size(size.width, h),
+                val bottomTop = size.height - h
+                val bottomBrush = Brush.verticalGradient(
+                    0f to Color.Transparent, 0.6f to Color.Black.copy(alpha = 0.22f), 1f to Color.Black.copy(alpha = 0.38f),
+                    startY = bottomTop, endY = size.height,
                 )
+                val bottomOffset = Offset(0f, bottomTop)
+                val bottomSize = Size(size.width, h)
+                onDrawBehind {
+                    drawRect(
+                        brush = grainBrush,
+                        alpha = 0.14f,
+                        blendMode = BlendMode.Overlay,
+                    )
+                    drawRect(
+                        bottomBrush,
+                        topLeft = bottomOffset,
+                        size = bottomSize,
+                    )
+                }
             },
         )
       }

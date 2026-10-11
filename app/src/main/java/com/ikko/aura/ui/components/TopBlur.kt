@@ -98,6 +98,7 @@ private data class TopBlurElement(val topInset: Dp, val strength: Density.() -> 
 
 private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) : Modifier.Node(), DrawModifierNode {
     private var group: GraphicsLayer? = null
+    private var rawBand: GraphicsLayer? = null
     private var sharp: GraphicsLayer? = null
     private var base: GraphicsLayer? = null
     private var levels: Array<GraphicsLayer>? = null
@@ -107,10 +108,11 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
     override fun onDetach() {
         val context = requireGraphicsContext()
         group?.let(context::releaseGraphicsLayer)
+        rawBand?.let(context::releaseGraphicsLayer)
         sharp?.let(context::releaseGraphicsLayer)
         base?.let(context::releaseGraphicsLayer)
         levels?.forEach(context::releaseGraphicsLayer)
-        group = null; sharp = null; base = null; levels = null
+        group = null; rawBand = null; sharp = null; base = null; levels = null
         radiusStep = Int.MIN_VALUE
     }
 
@@ -159,6 +161,11 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
         // The page below the band, as it always was.
         clipRect(top = bandHeight) { this@draw.drawContent() }
 
+        val rawLayer = rawBand ?: context.createGraphicsLayer().also { rawBand = it }
+        rawLayer.record(IntSize(width, height)) {
+            this@draw.drawContent()
+        }
+
         val sharpLayer = sharp ?: context.createGraphicsLayer().also {
             // Offscreen: the ramp is a mask on this layer's own pixels, which it can only be if they are rendered apart.
             it.compositingStrategy = CompositingStrategy.Offscreen
@@ -166,7 +173,7 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
             sharp = it
         }
         sharpLayer.record(IntSize(width, height)) {
-            this@draw.drawContent()
+            drawLayer(rawLayer)
             drawRect(ramp(0, false, reach, bandHeight), size = Size(width.toFloat(), bandHeight), blendMode = BlendMode.DstIn)
         }
 
@@ -176,7 +183,7 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
         val smallH = ceil(height * DOWNSCALE).toInt().coerceAtLeast(1)
         val baseLayer = base ?: context.createGraphicsLayer().also { base = it }
         baseLayer.record(IntSize(smallW, smallH)) {
-            withTransform({ scale(DOWNSCALE, DOWNSCALE, pivot = Offset.Zero) }) { this@draw.drawContent() }
+            withTransform({ scale(DOWNSCALE, DOWNSCALE, pivot = Offset.Zero) }) { drawLayer(rawLayer) }
         }
         val blurred = levels ?: Array(LEVELS) {
             context.createGraphicsLayer().also { l ->

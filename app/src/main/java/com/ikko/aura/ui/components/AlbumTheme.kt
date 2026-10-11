@@ -119,10 +119,14 @@ fun albumThemeFromBitmap(bitmap: Bitmap, seed: Int): AlbumTheme {
  * coloured parts; null when it is essentially grey.
  */
 private fun auroraHue(art: Bitmap): Pair<Float, Float>? {
-    val frame = AuroraRenderer(art).also { it.render(30f) }
+    val small = if (art.width == 24 && art.height == 24) art else Bitmap.createScaledBitmap(art, 24, 24, true)
+    val pixels = IntArray(24 * 24)
+    small.getPixels(pixels, 0, 24, 0, 0, 24, 24)
     var r = 0.0; var g = 0.0; var b = 0.0; var weight = 0.0
-    for (i in 0 until AURORA_PIXELS) {
-        val cr = frame.outR[i] shr 8; val cg = frame.outG[i] shr 8; val cb = frame.outB[i] shr 8
+    for (px in pixels) {
+        val cr = (px ushr 16) and 0xFF
+        val cg = (px ushr 8) and 0xFF
+        val cb = px and 0xFF
         val chroma = (maxOf(cr, cg, cb) - minOf(cr, cg, cb)).toDouble()
         val w = chroma * chroma + 1.0
         r += cr * w; g += cg * w; b += cb * w; weight += w

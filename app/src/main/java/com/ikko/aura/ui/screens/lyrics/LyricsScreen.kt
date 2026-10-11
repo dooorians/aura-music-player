@@ -152,18 +152,33 @@ private fun LyricsPanel(
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
 ) {
-    val clock = rememberLiveLyricClock(livePosition, isPlaying)
     val listState = rememberLazyListState()
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val readPos = rememberUpdatedState(livePosition)
 
-    // The line being sung, from the clock: it changes a few times a minute, and that is all that is ever read in
-    // composition. Everything that moves every frame is read in the draw phase.
-    val activeIndex = remember(lines) { mutableIntStateOf(lines.indexAt(clock.longValue)) }
-    LaunchedEffect(lines) {
-        snapshotFlow { lines.indexAt(clock.longValue) }
-            .distinctUntilChanged()
-            .collect { activeIndex.intValue = it }
+    // The line being sung: scheduled to wake at the next line's stamp (capped at 150 ms to catch seeks), so
+    // non-word-synced songs sit at 0 FPS between line transitions instead of polling MediaController at 96 Hz.
+    val activeIndex = remember(lines) {
+        val initialPos = livePosition() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
+        mutableIntStateOf(lines.indexAt(initialPos))
     }
+    LaunchedEffect(lines, isPlaying) {
+        while (true) {
+            val pos = readPos.value() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
+            val idx = lines.indexAt(pos)
+            if (activeIndex.intValue != idx) activeIndex.intValue = idx
+            val nextStamp = lines.getOrNull(idx + 1)?.timeMs
+            val waitMs = if (isPlaying && nextStamp != null) {
+                (nextStamp - pos).coerceIn(16L, 150L)
+            } else {
+                150L
+            }
+            delay(waitMs)
+        }
+    }
+    val activeLine = lines.getOrNull(activeIndex.intValue)
+    val needsFrameClock = isPlaying && (activeLine?.isWordSynced == true || activeLine?.isGap == true)
+    val clock = rememberLiveLyricClock(livePosition, isPlaying, active = needsFrameClock)
 
     // The list's fractional position, which every line's look is a function of. A new line re-aims it from wherever
     // it has got to.

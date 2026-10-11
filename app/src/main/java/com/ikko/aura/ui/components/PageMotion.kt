@@ -376,7 +376,10 @@ fun PagedContainer(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .graphicsLayer { translationX = (index - state.p) * state.widthPx },
+                        .graphicsLayer { translationX = (index - state.p) * state.widthPx }
+                        .drawWithContent {
+                            if (abs(index - state.p) < 1f) drawContent()
+                        },
                 ) { content() }
             }
         }

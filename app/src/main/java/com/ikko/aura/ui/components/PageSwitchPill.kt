@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -31,10 +33,14 @@ import com.ikko.aura.ui.theme.CupertinoIcons
  * (the house on the library, the list on Home). Same glass and height as the mini player so the two read as a pair.
  */
 @Composable
-fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {}) {
+fun PageSwitchPill(
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    beforeSwitch: () -> Unit = {},
+) {
     val motion = LocalPageMotion.current ?: return
     val scope = rememberCoroutineScope()
-    val onHome = motion.p < 0.5f
+    val onHome by remember(motion) { derivedStateOf { motion.p < 0.5f } }
     // White, whatever the cover: the pill's glyphs and text do not take the playing track's colour.
     val accent = Color.White
     val pressed = remember { Animatable(1f) }
@@ -65,20 +71,26 @@ fun PageSwitchPill(modifier: Modifier = Modifier, beforeSwitch: () -> Unit = {})
                 position = { val p = motion.p; 1.3f - 1.7f * (p - kotlin.math.floor(p)).coerceIn(-0.2f, 1.2f) },
                 strength = { if (motion.reduceMotion || !motion.inTransit) 0f else 1f },
             )
-            .pointerInput(onHome) {
-                detectTapGestures(
-                    onPress = {
-                        scope.launch { pressed.animateTo(0.94f, spring(dampingRatio = 0.82f, stiffness = 160f)) }
-                        tryAwaitRelease()
-                        scope.launch { pressed.animateTo(1f, spring(dampingRatio = 0.58f, stiffness = 135f)) }
-                    },
-                    onTap = {
-                        // From a page that is not Home or Bibliothèque, the button first goes back to them.
-                        beforeSwitch()
-                        motion.goTo(scope, if (onHome) 1 else 0)
-                    },
-                )
-            },
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(onHome) {
+                        detectTapGestures(
+                            onPress = {
+                                scope.launch { pressed.animateTo(0.94f, spring(dampingRatio = 0.82f, stiffness = 160f)) }
+                                tryAwaitRelease()
+                                scope.launch { pressed.animateTo(1f, spring(dampingRatio = 0.58f, stiffness = 135f)) }
+                            },
+                            onTap = {
+                                // From a page that is not Home or Bibliothèque, the button first goes back to them.
+                                beforeSwitch()
+                                motion.goTo(scope, if (onHome) 1 else 0)
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         // The lit rim of the mini player's glass.
         Spacer(Modifier.matchParentSize().clip(shape).pillEdge(shape))

@@ -15,24 +15,31 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.unit.IntSize
+import com.ikko.aura.ui.components.backdrop.LocalGlassSettle
 import com.ikko.aura.ui.components.backdrop.internal.recordLayer
 
-fun Modifier.layerBackdrop(backdrop: LayerBackdrop, enabled: Boolean = true): Modifier =
-    this then LayerBackdropElement(backdrop, enabled)
+fun Modifier.layerBackdrop(
+    backdrop: LayerBackdrop,
+    enabled: Boolean = true,
+    enabledProvider: (() -> Boolean)? = null,
+): Modifier = this then LayerBackdropElement(backdrop, enabled, enabledProvider)
 
 private class LayerBackdropElement(
     val backdrop: LayerBackdrop,
     val enabled: Boolean,
+    val enabledProvider: (() -> Boolean)?,
 ) : ModifierNodeElement<LayerBackdropNode>() {
 
     override fun create(): LayerBackdropNode {
-        return LayerBackdropNode(backdrop, enabled)
+        return LayerBackdropNode(backdrop, enabled, enabledProvider)
     }
 
     override fun update(node: LayerBackdropNode) {
@@ -47,6 +54,10 @@ private class LayerBackdropElement(
             node.enabled = enabled
             changed = true
         }
+        if (node.enabledProvider !== enabledProvider) {
+            node.enabledProvider = enabledProvider
+            changed = true
+        }
         if (changed) {
             node.invalidateDraw()
         }
@@ -56,32 +67,39 @@ private class LayerBackdropElement(
         name = "layerBackdrop"
         properties["backdrop"] = backdrop
         properties["enabled"] = enabled
+        properties["enabledProvider"] = enabledProvider
     }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is LayerBackdropElement) return false
 
-        if (backdrop != other.backdrop || enabled != other.enabled) return false
+        if (backdrop != other.backdrop || enabled != other.enabled || enabledProvider !== other.enabledProvider) return false
 
         return true
     }
 
     override fun hashCode(): Int {
-        return 31 * backdrop.hashCode() + enabled.hashCode()
+        var result = backdrop.hashCode()
+        result = 31 * result + enabled.hashCode()
+        result = 31 * result + (enabledProvider?.hashCode() ?: 0)
+        return result
     }
 }
 
 private class LayerBackdropNode(
     var backdrop: LayerBackdrop,
     var enabled: Boolean,
-) : DrawModifierNode, GlobalPositionAwareModifierNode, Modifier.Node() {
+    var enabledProvider: (() -> Boolean)?,
+) : DrawModifierNode, GlobalPositionAwareModifierNode, CompositionLocalConsumerModifierNode, Modifier.Node() {
 
     private var lastPositionInWindow = Offset.Unspecified
     private var lastSize = IntSize.Zero
+    private var wasRecording = false
 
     override fun ContentDrawScope.draw() {
-        if (!enabled) {
+        if (!enabled || (enabledProvider != null && !enabledProvider!!.invoke())) {
+            wasRecording = false
             drawContent()
             return
         }
@@ -107,10 +125,17 @@ private class LayerBackdropNode(
         }
         recordLayer(this@LayerBackdropNode, backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
         drawLayer(backdrop.graphicsLayer)
+        if (!wasRecording) {
+            wasRecording = true
+            backdrop.invalidateTick++
+        }
     }
 
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
         if (coordinates.isAttached) {
+            if (currentValueOf(LocalGlassSettle)?.frozen == true && backdrop.layerCoordinates != null) {
+                return
+            }
             val position = coordinates.positionInWindow()
             if (position != lastPositionInWindow || coordinates.size != lastSize) {
                 lastPositionInWindow = position

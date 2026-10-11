@@ -24,8 +24,17 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ProfileAvatar(imageUri: String?, modifier: Modifier = Modifier, contentDescription: String? = null) {
     val context = LocalContext.current
-    val bitmap by produceState<android.graphics.Bitmap?>(null, imageUri) {
-        value = if (imageUri == null) null else withContext(Dispatchers.IO) {
+    val seeded = remember(imageUri) { imageUri?.let(avatarCache::get) }
+    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(seeded, imageUri) {
+        if (imageUri == null) {
+            value = null
+            return@produceState
+        }
+        avatarCache.get(imageUri)?.let {
+            value = it
+            return@produceState
+        }
+        value = withContext(Dispatchers.IO) {
             runCatching {
                 // Decoded at the size it is shown at, not at the photo's: a camera picture decoded whole for a 36 dp circle
                 // is tens of megabytes of bitmap and as big a texture, uploaded with Home's first frame.
@@ -36,14 +45,13 @@ fun ProfileAvatar(imageUri: String?, modifier: Modifier = Modifier, contentDescr
                         val scale = AVATAR_MAX_PX.toFloat() / longest
                         decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                     }
-                }
+                }.asImageBitmap().also { avatarCache.put(imageUri, it) }
             }.getOrNull()
         }
     }
-    val image = remember(bitmap) { bitmap?.asImageBitmap() }
     if (image != null) {
         Image(
-            bitmap = image,
+            bitmap = image!!,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             modifier = modifier.clip(CircleShape),
@@ -59,6 +67,8 @@ fun ProfileAvatar(imageUri: String?, modifier: Modifier = Modifier, contentDescr
         )
     }
 }
+
+private val avatarCache = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(4)
 
 /** Largest side the profile picture is decoded at: twice its biggest use (the 36 dp avatar, the Réglages row) is plenty. */
 private const val AVATAR_MAX_PX = 256

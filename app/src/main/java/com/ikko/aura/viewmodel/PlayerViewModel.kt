@@ -764,7 +764,10 @@ class PlayerViewModel @Inject constructor(
                 cacheKey = track.albumId.toString(),
                 shrink = true,
             ) ?: bitmap
-            cover?.let { playerController.updateItemArtwork(track.id, squared(it)) }
+            cover?.let {
+                val squaredCover = withContext(Dispatchers.Default) { squared(it) }
+                playerController.updateItemArtwork(track.id, squaredCover)
+            }
             // While the song plays, its album page is found in the background: a tap on its title then opens at once.
             if (YtmLibrary.isStreamed(track) && track.remoteAlbumId == null) {
                 delay(ALBUM_WARM_DELAY_MS)

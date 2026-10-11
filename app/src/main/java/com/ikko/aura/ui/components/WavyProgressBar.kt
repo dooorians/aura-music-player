@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.theme.AuraColors
 import java.util.Locale
 
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+
 private val IDLE_HEIGHT = 7.dp
 private val ACTIVE_HEIGHT = 12.dp
 
@@ -53,9 +56,13 @@ fun WavyProgressBar(
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val safeDuration = durationMs().coerceAtLeast(1L)
-    val reportedValue = (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
-    val value = dragFraction ?: reportedValue
-    val displayedMs = (value * safeDuration).toLong()
+    val displayedSec by remember(safeDuration) {
+        derivedStateOf {
+            val frac = dragFraction ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+            ((frac * safeDuration).toLong() / 1000L)
+        }
+    }
+    val totalSec = safeDuration / 1000L
     val height by animateDpAsState(
         targetValue = if (dragging) ACTIVE_HEIGHT else IDLE_HEIGHT,
         animationSpec = spring(
@@ -106,8 +113,10 @@ fun WavyProgressBar(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = edgeInset)
-                    .height(height),
+                    .height(height)
+                    .graphicsLayer(),
             ) {
+                val value = dragFraction ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
                 val radius = CornerRadius(size.height / 2f)
                 drawRoundRect(
                     color = accent.copy(alpha = 0.26f),
@@ -131,14 +140,14 @@ fun WavyProgressBar(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = formatDuration(displayedMs),
+                text = formatSeconds(displayedSec),
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
                 ),
                 color = accent.copy(alpha = 0.7f),
             )
             Text(
-                text = "-${formatDuration((safeDuration - displayedMs).coerceAtLeast(0L))}",
+                text = "-${formatSeconds((totalSec - displayedSec).coerceAtLeast(0L))}",
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
                 ),
@@ -148,7 +157,6 @@ fun WavyProgressBar(
     }
 }
 
-private fun formatDuration(ms: Long): String {
-    val totalSeconds = ms / 1000
+private fun formatSeconds(totalSeconds: Long): String {
     return String.format(Locale.getDefault(), "%d:%02d", totalSeconds / 60, totalSeconds % 60)
 }

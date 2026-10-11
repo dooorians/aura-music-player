@@ -205,6 +205,7 @@ fun AlbumPageContent(
 
     // The background behind this page is lit with this album, not with what is playing.
     val pageTheme = LocalPageTheme.current
+    val localPageThemeState = remember(theme) { mutableStateOf<com.ikko.aura.ui.components.AlbumTheme?>(theme) }
     DisposableEffect(theme) {
         pageTheme.value = theme
         onDispose { if (pageTheme.value === theme) pageTheme.value = null }
@@ -226,6 +227,7 @@ fun AlbumPageContent(
     val density = LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalPageTheme provides localPageThemeState) {
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(
             applyStatusBarInset = false,
@@ -310,6 +312,7 @@ fun AlbumPageContent(
                 onDismiss = { showAddToPlaylist = false },
             )
         }
+    }
     }
 }
 
@@ -725,8 +728,9 @@ internal fun AlbumTrackRow(
             }
         }
         Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 24f))
+        val formattedDuration = remember(track.durationMs) { formatTrackDuration(track.durationMs) }
         Text(
-            text = formatTrackDuration(track.durationMs),
+            text = formattedDuration,
             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
                 fontSize = com.ikko.aura.ui.components.designSp(30f), lineHeight = com.ikko.aura.ui.components.designSp(36f), fontWeight = FontWeight.SemiBold),
             color = Color.White.copy(alpha = 0.78f),

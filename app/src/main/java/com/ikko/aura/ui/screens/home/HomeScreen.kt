@@ -111,7 +111,6 @@ fun HomeScreen(
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected: ForYouCard? = state.cards.firstOrNull { it.id == selectedId } ?: state.cards.firstOrNull()
     val ink = inkOf(selected)
-    val accent = rememberPlayerAccent()
     val face = TextStyle(fontFamily = AuraFontFamily, color = Color.White)
 
     // The page's background is the mood's — only while Home is the page showing.
@@ -124,9 +123,10 @@ fun HomeScreen(
     // again, so the mood's colours replace what that page left (the playing track's), instead of waiting for a tab change.
     val backEntry by navController.currentBackStackEntryAsState()
     val onTabs = rememberUpdatedState(backEntry?.destination?.route == AuraDestination.Tabs.route)
+    val onHomeFront by remember(motion) { androidx.compose.runtime.derivedStateOf { (motion?.p ?: 0f) < 0.5f } }
     LaunchedEffect(palette) {
         // Also watches the slot: a page that is leaving (the playlist) may still write to it a moment after Home is back.
-        snapshotFlow { (onTabs.value && (motion?.p ?: 0f) < 0.5f) to slot.value }.collect { (shown, current) ->
+        snapshotFlow { (onTabs.value && onHomeFront) to slot.value }.collect { (shown, current) ->
             if (shown) { if (current !== palette) slot.value = palette } else if (current === palette) slot.value = null
         }
     }
@@ -182,7 +182,7 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = u * 40f),
                     horizontalArrangement = Arrangement.spacedBy(u * 12f),
                 ) {
-                    items(state.cards) { card ->
+                    items(state.cards, key = { it.id }) { card ->
                         val on = card.id == selected?.id
                         Box(
                             Modifier

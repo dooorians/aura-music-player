@@ -25,7 +25,7 @@ import com.ikko.aura.ui.theme.LocalAuraBatterySaver
 /** What the page's frosted buttons blur: the F background alone (the buttons sit on it, never over the page's rows). */
 val LocalImmersiveBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
-private const val SCALE = 0.33f
+private const val SCALE = 0.5f
 
 /**
  * The design's frosted button: white from [top] to [bottom] over a 26-px blur of what is behind it, saturated by 1.6, a
@@ -41,7 +41,9 @@ fun Modifier.frosted(
     val backdrop = LocalImmersiveBackdrop.current
     val unit = designUnit()
     val density = LocalDensity.current
-    val fill = Brush.verticalGradient(listOf(Color.White.copy(alpha = top), Color.White.copy(alpha = bottom)))
+    val fill = androidx.compose.runtime.remember(top, bottom) {
+        Brush.verticalGradient(listOf(Color.White.copy(alpha = top), Color.White.copy(alpha = bottom)))
+    }
     val rimWidth = with(density) { (unit * 1.5f).toPx() }
     val lineWidth = with(density) { (unit * 2f).toPx() }
     if (backdrop == null || LocalAuraBatterySaver.current) {

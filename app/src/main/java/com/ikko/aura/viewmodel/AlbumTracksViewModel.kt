@@ -1,16 +1,18 @@
 package com.ikko.aura.viewmodel
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.MusicRepository
 import com.ikko.aura.data.model.Track
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -26,12 +28,13 @@ class AlbumTracksViewModel @Inject constructor(
 
     val byAlbum: StateFlow<Map<Long, List<Track>>> = repository.tracks
         .map { it.groupBy { track -> track.albumId } }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 }
 
 /** The songs of an album, as the library knows them now. */
 @Composable
 fun rememberAlbumTracks(viewModel: AlbumTracksViewModel = hiltViewModel()): (Long) -> List<Track> {
-    val map = viewModel.byAlbum.collectAsState().value
+    val map = viewModel.byAlbum.collectAsStateWithLifecycle().value
     return { id -> map[id].orEmpty() }
 }

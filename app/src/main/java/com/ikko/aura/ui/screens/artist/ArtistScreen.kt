@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -163,8 +164,7 @@ fun ArtistPageContent(
                 )
             }
 
-            items(uiState.tracks, key = { it.id }) { track ->
-                val index = uiState.tracks.indexOf(track)
+            itemsIndexed(uiState.tracks, key = { _, it -> it.id }) { index, track ->
                 TrackListItem(
                     track = track,
                     onClick = {

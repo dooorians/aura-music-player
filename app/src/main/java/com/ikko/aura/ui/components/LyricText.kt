@@ -111,7 +111,7 @@ fun List<LyricLine>.indexAt(positionMs: Long): Int {
     return found
 }
 
-private const val LYRIC_LEAD_MS = 80L
+internal const val LYRIC_LEAD_MS = 80L
 private const val PAUSED_POLL_MS = 120L
 
 /**
@@ -147,6 +147,18 @@ fun SweepLyricLine(
      */
     plain: Boolean = false,
 ) {
+    if (!line.isWordSynced) {
+        Text(
+            text = line.text,
+            style = style,
+            color = litColor,
+            textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier.fillMaxWidth(),
+        )
+        return
+    }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     // Where each timed word sits in the text, walked in order so a repeated word still lines up.
     val spans = remember(line, plain) {

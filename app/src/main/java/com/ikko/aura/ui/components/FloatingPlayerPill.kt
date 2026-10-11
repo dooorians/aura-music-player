@@ -231,149 +231,165 @@ fun FloatingPlayerPill(
                     center = centre,
                 )
             }
-            .pointerInput(Unit) {
-                // Watches, and takes nothing: the finger's path, for the prewarm decision above.
-                awaitPointerEventScope {
-                    while (true) {
-                        val change = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: continue
-                        when {
-                            change.pressed && !change.previousPressed -> travel[0] = 0f
-                            change.pressed -> travel[0] += (change.position - change.previousPosition).getDistance()
-                        }
-                    }
-                }
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                val nextZoneStart = size.width - NEXT_ZONE.toPx()
-                val playZoneStart = size.width - PLAY_ZONE.toPx()
-                detectTapGestures(
-                    onPress = { offset ->
-                        val pressStart = System.currentTimeMillis()
-                        val w = size.width.toFloat()
-                        val h = size.height.toFloat()
-                        if (w > 0f && h > 0f) {
-                            touchPivot = TransformOrigin(
-                                (offset.x / w).coerceIn(0f, 1f),
-                                (offset.y / h).coerceIn(0f, 1f),
-                            )
-                        }
-                        haloCenter = offset
-                        val zone = when {
-                            offset.x >= nextZoneStart -> 2
-                            offset.x >= playZoneStart -> 1
-                            else -> 0
-                        }
-                        if (zone == 1) scope.launch { playHalo.snapTo(HALO_ALPHA) }
-                        if (zone == 2) {
-                            scope.launch { nextHalo.snapTo(HALO_ALPHA) }
-                            scope.launch {
-                                chase.snapTo(0f)
-                                chase.animateTo(1f, tween(CHASE_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing))
-                            }
-                        }
-                        // Only on the part that opens the player, and only once the finger has stayed: a press that is
-                        // about to become a swipe has usually moved by then.
-                        val prewarm = if (offset.x < playZoneStart) {
-                            scope.launch {
-                                kotlinx.coroutines.delay(PREWARM_AFTER_MS)
-                                if (travel[0] <= PREWARM_MAX_TRAVEL.toPx()) {
-                                    prewarmed = true
-                                    onPrewarm()
+            .then(
+                if (enabled) {
+                    Modifier
+                        .pointerInput(Unit) {
+                            // Watches, and takes nothing: the finger's path, for the prewarm decision above.
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val change = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: continue
+                                    when {
+                                        change.pressed && !change.previousPressed -> travel[0] = 0f
+                                        change.pressed -> travel[0] += (change.position - change.previousPosition).getDistance()
+                                    }
                                 }
                             }
-                        } else null
-                        val spread = scope.launch {
-                            halo.snapTo(0f)
-                            halo.animateTo(1f, tween(HALO_MS, easing = LinearOutSlowInEasing))
                         }
-                        pressAnimJob?.cancel()
-                        pressAnimJob = scope.launch {
-                            scale.animateTo(
-                                targetValue = PRESSED_SCALE,
-                                animationSpec = spring(
-                                    dampingRatio = 0.82f, // Apple interactive soft cushion
-                                    stiffness = 160f,
-                                ),
+                        .pointerInput(Unit) {
+                            val nextZoneStart = size.width - NEXT_ZONE.toPx()
+                            val playZoneStart = size.width - PLAY_ZONE.toPx()
+                            detectTapGestures(
+                                onPress = { offset ->
+                                    val pressStart = System.currentTimeMillis()
+                                    val w = size.width.toFloat()
+                                    val h = size.height.toFloat()
+                                    if (w > 0f && h > 0f) {
+                                        touchPivot = TransformOrigin(
+                                            (offset.x / w).coerceIn(0f, 1f),
+                                            (offset.y / h).coerceIn(0f, 1f),
+                                        )
+                                    }
+                                    haloCenter = offset
+                                    val zone = when {
+                                        offset.x >= nextZoneStart -> 2
+                                        offset.x >= playZoneStart -> 1
+                                        else -> 0
+                                    }
+                                    if (zone == 1) scope.launch { playHalo.snapTo(HALO_ALPHA) }
+                                    if (zone == 2) {
+                                        scope.launch { nextHalo.snapTo(HALO_ALPHA) }
+                                        scope.launch {
+                                            chase.snapTo(0f)
+                                            chase.animateTo(1f, tween(CHASE_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                                        }
+                                    }
+                                    // Only on the part that opens the player, and only once the finger has stayed: a press that is
+                                    // about to become a swipe has usually moved by then.
+                                    val prewarm = if (offset.x < playZoneStart) {
+                                        scope.launch {
+                                            kotlinx.coroutines.delay(PREWARM_AFTER_MS)
+                                            if (travel[0] <= PREWARM_MAX_TRAVEL.toPx()) {
+                                                prewarmed = true
+                                                onPrewarm()
+                                            }
+                                        }
+                                    } else null
+                                    val spread = scope.launch {
+                                        halo.snapTo(0f)
+                                        halo.animateTo(1f, tween(HALO_MS, easing = LinearOutSlowInEasing))
+                                    }
+                                    pressAnimJob?.cancel()
+                                    pressAnimJob = scope.launch {
+                                        scale.animateTo(
+                                            targetValue = PRESSED_SCALE,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.82f, // Apple interactive soft cushion
+                                                stiffness = 160f,
+                                            ),
+                                        )
+                                    }
+                                    val released = tryAwaitRelease()
+                                    prewarm?.cancel()
+                                    scope.launch { playHalo.animateTo(0f, tween(HALO_FADE_MS)) }
+                                    scope.launch { nextHalo.animateTo(0f, tween(HALO_FADE_MS)) }
+                                    if (released && zone == 0) {
+                                        spread.cancel()
+                                        halo.snapTo(1f)
+                                        pressAnimJob?.cancel()
+                                        scale.snapTo(1f)
+                                    } else if (released) {
+                                        val elapsed = System.currentTimeMillis() - pressStart
+                                        pressAnimJob?.cancel()
+                                        pressAnimJob = scope.launch {
+                                            val minSinkMs = 100L
+                                            if (elapsed < minSinkMs) {
+                                                kotlinx.coroutines.delay(minSinkMs - elapsed)
+                                            }
+                                            // A hair of rebound at the end. The spring's default stopping threshold (0.01 of scale) is bigger than
+                                            // the whole press (0.045) and its rebound, so it was declared done at ~1.01 and snapped the
+                                            // rest — the hard stop. A threshold of 0.0004 lets it run its last tenth of a percent.
+                                            scale.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.52f,
+                                                    stiffness = 150f,
+                                                    visibilityThreshold = 0.0004f,
+                                                ),
+                                            )
+                                        }
+                                    } else {
+                                        spread.cancel()
+                                        halo.snapTo(1f)
+                                        pressAnimJob?.cancel()
+                                        pressAnimJob = scope.launch {
+                                            scale.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.82f,
+                                                    stiffness = 160f,
+                                                    visibilityThreshold = 0.0004f,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                },
+                                onTap = { offset ->
+                                    prewarmed = false // a tap on the opening part confirms what the press began
+                                    when {
+                                        offset.x >= nextZoneStart -> onNext()
+                                        offset.x >= playZoneStart -> onTogglePlay()
+                                        else -> onOpen()
+                                    }
+                                },
                             )
                         }
-                        val released = tryAwaitRelease()
-                        prewarm?.cancel()
-                        scope.launch { playHalo.animateTo(0f, tween(HALO_FADE_MS)) }
-                        scope.launch { nextHalo.animateTo(0f, tween(HALO_FADE_MS)) }
-                        if (released) {
-                            val elapsed = System.currentTimeMillis() - pressStart
-                            pressAnimJob?.cancel()
-                            pressAnimJob = scope.launch {
-                                val minSinkMs = 100L
-                                if (elapsed < minSinkMs) {
-                                    kotlinx.coroutines.delay(minSinkMs - elapsed)
-                                }
-                                // A hair of rebound at the end. The spring's default stopping threshold (0.01 of scale) is bigger than
-                                // the whole press (0.045) and its rebound, so it was declared done at ~1.01 and snapped the
-                                // rest — the hard stop. A threshold of 0.0004 lets it run its last tenth of a percent.
-                                scale.animateTo(
-                                    targetValue = 1f,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.52f,
-                                        stiffness = 150f,
-                                        visibilityThreshold = 0.0004f,
-                                    ),
-                                )
-                            }
-                        } else {
-                            spread.cancel()
-                            halo.snapTo(1f)
-                            pressAnimJob?.cancel()
-                            pressAnimJob = scope.launch {
-                                scale.animateTo(
-                                    targetValue = 1f,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = 160f,
-                                        visibilityThreshold = 0.0004f,
-                                    ),
-                                )
+                        .pointerInput(Unit) {
+                            // One drag detector for both axes rather than two competing ones: the dominant
+                            // axis at release decides, so a slightly diagonal swipe still does what was meant.
+                            val threshold = 40.dp.toPx()
+                            var dx = 0f
+                            var dy = 0f
+                            detectDragGestures(
+                                onDragStart = { dx = 0f; dy = 0f },
+                                onDragEnd = {
+                                    val wasPrewarmed = prewarmed
+                                    prewarmed = false
+                                    when {
+                                        abs(dx) > abs(dy) && dx <= -threshold -> { if (wasPrewarmed) onPrewarmCancel(); onNext() }
+                                        abs(dx) > abs(dy) && dx >= threshold -> { if (wasPrewarmed) onPrewarmCancel(); onPrevious() }
+                                        dy <= -threshold -> {
+                                            pressAnimJob?.cancel()
+                                            scope.launch {
+                                                halo.snapTo(1f)
+                                                scale.snapTo(1f)
+                                            }
+                                            onOpen()
+                                        }
+                                        else -> if (wasPrewarmed) onPrewarmCancel()
+                                    }
+                                },
+                                onDragCancel = { if (prewarmed) { prewarmed = false; onPrewarmCancel() } },
+                            ) { change, drag ->
+                                dx += drag.x
+                                dy += drag.y
+                                change.consume()
                             }
                         }
-                    },
-                    onTap = { offset ->
-                        prewarmed = false // a tap on the opening part confirms what the press began
-                        when {
-                            offset.x >= nextZoneStart -> onNext()
-                            offset.x >= playZoneStart -> onTogglePlay()
-                            else -> onOpen()
-                        }
-                    },
-                )
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                // One drag detector for both axes rather than two competing ones: the dominant
-                // axis at release decides, so a slightly diagonal swipe still does what was meant.
-                val threshold = 40.dp.toPx()
-                var dx = 0f
-                var dy = 0f
-                detectDragGestures(
-                    onDragStart = { dx = 0f; dy = 0f },
-                    onDragEnd = {
-                        val wasPrewarmed = prewarmed
-                        prewarmed = false
-                        when {
-                            abs(dx) > abs(dy) && dx <= -threshold -> { if (wasPrewarmed) onPrewarmCancel(); onNext() }
-                            abs(dx) > abs(dy) && dx >= threshold -> { if (wasPrewarmed) onPrewarmCancel(); onPrevious() }
-                            dy <= -threshold -> onOpen()
-                            else -> if (wasPrewarmed) onPrewarmCancel()
-                        }
-                    },
-                    onDragCancel = { if (prewarmed) { prewarmed = false; onPrewarmCancel() } },
-                ) { change, drag ->
-                    dx += drag.x
-                    dy += drag.y
-                    change.consume()
-                }
-            }
-            ,
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         // The glass's edge, lit like Apple's: bright at two corners, a hairline along the sides.
         Spacer(Modifier.matchParentSize().clip(PillShape).pillEdge(PillShape))
@@ -409,7 +425,7 @@ fun FloatingPlayerPill(
             label = "pill-track",
         ) { (_, shown) ->
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().graphicsLayer(),
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -420,7 +436,7 @@ fun FloatingPlayerPill(
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                    modifier = Modifier.basicMarquee(iterations = 1),
                 )
                 Text(
                     text = shown.artist,
@@ -429,7 +445,7 @@ fun FloatingPlayerPill(
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Start,
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                    modifier = Modifier.basicMarquee(iterations = 1),
                 )
             }
         }

@@ -39,6 +39,7 @@ class QueueSnapshotWriter(
 
     /** The items, rebuilt only when the queue itself changes: a position tick should not walk the whole queue again. */
     private var entries: List<QueueSnapshot.Entry> = emptyList()
+    private var entriesDirty = true
 
     /** Follows the player the session is on, as PlaybackRecovery does: see PlaybackService.adoptPlayer. */
     fun attach(next: Player) {
@@ -47,7 +48,7 @@ class QueueSnapshotWriter(
         ticker?.cancel()
         player = next
         next.addListener(this)
-        rebuildEntries()
+        entriesDirty = true
         if (next.isPlaying) startTicker()
         schedule(DEBOUNCE_MS)
     }
@@ -60,7 +61,7 @@ class QueueSnapshotWriter(
     }
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-        rebuildEntries()
+        entriesDirty = true
         schedule(DEBOUNCE_MS)
     }
 
@@ -91,6 +92,7 @@ class QueueSnapshotWriter(
                 album = item.mediaMetadata.albumTitle?.toString().orEmpty(),
             )
         }
+        entriesDirty = false
     }
 
     private fun startTicker() {
@@ -113,6 +115,7 @@ class QueueSnapshotWriter(
 
     private fun capture(): QueueSnapshot? {
         val p = player ?: return null
+        if (entriesDirty) rebuildEntries()
         if (p.mediaItemCount == 0 || entries.size != p.mediaItemCount) return null
         return QueueSnapshot(
             items = entries,

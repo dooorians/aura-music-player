@@ -126,8 +126,7 @@ class PlaylistRepository @Inject constructor(
         val list = tracks()
         // An empty pick (nothing played yet) leaves the old list rather than emptying a playlist the user may use.
         if (list.isNotEmpty()) {
-            playlistDao.clearPlaylistTracks(id)
-            list.forEachIndexed { i, t -> playlistDao.insertPlaylistTrack(PlaylistTrackEntity(id, t.id, i, nowMs)) }
+            playlistDao.replaceTracks(id, list.mapIndexed { i, t -> PlaylistTrackEntity(id, t.id, i, nowMs) })
             settingsStore.setAutoPlaylist(key, id, nowMs)
         } else if (!alive) {
             settingsStore.setAutoPlaylist(key, id, 0L)

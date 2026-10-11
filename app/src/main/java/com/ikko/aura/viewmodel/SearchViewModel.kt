@@ -140,28 +140,29 @@ class SearchViewModel @Inject constructor(
                     jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = true)
                     jioSaavnJob = launch {
                         try {
-                            val results = withContext(Dispatchers.IO) { jioSaavnClient.searchSongsOrThrow(q) }
-                            val tracks = results.map { res ->
-                                val artistName = res.moreInfo.artistMap.primaryArtists.joinToString(", ") { it.name }.ifBlank { "Unknown Artist" }
-                                val durationMillis = res.moreInfo.duration.toLongOrNull()?.times(1000) ?: 0L
-                                val thumbnail = res.image.replace(Regex("150x150|50x50"), "500x500").replace(Regex("^http://"), "https://")
-                                Track(
-                                    id = "jiosaavn:${res.id}",
-                                    title = res.title,
-                                    artist = artistName,
-                                    album = res.moreInfo.album.ifBlank { "" },
-                                    artistId = 0L,
-                                    albumId = com.ikko.aura.source.jiosaavn.jioSaavnAlbumId(res.moreInfo.album_id, res.id),
-                                    artworkUri = android.net.Uri.parse(thumbnail),
-                                    contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(res.id).build(),
-                                    durationMs = durationMillis,
-                                    trackNumber = 0,
-                                    year = 0,
-                                    format = com.ikko.aura.data.model.AudioFormat.UNKNOWN,
-                                    bitrateKbps = 320,
-                                    sampleRateHz = 44100,
-                                    bitDepth = 16
-                                )
+                            val tracks = withContext(Dispatchers.IO) {
+                                jioSaavnClient.searchSongsOrThrow(q).map { res ->
+                                    val artistName = res.moreInfo.artistMap.primaryArtists.joinToString(", ") { it.name }.ifBlank { "Unknown Artist" }
+                                    val durationMillis = res.moreInfo.duration.toLongOrNull()?.times(1000) ?: 0L
+                                    val thumbnail = res.image.replace(Regex("150x150|50x50"), "500x500").replace(Regex("^http://"), "https://")
+                                    Track(
+                                        id = "jiosaavn:${res.id}",
+                                        title = res.title,
+                                        artist = artistName,
+                                        album = res.moreInfo.album.ifBlank { "" },
+                                        artistId = 0L,
+                                        albumId = com.ikko.aura.source.jiosaavn.jioSaavnAlbumId(res.moreInfo.album_id, res.id),
+                                        artworkUri = android.net.Uri.parse(thumbnail),
+                                        contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(res.id).build(),
+                                        durationMs = durationMillis,
+                                        trackNumber = 0,
+                                        year = 0,
+                                        format = com.ikko.aura.data.model.AudioFormat.UNKNOWN,
+                                        bitrateKbps = 320,
+                                        sampleRateHz = 44100,
+                                        bitDepth = 16
+                                    )
+                                }
                             }
                             jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, songs = tracks)
                         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
@@ -191,17 +192,19 @@ class SearchViewModel @Inject constructor(
                                 val section = if (client == null || found == null || found.isFailure) {
                                     RemoteSection(id, remoteSources.nameOf(id), loading = false, error = true)
                                 } else {
-                                    val r = found.getOrThrow()
-                                    RemoteSection(
-                                        sourceId = id,
-                                        name = remoteSources.nameOf(id),
-                                        loading = false,
-                                        songs = r.songs.map { com.ikko.aura.source.remote.RemoteTracks.trackOf(id, it, client) }.distinctBy { it.id },
-                                        albums = r.albums.distinctBy { it.id }.map { a ->
-                                            YtmAlbumRef("$id:${a.id}", a.title, a.artist, client.coverUrl(a.coverId, com.ikko.aura.source.remote.RemoteTracks.COVER_PX))
-                                        },
-                                        artists = r.artists.map { it.name }.distinct(),
-                                    )
+                                    withContext(Dispatchers.Default) {
+                                        val r = found.getOrThrow()
+                                        RemoteSection(
+                                            sourceId = id,
+                                            name = remoteSources.nameOf(id),
+                                            loading = false,
+                                            songs = r.songs.map { com.ikko.aura.source.remote.RemoteTracks.trackOf(id, it, client) }.distinctBy { it.id },
+                                            albums = r.albums.distinctBy { it.id }.map { a ->
+                                                YtmAlbumRef("$id:${a.id}", a.title, a.artist, client.coverUrl(a.coverId, com.ikko.aura.source.remote.RemoteTracks.COVER_PX))
+                                            },
+                                            artists = r.artists.map { it.name }.distinct(),
+                                        )
+                                    }
                                 }
                                 remoteSearch.update { list -> list.map { if (it.sourceId == id) section else it } }
                             }
@@ -225,11 +228,11 @@ class SearchViewModel @Inject constructor(
                     ytmSearch.value = YtmSearchState(enabled = true, loading = true)
                     // Albums and artists come on their own, so the songs are never held up by them.
                     ytmSideJobs += launch {
-                        val albums = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchAlbums(q) } }.getOrDefault(emptyList()).distinctBy { it.id }
+                        val albums = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchAlbums(q).distinctBy { it.id } } }.getOrDefault(emptyList())
                         if (q == searchedQuery) ytmSearch.update { it.copy(albums = albums) }
                     }
                     ytmSideJobs += launch {
-                        val artists = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchArtists(q) } }.getOrDefault(emptyList()).distinctBy { it.name }
+                        val artists = runCatchingCancellable { withContext(Dispatchers.IO) { ytmClient.searchArtists(q).distinctBy { it.name } } }.getOrDefault(emptyList())
                         if (q == searchedQuery) ytmSearch.update { it.copy(artists = artists) }
                     }
                     ytmJob = launch {
@@ -237,13 +240,14 @@ class SearchViewModel @Inject constructor(
                         if (q != searchedQuery) return@launch // The query moved on while this was on its way.
                         nextPage = page.getOrNull()?.next
                         val songs = page.getOrNull()?.songs.orEmpty()
+                        val mappedResults = withContext(Dispatchers.Default) { songs.map(YtmLibrary::trackOf).distinctBy { it.id } }
                         ytmSearch.update {
                             it.copy(
                                 loading = false,
                                 error = page.isFailure,
                                 empty = page.isSuccess && songs.isEmpty() && it.albums.isEmpty() && it.artists.isEmpty(),
                                 hasMore = nextPage != null,
-                                results = songs.map(YtmLibrary::trackOf).distinctBy { it.id },
+                                results = mappedResults,
                             )
                         }
                     }
@@ -349,7 +353,7 @@ class SearchViewModel @Inject constructor(
             albums = bestAlbums,
             artists = bestArtists
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteSection("unified", "Meilleurs Résultats"))
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteSection("unified", "Meilleurs Résultats"))
 
     val unifiedHasMore = ytmSearch.map { it.hasMore }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     val unifiedLoadingMore = ytmSearch.map { it.loadingMore }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)

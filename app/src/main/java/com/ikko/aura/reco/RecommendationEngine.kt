@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -31,7 +32,7 @@ data class RecoItem(
     val reason: Reason?,
     val verified: Boolean,
 ) {
-    val credits: List<String> get() = ArtistNames.creditsOf(artist, title)
+    val credits: List<String> = ArtistNames.creditsOf(artist, title)
 }
 
 data class BlockedArtist(val key: String, val name: String, val atMs: Long)
@@ -72,7 +73,7 @@ class RecommendationEngine @Inject constructor(
                 )
             }.filterNot { ArtistNames.involves(it.credits, it.artist, keys) }
         }
-    }
+    }.flowOn(Dispatchers.Default)
 
     val status: Flow<Map<String, RecoStatus>> = dao.observeStates().map { list ->
         list.associate { it.kindKey to RecoStatus(it.generatedAtMs, it.attemptedAtMs, it.status) }

@@ -214,8 +214,11 @@ fun LibraryScreen(
     // Shared by the sort button and the menu laid over the page: the menu grows out of the button, and the button
     // empties while it does.
     val sortMenu = rememberGlassMenuState()
-    val capsule = LocalTabCapsule.current
     val reduceMotion = LocalPageMotion.current?.reduceMotion == true
+    val tracksGridState = rememberLazyGridState()
+    val albumsGridState = rememberLazyGridState()
+    val artistsListState = rememberLazyListState()
+    val playlistsListState = rememberLazyListState()
     // A new view starts at its top, so its header is back, and the capsule with it.
     // Only on a real change of filter, though: this also runs when the page comes back into composition — back
     // from an album opened further down — and it used to reopen the header there over a list still scrolled
@@ -224,9 +227,7 @@ fun LibraryScreen(
     androidx.compose.runtime.LaunchedEffect(uiState.filter) {
         if (lastFilter != null && lastFilter != uiState.filter) headerOffsetPx = 0f
         lastFilter = uiState.filter
-        capsule?.scrolledAway = false
     }
-    val capsuleScroll = rememberCapsuleScrollConnection(capsule, density.density) { headerOffsetPx == 0f }
 
     /**
      * Puts the header where the new scroll position says it should be, after a jump the nested
@@ -235,8 +236,6 @@ fun LibraryScreen(
      */
     fun settleHeaderAfterJump(atTop: Boolean) {
         headerOffsetPx = if (atTop) 0f else -headerHeightPx
-        // Back at the top, the tab capsule belongs out too: the jump is no scroll, so nothing else brought it back.
-        if (atTop) capsule?.scrolledAway = false
     }
 
     val countText = when (uiState.filter) {
@@ -298,9 +297,6 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                // The capsule's, outermost: it hears every scroll before the header takes its share, so a scroll that only
-                // moves the header still counts.
-                .nestedScroll(capsuleScroll)
                 .nestedScroll(headerScrollConnection),
         ) {
             // The four filters are peers, exactly like the top tabs, so they animate with the
@@ -332,6 +328,7 @@ fun LibraryScreen(
                         tracks = uiState.tracks,
                         sort = uiState.sort,
                         layoutMode = uiState.trackLayoutMode,
+                        gridState = tracksGridState,
                         onTrackClick = { index ->
                             playerViewModel.playQueue(uiState.tracks, index)
                         },
@@ -342,6 +339,7 @@ fun LibraryScreen(
                         albums = uiState.albums,
                         sort = uiState.sort,
                         layoutMode = uiState.albumLayoutMode,
+                        gridState = albumsGridState,
                         navController = navController,
                         onAlbumLongPress = { album ->
                             context.show(
@@ -355,11 +353,13 @@ fun LibraryScreen(
                     )
                     LibraryFilter.ARTISTS -> ArtistList(
                         artists = uiState.artists,
+                        listState = artistsListState,
                         navController = navController,
                         onJumped = ::settleHeaderAfterJump,
                     )
                     LibraryFilter.PLAYLISTS -> PlaylistsList(
                         playlists = playlists,
+                        listState = playlistsListState,
                         onCreate = playlistsViewModel::createPlaylist,
                         onOpen = { id -> navController.navigate(AuraDestination.PlaylistPattern.route(id.toString())) },
                     )
@@ -392,6 +392,12 @@ fun LibraryScreen(
 /** "128 albums": the count with its noun, agreed, and the thousands set off by a narrow no-break space. */
 /** Where a view sits among the header's chips, left to right — the direction the list slides when it changes. */
 private val CHIP_ORDER = listOf(LibraryFilter.TRACKS, LibraryFilter.ALBUMS, LibraryFilter.ARTISTS, LibraryFilter.PLAYLISTS)
+private val LIBRARY_CHIPS = listOf(
+    LibraryFilter.TRACKS to "Titres",
+    LibraryFilter.ALBUMS to "Albums",
+    LibraryFilter.ARTISTS to "Artistes",
+    LibraryFilter.PLAYLISTS to "Playlists",
+)
 private fun chipIndex(filter: LibraryFilter): Int = CHIP_ORDER.indexOf(filter).coerceAtLeast(0)
 
 private fun countLabel(count: Int, noun: String): String {
@@ -449,12 +455,7 @@ private fun LibraryHeader(
             }
         }
         Row(Modifier.padding(top = u * 26f), horizontalArrangement = Arrangement.spacedBy(u * 12f)) {
-            listOf(
-                LibraryFilter.TRACKS to "Titres",
-                LibraryFilter.ALBUMS to "Albums",
-                LibraryFilter.ARTISTS to "Artistes",
-                LibraryFilter.PLAYLISTS to "Playlists",
-            ).sortedBy { chipIndex(it.first) }.forEach { (f, label) ->
+            LIBRARY_CHIPS.forEach { (f, label) ->
                 val on = f == filter
                 Box(
                     Modifier
@@ -503,11 +504,11 @@ private fun TrackList(
     tracks: List<Track>,
     sort: LibrarySort,
     layoutMode: TrackLayoutMode,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     onTrackClick: (Int) -> Unit,
     onTrackLongPress: (Track) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
-    val gridState = rememberLazyGridState()
     val isList = layoutMode == TrackLayoutMode.LIST
     val columns = if (isList) 1 else 2
     IndexedList(
@@ -524,7 +525,7 @@ private fun TrackList(
             horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else 8.dp),
             verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else 0.dp),
         ) {
-            gridItemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
+            gridItemsIndexed(tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                 TrackListItem(
                     track = track,
                     onClick = { onTrackClick(index) },
@@ -541,17 +542,43 @@ private fun AlbumGrid(
     albums: List<Album>,
     sort: LibrarySort,
     layoutMode: AlbumLayoutMode,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     navController: NavHostController,
     onAlbumLongPress: (Album) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
-    val gridState = rememberLazyGridState()
     val isList = layoutMode == AlbumLayoutMode.LIST
     val columns = when (layoutMode) {
         AlbumLayoutMode.LIST -> 1
         AlbumLayoutMode.GRID_2 -> 2
         AlbumLayoutMode.GRID_3 -> 3
     }
+    val u = com.ikko.aura.ui.components.designUnit()
+    val coverShape = remember(u) { androidx.compose.foundation.shape.RoundedCornerShape(u * 32f) }
+    val titleFontSize = com.ikko.aura.ui.components.designSp(38f)
+    val titleLineHeight = com.ikko.aura.ui.components.designSp(46f)
+    val artistFontSize = com.ikko.aura.ui.components.designSp(34f)
+    val artistLineHeight = com.ikko.aura.ui.components.designSp(42f)
+    val titleStyle = remember(titleFontSize, titleLineHeight) {
+        androidx.compose.ui.text.TextStyle(
+            fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+            color = Color.White,
+            fontSize = titleFontSize,
+            lineHeight = titleLineHeight,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+    val artistStyle = remember(artistFontSize, artistLineHeight) {
+        androidx.compose.ui.text.TextStyle(
+            fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+            color = Color.White.copy(alpha = 0.78f),
+            fontSize = artistFontSize,
+            lineHeight = artistLineHeight,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    val rimColor = Color.White.copy(alpha = 0.1f)
+    val targetArtDp = if (columns == 2) 260.dp else 180.dp
     IndexedList(
         target = rememberScrollTarget(gridState),
         onJumped = onJumped,
@@ -564,15 +591,15 @@ private fun AlbumGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                start = com.ikko.aura.ui.components.designUnit() * 40f,
+                start = u * 40f,
                 end = INDEX_GUTTER,
                 top = if (isList) 8.dp else 0.dp,
                 bottom = listBottomPadding() + 12.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else com.ikko.aura.ui.components.designUnit() * 25f),
-            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else com.ikko.aura.ui.components.designUnit() * 40f),
+            horizontalArrangement = Arrangement.spacedBy(if (isList) 0.dp else u * 25f),
+            verticalArrangement = Arrangement.spacedBy(if (isList) 2.dp else u * 40f),
         ) {
-            itemsIndexed(albums, key = { _, album -> album.id }) { index, album ->
+            itemsIndexed(albums, key = { _, album -> album.id }, contentType = { _, _ -> if (isList) "album_row" else "album_cell" }) { _, album ->
                 if (isList) {
                     AlbumListItem(
                         album = album,
@@ -581,9 +608,6 @@ private fun AlbumGrid(
                     )
                 } else {
                     // The "F" grid: square covers with 32 px corners and a hairline rim, then the title and the artist, in design px.
-                    val u = com.ikko.aura.ui.components.designUnit()
-                    val coverShape = androidx.compose.foundation.shape.RoundedCornerShape(u * 32f)
-                    val face = androidx.compose.ui.text.TextStyle(fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, color = Color.White)
                     Column(verticalArrangement = Arrangement.spacedBy(u * 14f)) {
                         Box(
                             Modifier
@@ -600,23 +624,22 @@ private fun AlbumGrid(
                                 contentDescription = album.title,
                                 shape = coverShape,
                                 modifier = Modifier.fillMaxSize(),
-                                targetSizeDp = if (columns == 2) 260.dp else 180.dp,
+                                targetSizeDp = targetArtDp,
                                 cacheKey = album.id.toString(),
                             )
-                            Box(Modifier.fillMaxSize().border(u * 1.5f, Color.White.copy(alpha = 0.1f), coverShape))
+                            Box(Modifier.fillMaxSize().border(u * 1.5f, rimColor, coverShape))
                         }
                         Column {
                             Text(
                                 text = album.title,
-                                style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(38f), lineHeight = com.ikko.aura.ui.components.designSp(46f), fontWeight = FontWeight.Bold),
+                                style = titleStyle,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 text = album.artist,
-                                style = face.copy(fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
-                                    fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.78f)),
+                                style = artistStyle,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
@@ -685,10 +708,10 @@ private fun AlbumListItem(
 @Composable
 private fun ArtistList(
     artists: List<Artist>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     navController: NavHostController,
     onJumped: (Boolean) -> Unit,
 ) {
-    val listState = rememberLazyListState()
     IndexedList(
         target = rememberScrollTarget(listState),
         indexKeys = remember(artists) { artists.map { it.name } },
@@ -724,6 +747,7 @@ private fun ArtistList(
 @Composable
 private fun PlaylistsList(
     playlists: List<PlaylistSummary>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     onCreate: (String) -> Unit,
     onOpen: (Long) -> Unit,
 ) {
@@ -731,6 +755,7 @@ private fun PlaylistsList(
     var newName by remember { mutableStateOf("") }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = PAGE_MARGIN, end = PAGE_MARGIN, top = 8.dp, bottom = listBottomPadding() + 12.dp),
     ) {
@@ -920,15 +945,6 @@ private const val MIN_ITEMS_FOR_INDEX = 25
 
 
 
-/** The room a list keeps at its end: the player's, plus the tab capsule's while it is out. */
+/** The room a list keeps at its end: the player's. */
 @Composable
-private fun listBottomPadding(): androidx.compose.ui.unit.Dp {
-    val capsule = LocalTabCapsule.current
-    // Whether the list's own scrolling has put the capsule away — and nothing else. It used to be the capsule's animation
-    // target, which also moves when the player opens (the capsule is reset under the card) and again when it closes: each
-    // time the list's end padding changed and every grid and list of the page, hidden under the player, was measured again —
-    // text and all — in the middle of the card's travel.
-    val shown = capsule != null && !capsule.scrolledAway
-    return LocalPlayerPillHeight.current +
-        if (shown) (PageMotionSpec.CAPSULE_HEIGHT_DP + PageMotionSpec.CAPSULE_GAP_TO_PLAYER_DP).dp else 0.dp
-}
+private fun listBottomPadding(): androidx.compose.ui.unit.Dp = LocalPlayerPillHeight.current

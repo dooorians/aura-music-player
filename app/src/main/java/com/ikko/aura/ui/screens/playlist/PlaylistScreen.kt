@@ -117,19 +117,8 @@ fun PlaylistScreen(
     )
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    // A weekly playlist opened from a Home card wears that card: its picture is the cover, and the page's background
-    // (the aurora at the top, the flat colour below) is made from it, as an album's is made from its sleeve.
     val autoKey by playlistDetailViewModel.autoKey.collectAsStateWithLifecycle()
     val ambience = autoKey?.let { cardAmbienceOf(it) }
-    val cardArt = ambience?.let { rememberCardArt(it) }
-    val theme = remember(cardArt, ambience) {
-        cardArt?.let { albumThemeFromBitmap(it, seed = ambience!!.ordinal * 31 + 7) }
-    }
-    val pageTheme = LocalPageTheme.current
-    DisposableEffect(theme) {
-        theme?.let { pageTheme.value = it }
-        onDispose { if (pageTheme.value === theme) pageTheme.value = null }
-    }
     // The "F" page is lit by blurred blobs: the weekly card's own mood when it is one, else the page's default (player-lit).
     val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
     val immersivePalette = remember(autoKey, ambience) {
@@ -141,7 +130,11 @@ fun PlaylistScreen(
         onDispose { if (immersive.value === immersivePalette) immersive.value = null }
     }
     val listState = rememberLazyListState()
-    val accent = rememberUpdatedState(theme?.accent ?: AuraColors.TextPrimary.copy(alpha = 0.9f))
+    val derivedAccent = remember(immersivePalette) {
+        immersivePalette?.blobs?.firstOrNull()?.let { com.ikko.aura.ui.components.vividAccent(it) ?: it }
+            ?: AuraColors.TextPrimary.copy(alpha = 0.9f)
+    }
+    val accent = rememberUpdatedState(derivedAccent)
 
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(applyStatusBarInset = false) {

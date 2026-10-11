@@ -213,10 +213,14 @@ private fun DrawScope.drawAmbience(look: Look, blobLayer: GraphicsLayer, sheenLa
         size = Size(w, h * 0.48f),
     )
     drawRect(
-        brush = ShaderBrush(BitmapShader(grainBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)),
+        brush = cardGrainBrush,
         alpha = GRAIN_ALPHA,
         blendMode = BlendMode.Overlay,
     )
+}
+
+private val cardGrainBrush: ShaderBrush by lazy {
+    ShaderBrush(BitmapShader(grainBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT))
 }
 
 /** The cards' corner radius: a fixed 20 dp, whatever the card's width. */

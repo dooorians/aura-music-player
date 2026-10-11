@@ -70,7 +70,7 @@ import com.ikko.aura.ui.components.backdrop.shadow.ShadowElement
 class GlassSettle {
     /** Read while drawing, so setting it redraws the glass once — which is how the resting picture is taken. */
     var offset: Offset by androidx.compose.runtime.mutableStateOf(Offset.Zero)
-    var frozen: Boolean = false
+    var frozen: Boolean by androidx.compose.runtime.mutableStateOf(false)
     var isClosing: Boolean = false
 
     /**

@@ -82,6 +82,7 @@ fun DesignMenu(
     modifier: Modifier = Modifier,
     closeIcon: ImageVector = CupertinoIcons.MoreVertical,
     closeTint: Color = Color.White,
+    alignStart: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!state.visible) return
@@ -123,13 +124,22 @@ fun DesignMenu(
             ) {
                 Icon(closeIcon, contentDescription = "Fermer", tint = closeTint, modifier = Modifier.size(IconSize))
             }
-            // The panel, right-aligned on the button, a little below it.
+            // The panel, aligned on the button, a little below it.
             val top = with(density) { (anchor.bottom + 7.2.dp.toPx()).roundToInt() }
             Column(
                 modifier = modifier
-                    .align(Alignment.TopEnd)
-                    .offset { IntOffset(0, top) }
-                    .padding(end = 16.dp)
+                    .then(
+                        if (alignStart) {
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .offset { IntOffset(anchor.left.roundToInt().coerceAtLeast(0), top) }
+                        } else {
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .offset { IntOffset(0, top) }
+                                .padding(end = 16.dp)
+                        }
+                    )
                     .width(width)
                     .shadow(24.dp, shape, ambientColor = Color.Black.copy(alpha = 0.55f), spotColor = Color.Black.copy(alpha = 0.55f))
                     .clip(shape)
@@ -153,6 +163,7 @@ fun DesignMenuRow(
     label: String,
     onClick: () -> Unit,
     icon: ImageVector? = null,
+    subtitle: String? = null,
     danger: Boolean = false,
     selected: Boolean? = null,
     accent: Color = Color.White,
@@ -162,10 +173,11 @@ fun DesignMenuRow(
         selected == true -> accent
         else -> Color.White
     }
+    val rowH = if (subtitle != null) 48.dp else RowHeight
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(RowHeight)
+            .height(rowH)
             .clip(RoundedCornerShape(RowCorner))
             .then(if (selected == true) Modifier.background(Color.White.copy(alpha = 0.10f)) else Modifier)
             .clickable(onClick = onClick)
@@ -174,15 +186,28 @@ fun DesignMenuRow(
         horizontalArrangement = Arrangement.spacedBy(IconGap),
     ) {
         if (icon != null) Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(IconSize))
-        Text(
-            text = label,
-            color = ink,
-            fontSize = 15.2.sp,
-            lineHeight = 18.4.sp,
-            fontWeight = if (selected == true) FontWeight.ExtraBold else FontWeight.Bold,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = ink,
+                fontSize = 15.2.sp,
+                lineHeight = 18.4.sp,
+                fontWeight = if (selected == true) FontWeight.ExtraBold else FontWeight.Bold,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    color = ink.copy(alpha = 0.65f),
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (selected == true) Icon(CupertinoIcons.Check, contentDescription = "Choisi", tint = accent, modifier = Modifier.size(IconSize))
         else if (selected == false) Spacer(Modifier.size(IconSize))
     }

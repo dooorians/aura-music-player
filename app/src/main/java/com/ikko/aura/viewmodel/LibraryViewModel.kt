@@ -90,7 +90,12 @@ class LibraryViewModel @Inject constructor(
         repository.tracks,
         // The device's albums, then the ones downloaded from the other sources (YouTube Music, a Subsonic server…).
         combine(repository.albums, ytmLibrary.observeDownloadedAlbums()) { local, downloaded ->
-            if (downloaded.isEmpty()) local else local + downloaded.filter { d -> local.none { it.id == d.id } }
+            if (downloaded.isEmpty()) {
+                local
+            } else {
+                val localIds = local.mapTo(HashSet(local.size)) { it.id }
+                local + downloaded.filter { d -> d.id !in localIds }
+            }
         },
         repository.artists,
         repository.isScanning,
@@ -98,18 +103,22 @@ class LibraryViewModel @Inject constructor(
         RepositorySnapshot(tracks, albums, artists, isScanning)
     }
 
+    private val sortedSnapshot = combine(repositorySnapshot, sort) { snapshot, s ->
+        Triple(sortTracks(snapshot.tracks, s), sortAlbums(snapshot.albums, s), snapshot)
+    }.flowOn(Dispatchers.Default)
+
     val uiState: StateFlow<LibraryUiState> = combine(
         filter,
         sort,
-        repositorySnapshot,
+        sortedSnapshot,
         settingsStore.albumLayoutMode,
         settingsStore.trackLayoutMode,
-    ) { f, s, snapshot, albumLayout, trackLayout ->
+    ) { f, s, (sortedTracks, sortedAlbums, snapshot), albumLayout, trackLayout ->
         LibraryUiState(
             filter = f,
             sort = s,
-            tracks = sortTracks(snapshot.tracks, s),
-            albums = sortAlbums(snapshot.albums, s),
+            tracks = sortedTracks,
+            albums = sortedAlbums,
             artists = snapshot.artists,
             isScanning = snapshot.isScanning,
             albumLayoutMode = albumLayout,

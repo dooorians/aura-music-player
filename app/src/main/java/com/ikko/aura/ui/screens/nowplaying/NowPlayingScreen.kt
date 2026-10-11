@@ -142,6 +142,12 @@ import com.ikko.aura.ui.components.indexAt
 import com.ikko.aura.ui.components.rememberLiveLyricClock
 import com.ikko.aura.ui.components.LiquidGlassPanel
 import com.ikko.aura.ui.components.horizontalEdgeBlur
+import com.ikko.aura.ui.components.DesignMenu
+import com.ikko.aura.ui.components.DesignMenuDivider
+import com.ikko.aura.ui.components.DesignMenuRow
+import com.ikko.aura.ui.components.GlassMenuState
+import com.ikko.aura.ui.components.glassMenuAnchor
+import com.ikko.aura.ui.components.rememberGlassMenuState
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.components.rememberPlayerAccent
 import com.ikko.aura.ui.components.SkipGlyph
@@ -228,91 +234,110 @@ fun NowPlayingScreen(
     leavingSideways: Boolean = false,
     /** The shared card; see below. */
     sheetCard: com.ikko.aura.SheetCard = remember { com.ikko.aura.SheetCard() },
-    /** The record's own deep colour, for the card's face. */
+    /** True when the player is active (open, opening, closing, or under a sideways destination). */
+    active: Boolean = true,
+    /** Called when the user swipes down or presses Back to close the player to the pill. */
+    onRequestClose: () -> Unit = { navController.popBackStack() },
+    /** Called once the close-to-pill animation has finished and released the card. */
+    onClosed: () -> Unit = {},
+    /** Called when navigating from the player to one of its own destinations (Queue, Lyrics, Album, Artist). */
+    onNavigateFromPlayer: (String) -> Unit = { navController.navigate(it) },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
     val isLiked by viewModel.isLiked.collectAsStateWithLifecycle()
     val albumScope = androidx.compose.runtime.rememberCoroutineScope()
     val albumContext = androidx.compose.ui.platform.LocalContext.current
-    val positionMs by viewModel.positionMs.collectAsStateWithLifecycle()
-    val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
+    val positionMsState = viewModel.positionMs.collectAsStateWithLifecycle()
+    val durationMsState = viewModel.durationMs.collectAsStateWithLifecycle()
 
-    var showOutputPicker by remember { mutableStateOf(false) }
+    val outputMenuState = rememberGlassMenuState()
     val queueSheet = rememberQueueSheetState()
 
     LaunchedEffect(uiState.currentTrack?.id) {
         lyricsViewModel.loadFor(uiState.currentTrack)
     }
 
-    if (showOutputPicker) {
-        AudioOutputPicker(
-            outputs = uiState.audioOutput.available,
-            selectedDeviceId = uiState.audioOutput.selectedDeviceId,
-            activeName = uiState.audioOutput.deviceName,
-            onSelect = {
-                viewModel.selectAudioOutput(it)
-                showOutputPicker = false
-            },
-            onDismiss = { showOutputPicker = false },
-        )
-    }
+    AudioOutputPicker(
+        state = outputMenuState,
+        outputs = uiState.audioOutput.available,
+        selectedDeviceId = uiState.audioOutput.selectedDeviceId,
+        activeName = uiState.audioOutput.deviceName,
+        onSelect = {
+            viewModel.selectAudioOutput(it)
+        },
+    )
 
     // The player as a card, in Apple's way (see AuraMotion). [sheetCard] says where the card's top edge is,
     // as a fraction of the screen's height — 0 up, 1 no card — and the rest of the app arranges itself
     // around it: the page under the card is drawn only above that edge, and the mini player and the tab
     // capsule stay away while it covers them.
     //
-    // This screen owns it for as long as it is composed, and gives it back when it leaves. One animation
+    // This screen owns it for as long as it is active, and gives it back when it leaves. One animation
     // drives it, keyed on what the card is doing, so a close started while the open was still running
     // cancels the open rather than fighting it for the same number.
-    // The player is six panels of live glass, and each of them works out a fresh sample of the backdrop
-    // whenever it moves — six blur-and-lens chains on every frame of the travel, which is what made the card
-    // arrive and leave in steps. While it travels they are held still instead, at the picture they will rest
-    // with: see [GlassSettle].
     val settle = remember { GlassSettle() }
     var cardHeightPx by remember { mutableIntStateOf(0) }
     // Set the first time this screen actually draws. Composing the player takes several frames, and a card
     // that started rising before then was an empty grey rectangle for the first of them, filling in
     // afterwards — which is the blink one sees on opening. Not snapshot state: it is written from the draw.
     val drawnOnce = remember { MutableStateFlow(false) }
+    var warmedUp by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        drawnOnce.first { it }
+        withFrameNanos { }
+        warmedUp = true
+    }
     // Whether the card has arrived at the top. Until then it takes no touches (see the card's pointerInput).
-    var landed by remember { mutableStateOf(!sheetOpening) }
+    // Held in a plain array rather than snapshot state so flipping it at the end of the spring never recomposes the player.
+    val landedRef = remember { booleanArrayOf(active && !sheetOpening) }
+    val activeState = androidx.compose.runtime.rememberUpdatedState(active)
+    val leavingSidewaysState = androidx.compose.runtime.rememberUpdatedState(leavingSideways)
+    val onRequestCloseState = androidx.compose.runtime.rememberUpdatedState(onRequestClose)
+    val onClosedState = androidx.compose.runtime.rememberUpdatedState(onClosed)
+    val onNavigateFromPlayerState = androidx.compose.runtime.rememberUpdatedState(onNavigateFromPlayer)
+    val frozenPositionRef = remember { longArrayOf(0L) }
 
     val token = remember { Any() }
-    // Whether the card is shown at no opacity at all: a close has taken it all the way into the mini player (the layer
-    // alpha below is then exactly 0) — or whether another player has taken the card. A closed player is still composed
-    // for a moment after its close, and a tap on the mini player in that moment opened a new one: its claim set the card
-    // back to not ready, this one drew again, and its last picture (the time, the wave and the lyric of the close)
-    // rode up over the new player until the navigation let it go. Derived, so the draw that reads it is invalidated
-    // once, when it flips, and not on every frame of the fade.
-    val cardCleared by remember {
-        derivedStateOf { (sheetCard.ready && sheetCard.cardAlpha <= 0f) || sheetCard.owner !== token }
-    }
-    remember(token) {
-        // Opening from the mini player, the card stays hidden until this screen has drawn (see
-        // SheetCard.ready): the mini player holds the place until then.
+    val wasActiveRef = remember { booleanArrayOf(false) }
+    if (active && !wasActiveRef[0]) {
+        wasActiveRef[0] = true
+        frozenPositionRef[0] = positionMsState.value
+        val alreadyWarm = drawnOnce.value
+        landedRef[0] = !sheetOpening
         sheetCard.claim(
             token,
             if (sheetOpening) AuraMotion.SHEET_PILL_TOP_FRACTION else 0f,
-            ready = !sheetOpening,
+            ready = !sheetOpening || alreadyWarm,
         )
-        token
+        if (sheetOpening && alreadyWarm) {
+            settle.frozen = true
+            sheetCard.frozen = true
+        }
+    } else if (!active && wasActiveRef[0]) {
+        wasActiveRef[0] = false
+        landedRef[0] = false
+        sheetCard.release(token)
     }
     DisposableEffect(token) { onDispose { sheetCard.release(token) } }
 
     // Set the moment this screen itself closes the player (the swipe down, the back button), so the card starts
-    // going down at once rather than whenever the navigation has worked out what its own pop was. Deduced from
-    // the navigation alone, the close waited 100–190 ms for the page under it to be rebuilt and this screen to
-    // be recomposed (latency), and could be read as "leaving sideways" if that recomposition came before the
-    // navigation's own transition had said it was a close (no animation at all).
+    // going down at once rather than whenever the navigation has worked out what its own pop was.
     var closeRequested by remember { mutableStateOf(false) }
+    if (!active || (!sheetClosing && closeRequested && !sheetCard.sinking && sheetCard.owner === token && sheetCard.edge >= AuraMotion.SHEET_PILL_TOP_FRACTION)) {
+        closeRequested = false
+    }
+    LaunchedEffect(active, sheetClosing) {
+        if (!active || !sheetClosing) closeRequested = false
+    }
     fun close() {
-        if (closeRequested) return
+        if (!activeState.value || closeRequested) return
         closeRequested = true
-        navController.popBackStack()
+        landedRef[0] = false
+        onRequestCloseState.value()
     }
     val phase = when {
+        !active -> SheetPhase.Away
         closeRequested || sheetClosing -> SheetPhase.Closing
         // Left for a page of its own (an album, the queue, the lyrics): there is no card any more, and the
         // player leaves whole, by its own sideways transition.
@@ -321,9 +346,14 @@ fun NowPlayingScreen(
     }
     settle.isClosing = phase == SheetPhase.Closing || phase == SheetPhase.Away
     // The system back button, the same way: without this it went to NavHost's own pop and waited like the swipe.
-    BackHandler(enabled = phase == SheetPhase.Settled && sheetCard.owner === token) { close() }
-    LaunchedEffect(phase) {
+    BackHandler(enabled = active && phase == SheetPhase.Settled && sheetCard.owner === token) { close() }
+    LaunchedEffect(active, phase) {
+        if (!active) {
+            landedRef[0] = false
+            return@LaunchedEffect
+        }
         if (phase != SheetPhase.Settled) {
+            landedRef[0] = false
             queueSheet.snapClosed()
             sheetCard.markReady()
         }
@@ -331,18 +361,14 @@ fun NowPlayingScreen(
         when (phase) {
             SheetPhase.Away -> sheetCard.edge = 1f
             SheetPhase.Closing -> {
-                // Down only once there is a page under the card to be uncovered. The page is let go shortly after
-                // the player opens (AuraMotion.SHEET_HOLD_MS) and is composed again by the pop: that takes a few
-                // frames, and a card already on its way down would have shown nothing around it meanwhile.
-                // Usually ~60 ms; bounded, so the card always goes.
-                withTimeoutOrNull(PAGE_WAIT_MS) {
-                    snapshotFlow { sheetCard.pagesComposed }.first { it > 0 }
-                    withFrameNanos { }
+                // Down only once there is a page under the card to be uncovered. When the underlying page is kept
+                // alive (pagesComposed > 0), start the descent immediately with zero frame wait.
+                if (sheetCard.pagesComposed <= 0) {
+                    withTimeoutOrNull(PAGE_WAIT_MS) {
+                        snapshotFlow { sheetCard.pagesComposed }.first { it > 0 }
+                        withFrameNanos { }
+                    }
                 }
-                // Already at rest, so the picture the glass has is the one to keep: nothing to compensate.
-                // In a try/finally: a close interrupted mid-flight (opened again, or left sideways, before
-                // it finished) cancels this coroutine inside animate(), and without the finally the glass
-                // was left frozen for good — a stuck picture that never went live again.
                 settle.frozen = true
                 sheetCard.frozen = true
                 try {
@@ -351,48 +377,51 @@ fun NowPlayingScreen(
                         targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
                         animationSpec = tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
                     ) { value, _ -> sheetCard.edge = value }
+                    sheetCard.release(token)
+                    onClosedState.value()
                 } finally {
                     settle.frozen = false
                     sheetCard.frozen = false
                 }
             }
-            SheetPhase.Settled -> if (sheetCard.edge > 0f && sheetCard.edge < 1f) {
-                // Not before this screen has drawn: composing the player takes several frames, and an
-                // animation begun in the meantime spends its first moves unseen and then jumps.
-                // The first draw can still be a half-built screen, so a couple of frames more: what rises has
-                // to be the finished player, never an empty card that fills in afterwards.
-                // Bounded, so a card can never stay hidden: past it the player shows as it is.
-                withTimeoutOrNull(READY_TIMEOUT_MS) {
-                    drawnOnce.first { it }
-                    repeat(3) { withFrameNanos { } }
-                }
-                // One frame drawn as the card will rest, then held there for the whole rise: the glass samples
-                // exactly where each panel will rest (see GlassSettle.restShift), so the picture it holds is
-                // the final one and letting go at the end changes nothing.
-                settle.offset = Offset(0f, sheetCard.edge * cardHeightPx)
-                withFrameNanos { }
-                settle.frozen = true
-                sheetCard.frozen = true
-                try {
-                    animate(
-                        initialValue = sheetCard.edge,
-                        targetValue = 0f,
-                        animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
-                    ) { value, _ ->
-                        sheetCard.edge = value
-                        // Shown — and the mini player gone — in the first frame the card has actually moved,
-                        // never sitting still at the pill's place: all the waiting (drawing, rendering, taking
-                        // the glass's resting picture) happened while it was still unseen.
-                        if (!sheetCard.ready && value < AuraMotion.SHEET_PILL_TOP_FRACTION) {
-                            sheetCard.markReady()
+            SheetPhase.Settled -> {
+                if (sheetCard.edge >= 1f) {
+                    // Returning from a sideways destination (Lyrics, Queue, Album, Artist): card is already full screen.
+                    sheetCard.edge = 0f
+                    sheetCard.markReady()
+                    landedRef[0] = true
+                } else if (sheetCard.edge > 0f && sheetCard.edge < 1f) {
+                    if (!drawnOnce.value) {
+                        withTimeoutOrNull(READY_TIMEOUT_MS) {
+                            drawnOnce.first { it }
+                            withFrameNanos { }
                         }
                     }
-                } finally {
-                    settle.frozen = false
-                    sheetCard.frozen = false
-                    settle.offset = Offset.Zero
+                    settle.offset = Offset(0f, sheetCard.edge * cardHeightPx)
+                    settle.frozen = true
+                    sheetCard.frozen = true
+                    try {
+                        sheetCard.markReady()
+                        animate(
+                            initialValue = sheetCard.edge,
+                            targetValue = 0f,
+                            animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
+                        ) { value, _ ->
+                            sheetCard.edge = value
+                            if (!sheetCard.ready && value < AuraMotion.SHEET_PILL_TOP_FRACTION) {
+                                sheetCard.markReady()
+                            }
+                        }
+                    } finally {
+                        settle.frozen = false
+                        sheetCard.frozen = false
+                        settle.offset = Offset.Zero
+                        sheetCard.markReady()
+                        landedRef[0] = true
+                    }
+                } else {
                     sheetCard.markReady()
-                    landed = true
+                    landedRef[0] = true
                 }
             }
         }
@@ -405,58 +434,62 @@ fun NowPlayingScreen(
     Box(
         Modifier
             .fillMaxSize()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                if (activeState.value || !warmedUp) {
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, 0)
+                    }
+                } else {
+                    layout(0, 0) {}
+                }
+            }
             // Where the card's content sits when the card is at rest (outside its movement), and the content
             // itself (inside it): what the glass needs to sample where it will rest. See GlassSettle.
             .onGloballyPositioned { settle.restOrigin = it.positionInWindow() }
             .graphicsLayer {
-                val o = sheetCard.edge.let { if (it >= 1f) 0f else it }
+                val isActive = activeState.value
+                val isWarmed = warmedUp
+                val rawEdge = sheetCard.edge
+                val isReady = sheetCard.ready
+                val cAlpha = sheetCard.cardAlpha
+                if (!isActive) {
+                    alpha = if (!isWarmed) WARMING_ALPHA else 0f
+                    return@graphicsLayer
+                }
+                val o = if (rawEdge >= 1f) 0f else rawEdge
                 translationY = o * size.height
                 val s = 1f - AuraMotion.SHEET_NARROWING * o
                 scaleX = s
                 scaleY = s
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
-                // Top corners: rounded while it is a card, straightening as it comes up; on the way down they
-                // settle to the pill's own. The bottom ones are rounded too, and never seen (the card's bottom is below
-                // the screen's): the same radius on all four is a shape the GPU clips by itself, where top-only
-                // corners made Skia draw a mask on the CPU and upload it on every frame of the travel.
                 val corner = AuraMotion.cornerAt(o).toPx()
                 shape = RoundedCornerShape(corner)
                 clip = o > 0.0005f
-                // Gone by the time it reaches the mini player, which takes its place — on the way down only.
-                // Coming up it stays opaque: a layer that is see-through at all has to be drawn to a buffer of
-                // its own and composited, and doing that to a full screen, every frame, is dear.
-                // Still getting ready: in place and rendered — its glass, its covers, all of it — but at 1%, under
-                // the mini player, so the first frame anyone sees is a finished one. Moved off screen instead, it
-                // was composed but never rendered, and its first real render was the frame it appeared in:
-                // 48 ms, and empty.
-                alpha = if (!sheetCard.ready) WARMING_ALPHA else sheetCard.cardAlpha
+                alpha = if (!isReady) WARMING_ALPHA else cAlpha
             }
-            // No face of its own: through its whole travel the card shows the player's own background — the
-            // cover's wash, drawn behind the page and cut to the card's shape (see MainLayout) — rather than an
-            // opaque grey that only gave way to it at the very top.
             .onSizeChanged { cardHeightPx = it.height }
-            // Deaf until it has landed. Rapid taps on the mini player do not stop at the mini player: the card rises
-            // under the same finger, and the taps that followed the first one landed on whatever was passing under
-            // it — the cover (the album page), the lyric bubble (the lyrics), the artist, next, a track in the queue.
-            // Each one either sent the player away mid-rise, cutting the card off where it was, or changed the track
-            // mid-rise, a new cover and its glass to render during the animation: the stutter that came and went
-            // over repeated spamming, depending on what the finger happened to hit. Taken here, in the Initial pass,
-            // before any control inside sees them.
-            .pointerInput(landed) {
-                if (landed) return@pointerInput
+            .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                        event.changes.forEach { it.consume() }
+                        if (activeState.value && !landedRef[0]) {
+                            event.changes.forEach { it.consume() }
+                        }
                     }
                 }
             }
             .onGloballyPositioned { settle.anchor = it }
             .drawWithContent {
-                // Nothing drawn once the card is fully cleared at the end of a close. The player stays composed for
-                // another ~0.2 s until the navigation lets it go, and its six glass panels were re-recorded and put
-                // through their blur and lens on nearly every frame of that time (traced) for a card at alpha 0.
-                if (!cardCleared) drawContent()
+                if (!activeState.value) {
+                    if (!drawnOnce.value) {
+                        drawContent()
+                        drawnOnce.value = true
+                    }
+                    return@drawWithContent
+                }
+                val cleared = (sheetCard.ready && sheetCard.cardAlpha <= 0f) || sheetCard.owner !== token
+                if (!cleared) drawContent()
                 if (!drawnOnce.value) drawnOnce.value = true
             },
     ) {
@@ -470,7 +503,6 @@ fun NowPlayingScreen(
         track = uiState.currentTrack,
         nextTrack = uiState.queue.getOrNull(uiState.queueIndex + 1),
         solid = uiState.albumTheme.solid,
-        recordForGlass = !sheetCard.frozen,
     )
     GradientScreenScaffold(applyContentInsets = true) {
         Column(
@@ -504,9 +536,7 @@ fun NowPlayingScreen(
                                 if (!sheetDrag && dy < 0f && abs(dy) > abs(dx)) sheetDrag = true
                                 if (sheetDrag) queueSheet.dragBy(delta.y)
                                 // A swipe down closes the player as soon as it has gone far enough, not when the finger
-                                // lifts. Closing starts by rebuilding the page under the card (a 35–40 ms frame): done
-                                // while the finger is still travelling, that frame lands on a screen that is standing
-                                // still, and the card is already free to go down when the finger is up.
+                                // lifts.
                                 if (!sheetDrag && dy >= threshold && dy > abs(dx)) close()
                             }
                         }
@@ -529,13 +559,6 @@ fun NowPlayingScreen(
                 // full width to catch a thumb at the edge (it draws itself inset by the same margin).
                 // Nothing under the playback controls: their touch area itself reaches down to the system bar's inset.
                 .padding(top = 10.dp),
-            // Evenly distributed rather than stacked with fixed gaps: every block below has a
-            // fixed height, so on this panel the leftover would otherwise pool into one dead gap
-            // in the middle. Spreading it reproduces the mockup's even rhythm, and it absorbs the
-            // lyric capsule appearing and disappearing without anything else jumping.
-            // The controls stack up from the bottom with one even gap between groups, and the title takes whatever room
-            // is left above them (sitting at its bottom, right over the lyrics): nothing is spread to fill the screen, so
-            // the rhythm is the same on any height.
             verticalArrangement = Arrangement.spacedBy(GROUP_GAP),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -553,13 +576,14 @@ fun NowPlayingScreen(
                 PlayerRoundButton(
                     icon = CupertinoIcons.Headphones,
                     contentDescription = "Sortie audio : ${uiState.audioOutput.deviceName ?: uiState.audioOutput.type.label()}",
-                    onClick = { showOutputPicker = true },
+                    onClick = { outputMenuState.open() },
                     left = true,
+                    modifier = Modifier.glassMenuAnchor(outputMenuState),
                 )
                 PlayerRoundButton(
                     icon = CupertinoIcons.Queue,
                     contentDescription = "Ouvrir la file d'attente",
-                    onClick = { navController.navigate(AuraDestination.Queue.route) },
+                    onClick = { onNavigateFromPlayerState.value(AuraDestination.Queue.route) },
                     left = false,
                 )
             }
@@ -581,11 +605,11 @@ fun NowPlayingScreen(
                                 // A streamed song's album is the source's: the one it came through, or else the one found by its name.
                                 albumScope.launch {
                                     val route = viewModel.streamedAlbumRouteOf(playing)
-                                    if (route != null) navController.navigate(route)
+                                    if (route != null) onNavigateFromPlayerState.value(route)
                                     else android.widget.Toast.makeText(albumContext, "Album introuvable", android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             } else {
-                                navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
+                                onNavigateFromPlayerState.value(AuraDestination.AlbumPattern.route(albumId.toString()))
                             }
                         }
                     },
@@ -593,9 +617,9 @@ fun NowPlayingScreen(
                         val playing = uiState.currentTrack
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
-                                navController.navigate(playing.streamedArtistRoute())
+                                onNavigateFromPlayerState.value(playing.streamedArtistRoute())
                             } else {
-                                navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
+                                onNavigateFromPlayerState.value(AuraDestination.ArtistPattern.route(artistId.toString()))
                             }
                         }
                     },
@@ -611,15 +635,24 @@ fun NowPlayingScreen(
                         lyricsState = lyricsState,
                         livePosition = viewModel::livePositionMs,
                         isPlaying = uiState.isPlaying,
-                        pauseAnimation = sheetCard.frozen,
+                        playerActive = active && !leavingSideways,
+                        pauseAnimation = { !activeState.value || sheetCard.frozen || leavingSidewaysState.value },
                         // The line being sung is the way into the lyrics.
-                        onClick = { if (sheetCard.cardTop <= 10f) navController.navigate(AuraDestination.Lyrics.route) },
+                        onClick = { if (sheetCard.cardTop <= 10f) onNavigateFromPlayerState.value(AuraDestination.Lyrics.route) },
                     )
                 }
                 WavyProgressBar(
                     // Providers, read inside the bar: the column around it no longer recomposes on every tick.
-                    positionMs = { positionMs },
-                    durationMs = { durationMs },
+                    // While the card is frozen (traveling) or parked, return the frozen timestamp without subscribing
+                    // to positionMsState so 1-second boundary crossings never trigger TextStringSimpleNode::measure mid-flight.
+                    positionMs = {
+                        if (!activeState.value || sheetCard.frozen || leavingSidewaysState.value) {
+                            frozenPositionRef[0]
+                        } else {
+                            positionMsState.value.also { frozenPositionRef[0] = it }
+                        }
+                    },
+                    durationMs = { durationMsState.value },
                     isPlaying = uiState.isPlaying,
                     onSeek = viewModel::seekTo,
                     // The full width of the screen, drawn inset by the page's margin: its touch area reaches the edges
@@ -666,24 +699,43 @@ private fun LyricStrip(
     lyricsState: LyricsUiState,
     livePosition: () -> Long,
     isPlaying: Boolean,
-    pauseAnimation: Boolean,
+    playerActive: Boolean,
+    pauseAnimation: () -> Boolean,
     onClick: () -> Unit,
 ) {
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
-    // The line is chosen from the player's own position on every frame, not from the value published twice a
-    // second: it changes when it is sung. Only a change of line is ever read in composition.
+    val readPos = androidx.compose.runtime.rememberUpdatedState(livePosition)
+    val readPaused = androidx.compose.runtime.rememberUpdatedState(pauseAnimation)
+    var currentLine by remember(lines) {
+        val initialPos = livePosition() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
+        androidx.compose.runtime.mutableStateOf(lines?.let { it.getOrNull(it.indexAt(initialPos)) })
+    }
+    LaunchedEffect(lines, isPlaying, playerActive) {
+        if (lines == null || !playerActive) return@LaunchedEffect
+        while (true) {
+            if (readPaused.value()) {
+                kotlinx.coroutines.delay(100L)
+                continue
+            }
+            val pos = readPos.value() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
+            val idx = lines.indexAt(pos)
+            val line = lines.getOrNull(idx)
+            if (currentLine?.timeMs != line?.timeMs) currentLine = line
+            val nextStamp = lines.getOrNull(idx + 1)?.timeMs
+            val waitMs = if (isPlaying && nextStamp != null) {
+                (nextStamp - pos).coerceIn(16L, 150L)
+            } else {
+                150L
+            }
+            kotlinx.coroutines.delay(waitMs)
+        }
+    }
     val clock = rememberLiveLyricClock(
         livePosition,
         isPlaying,
-        active = lines != null && !pauseAnimation,
+        active = playerActive && isPlaying && currentLine?.isWordSynced == true,
     )
-    var currentLine by remember(lines) { androidx.compose.runtime.mutableStateOf(lines?.let { it.getOrNull(it.indexAt(clock.longValue)) }) }
-    LaunchedEffect(lines) {
-        if (lines == null) return@LaunchedEffect
-        androidx.compose.runtime.snapshotFlow { lines.getOrNull(lines.indexAt(clock.longValue)) }
-            .distinctUntilChanged { a, b -> a?.timeMs == b?.timeMs }
-            .collect { currentLine = it }
-    }
+    val frozenClockRef = remember { longArrayOf(clock.longValue) }
 
     Box(
         modifier = Modifier
@@ -723,7 +775,13 @@ private fun LyricStrip(
                 )
                 else -> SweepLyricLine(
                     line = shown,
-                    positionProvider = { clock.longValue },
+                    positionProvider = {
+                        if (readPaused.value()) {
+                            frozenClockRef[0]
+                        } else {
+                            clock.longValue.also { frozenClockRef[0] = it }
+                        }
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     // BitChord's: unsung words at 55% white, sung ones plain white, the sung part simply filling in.
                     litColor = rememberPlayerAccent(),
@@ -762,7 +820,7 @@ private fun List<LyricLine>.currentLineAt(positionMs: Long): LyricLine? =
  * dissolves away over the new.
  */
 @Composable
-private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color, recordForGlass: Boolean) {
+private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // The picture is baked at the size of the screen, once per record, so that drawing it is one image and nothing else.
     val metrics = context.resources.displayMetrics
@@ -798,7 +856,7 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color, re
     // The two round buttons at the top take their blurred backdrop from the picture itself (see PlayerRoundButton).
     val holder = LocalGroundPicture.current
     androidx.compose.runtime.SideEffect { if (holder != null && holder.value !== current) holder.value = current }
-    Box(Modifier.fillMaxSize().background(solid)) {
+    Box(Modifier.fillMaxSize().then(if (current == null) Modifier.background(solid) else Modifier)) {
         current?.let { GroundLayer(it) }
         outgoing?.let { old ->
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) { GroundLayer(old) }
@@ -1019,8 +1077,8 @@ private const val GROUND_FADE_MS = 500
 /** Long enough that the work is not done in the middle of a track change. */
 private const val GROUND_PREFETCH_DELAY_MS = 600L
 
-/** The size the cover is read at for the ground: it fills the screen's width, so a little over the screen's own. */
-private const val GROUND_COVER_PX = 1080
+/** The size the cover is read at for the ground: matches PlayerViewModel.NOTIFICATION_COVER_PX so the cache hits 100%. */
+private const val GROUND_COVER_PX = 1024
 
 /** The size a cover is read at to make its aurora: it is scaled to 64 px and blurred, so no more is needed. */
 private const val AURORA_ART_PX = 192
@@ -1354,6 +1412,8 @@ private val LocalPlayerGlassTint = androidx.compose.runtime.staticCompositionLoc
 /** The ground picture now showing, so the two round buttons can look through to a blurred piece of it. */
 private val LocalGroundPicture = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableState<GroundPicture?>?> { null }
 
+private val FrostedWhiteGradient = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f)))
+
 /**
  * The design's frosted button, drawn over the ground (nothing is blurred: the player's ground is a still picture):
  * a soft shadow, a dark wash, a white gradient from 22 % to 8 %, a rim at 28 % and a light line along the top edge.
@@ -1369,7 +1429,7 @@ private fun Modifier.playerFrosted(shape: androidx.compose.ui.graphics.Shape): M
         .androidx_shadow(u * 10f, shape)
         .clip(shape)
         .background(tint)
-        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))))
+        .background(FrostedWhiteGradient)
         .drawWithContent {
             drawContent()
             drawGlassRim(shape, rim, line)
@@ -1423,6 +1483,9 @@ private fun PlayerRoundButton(
     // Where the button sits on the screen, as drawn: 40 px from its edge, 110 from the top.
     val originX = if (left) (40f * unitPx).toInt() else metrics.widthPixels - (40f * unitPx).toInt() - sizePx
     val originY = (110f * unitPx).toInt()
+    // Blur only the local patch around the button (sizePx + 3*sigma margin on each side) rather than a full 1080x1240 FBO.
+    val padPx = (78f * unitPx).toInt()
+    val patchSize = sizePx + 2 * padPx
     val blur = remember(unitPx) {
         val blurEffect = android.graphics.RenderEffect.createBlurEffect(26f * unitPx, 26f * unitPx, android.graphics.Shader.TileMode.CLAMP)
         val saturate = android.graphics.RenderEffect.createColorFilterEffect(
@@ -1447,13 +1510,17 @@ private fun PlayerRoundButton(
                 Modifier
                     .layout { measurable, _ ->
                         val placeable = measurable.measure(
-                            androidx.compose.ui.unit.Constraints.fixed(metrics.widthPixels, metrics.heightPixels),
+                            androidx.compose.ui.unit.Constraints.fixed(patchSize, patchSize),
                         )
-                        layout(sizePx, sizePx) { placeable.place(-originX, -originY) }
+                        layout(sizePx, sizePx) { placeable.place(-padPx, -padPx) }
                     }
                     .graphicsLayer { renderEffect = blur }
                     .drawBehind {
-                        drawImage(picture.baked, dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()))
+                        drawImage(
+                            picture.baked,
+                            dstOffset = androidx.compose.ui.unit.IntOffset(-(originX - padPx), -(originY - padPx)),
+                            dstSize = androidx.compose.ui.unit.IntSize(metrics.widthPixels, metrics.heightPixels),
+                        )
                     },
             )
         }
@@ -1461,7 +1528,7 @@ private fun PlayerRoundButton(
             Modifier
                 .matchParentSize()
                 .background(tint)
-                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))))
+                .background(FrostedWhiteGradient)
                 .drawWithContent {
                     drawContent()
                     drawGlassRim(CircleShape, rimPx, linePx)
@@ -1581,83 +1648,52 @@ private fun AudioOutputType.label(): String = when (this) {
 }
 
 /**
- * Where the music comes out, and how to send it somewhere else.
- *
- * A plain dialog rather than a liquid-glass sheet: the glass samples a backdrop layer recorded
- * in the main window, and a dialog is a window of its own — the coordinates would not line up
- * and the panel would refract the wrong part of the screen.
- *
+ * The audio output picker, styled as a [DesignMenu] anchored to the headphone button.
  * "Automatique" is a first-class choice, not the absence of one. Picking a device pins playback
  * to it; the system's own routing — which follows a headset being plugged in — is what Aura does
  * otherwise, and there has to be a way back to it.
  */
 @Composable
 private fun AudioOutputPicker(
+    state: GlassMenuState,
     outputs: List<AudioOutput>,
     selectedDeviceId: Int?,
     activeName: String?,
     onSelect: (Int?) -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .auraMenuSurface(PanelShape)
-                .padding(vertical = 10.dp),
-        ) {
-            Text(
-                text = "Sortie audio",
-                style = MaterialTheme.typography.titleSmall,
-                color = AuraColors.TextPrimary,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
-            )
-
-            OutputRow(
-                label = "Automatique",
-                detail = activeName?.takeIf { selectedDeviceId == null },
-                selected = selectedDeviceId == null,
-                onClick = { onSelect(null) },
-            )
-            outputs.forEach { output ->
-                OutputRow(
-                    label = output.name,
-                    detail = if (output.supportsHiRes) "Haute résolution" else null,
-                    selected = output.deviceId == selectedDeviceId,
-                    onClick = { onSelect(output.deviceId) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OutputRow(label: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val accent = rememberPlayerAccent()
+    DesignMenu(
+        state = state,
+        width = 250.dp,
+        shade = 0.24f,
+        alignStart = true,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) AuraColors.TextPrimary else AuraColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            detail?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = AuraColors.TextTertiary)
-            }
+        val choose: (Int?) -> () -> Unit = { id -> { state.close(); onSelect(id) } }
+        DesignMenuRow(
+            label = "Automatique",
+            subtitle = activeName?.takeIf { selectedDeviceId == null },
+            icon = CupertinoIcons.Headphones,
+            selected = selectedDeviceId == null,
+            accent = accent,
+            onClick = choose(null),
+        )
+        if (outputs.isNotEmpty()) {
+            DesignMenuDivider()
         }
-        if (selected) {
-            Icon(
-                CupertinoIcons.Check,
-                contentDescription = "Sélectionné",
-                tint = AuraColors.TextPrimary,
-                modifier = Modifier.size(18.dp),
+        outputs.forEach { output ->
+            val icon = when (output.type) {
+                AudioOutputType.BLUETOOTH -> CupertinoIcons.Headphones
+                AudioOutputType.WIRED_HEADSET -> CupertinoIcons.Headphones
+                AudioOutputType.USB_DAC -> CupertinoIcons.MusicNote
+                AudioOutputType.PHONE_SPEAKER -> CupertinoIcons.Headphones
+            }
+            DesignMenuRow(
+                label = output.name,
+                subtitle = if (output.supportsHiRes) "Haute résolution" else null,
+                icon = icon,
+                selected = output.deviceId == selectedDeviceId,
+                accent = accent,
+                onClick = choose(output.deviceId),
             )
         }
     }
