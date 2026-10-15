@@ -397,6 +397,12 @@ fun NowPlayingScreen(
                             withFrameNanos { }
                         }
                     }
+                    // The finger is still pulling the card up from the mini player: it is shown (the player has drawn)
+                    // and left where the finger puts it, and goes on from there once it is let go.
+                    if (sheetCard.holding) {
+                        sheetCard.markReady()
+                        snapshotFlow { sheetCard.holding }.first { !it }
+                    }
                     settle.offset = Offset(0f, sheetCard.edge * cardHeightPx)
                     settle.frozen = true
                     sheetCard.frozen = true

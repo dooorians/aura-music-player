@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -93,10 +94,15 @@ fun FloatingPlayerPill(
     progressProvider: () -> Float = { 0f },
     onPrewarm: () -> Unit = {},
     onPrewarmCancel: () -> Unit = {},
+    /** A pull up on the bar: started, then how far up it has gone as a fraction of the screen's height, then let go ([commit]: carry on up). */
+    onOpenDragStart: () -> Unit = {},
+    onOpenDrag: (Float) -> Unit = {},
+    onOpenDragEnd: (Boolean) -> Unit = {},
     hasRightButton: Boolean = true,
     endSlot: @Composable () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val view = androidx.compose.ui.platform.LocalView.current
     var prewarmed by remember { mutableStateOf(false) }
     val travel = remember { floatArrayOf(0f) }
 
@@ -194,13 +200,25 @@ fun FloatingPlayerPill(
                             }
                             .pointerInput(Unit) {
                                 val threshold = 40.dp.toPx()
+                                val slop = 6.dp.toPx()
+                                val commitDistance = 72.dp.toPx()
                                 var dx = 0f
                                 var dy = 0f
+                                var vertical: Boolean? = null
+                                var pulling = false
+                                val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                                 detectDragGestures(
-                                    onDragStart = { dx = 0f; dy = 0f },
+                                    onDragStart = { dx = 0f; dy = 0f; vertical = null; pulling = false; tracker.resetTracking() },
                                     onDragEnd = {
                                         val wasPrewarmed = prewarmed
                                         prewarmed = false
+                                        if (pulling) {
+                                            val vy = tracker.calculateVelocity().y
+                                            pulling = false
+                                            scope.launch { playHalo.snapTo(0f); artScale.snapTo(1f) }
+                                            onOpenDragEnd(-dy >= commitDistance || vy < -900f)
+                                            return@detectDragGestures
+                                        }
                                         when {
                                             abs(dx) > abs(dy) && dx <= -threshold -> {
                                                 if (wasPrewarmed) onPrewarmCancel()
@@ -210,17 +228,14 @@ fun FloatingPlayerPill(
                                                 if (wasPrewarmed) onPrewarmCancel()
                                                 onPrevious()
                                             }
-                                            dy <= -threshold -> {
-                                                scope.launch {
-                                                    playHalo.snapTo(0f)
-                                                    artScale.snapTo(1f)
-                                                }
-                                                onOpen()
-                                            }
                                             else -> if (wasPrewarmed) onPrewarmCancel()
                                         }
                                     },
                                     onDragCancel = {
+                                        if (pulling) {
+                                            pulling = false
+                                            onOpenDragEnd(false)
+                                        }
                                         if (prewarmed) {
                                             prewarmed = false
                                             onPrewarmCancel()
@@ -229,6 +244,16 @@ fun FloatingPlayerPill(
                                 ) { change, drag ->
                                     dx += drag.x
                                     dy += drag.y
+                                    tracker.addPointerInputChange(change)
+                                    if (vertical == null && kotlin.math.hypot(dx, dy) > slop) vertical = abs(dy) > abs(dx)
+                                    if (vertical == true && dy < 0f) {
+                                        if (!pulling) {
+                                            pulling = true
+                                            // Released by the pull: no longer a press that is about to be a tap.
+                                            onOpenDragStart()
+                                        }
+                                        onOpenDrag(-dy / view.height.coerceAtLeast(1).toFloat())
+                                    }
                                     change.consume()
                                 }
                             }

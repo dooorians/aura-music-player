@@ -182,6 +182,21 @@ class SheetCard {
     var edge by mutableFloatStateOf(1f)
         internal set
 
+    /**
+     * The finger is on the mini player and pulling the player up with it. The card then sits where the finger puts it
+     * ([dragTo]) and the player waits to settle until the finger is let go.
+     */
+    var holding by mutableStateOf(false)
+
+    /** Where the finger has put the card's top edge, as a fraction of the screen's height; read by the mini player riding with it. */
+    var dragEdge by mutableFloatStateOf(1f)
+        internal set
+
+    fun dragTo(edge: Float) {
+        dragEdge = edge
+        this.edge = edge
+    }
+
     /** The player composition in charge of the card, or null when there is no player on screen. */
     var owner: Any? by mutableStateOf(null)
         internal set
@@ -689,6 +704,7 @@ fun MainLayout() {
         sheetFlags.openingFromPill()
     }
 
+    val rootView = androidx.compose.ui.platform.LocalView.current
     val playerSidewaysOffset = remember { Animatable(0f) }
     val playerSidewaysAlpha = remember { Animatable(1f) }
     LaunchedEffect(playerOpen, playerLeavingSideways) {
@@ -1298,12 +1314,9 @@ fun MainLayout() {
                     return when {
                         waiting -> 1f
                         sheetCard.owner != null -> {
-                            if (sheetCard.sinking) {
-                                if (sheetCard.coversPill) 0f else 1f
-                            } else {
-                                if (sheetCard.coversPill || (sheetCard.edge >= 1f && playerOpen)) 0f
-                                else ((sheetCard.edge - 0.75f) / 0.05f).coerceIn(0f, 1f)
-                            }
+                            // The mini player rides with the card's top edge and is faded out near the top (see its layer): it
+                            // does not cut out as the card covers it.
+                            if (sheetCard.edge >= 1f && playerOpen && !sheetCard.holding) 0f else 1f
                         }
                         playerOpen -> 0f
                         else -> pillAlpha.value
@@ -1311,7 +1324,8 @@ fun MainLayout() {
                 }
 
                 if (backdrop.hasTrack) {
-                    val pillInteractive = showPill && (!playerOpen || playerClosingToPill) && !searchOpen
+                    // Also while the finger is pulling the player up from it: the player opens under the finger, and the bar keeps its gesture.
+                    val pillInteractive = (showPill && (!playerOpen || playerClosingToPill) && !searchOpen) || sheetCard.holding
                     PlayerPillHost(
                         playerViewModel = playerViewModel,
                         enabled = pillInteractive,
@@ -1324,6 +1338,25 @@ fun MainLayout() {
                         onPrewarm = {},
                         onPrewarmCancel = {},
                         onOpenNowPlaying = ::openPlayerFromPill,
+                        // The player follows the finger up from the mini player, as the other players do: the card is put
+                        // where the finger is; let go, it goes on to the top (past a third of the way, or flung) or back.
+                        onOpenDragStart = {
+                            if (sheetCard.acceptsOpen) {
+                                openPlayerFromPill()
+                                if (playerOpen) sheetCard.holding = true
+                            }
+                        },
+                        onOpenDrag = { upFraction ->
+                            if (sheetCard.holding) {
+                                sheetCard.dragTo((AuraMotion.SHEET_PILL_TOP_FRACTION - upFraction).coerceIn(0f, AuraMotion.SHEET_PILL_TOP_FRACTION))
+                            }
+                        },
+                        onOpenDragEnd = { commit ->
+                            if (sheetCard.holding) {
+                                sheetCard.holding = false
+                                if (!commit) playerClosingToPill = true
+                            }
+                        },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
@@ -1334,8 +1367,18 @@ fun MainLayout() {
                                     return@graphicsLayer
                                 }
                                 val a = arrival.value
-                                translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
-                                alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
+                                // Where the card's top edge is: under the finger while it pulls, else the card's own.
+                                val top = AuraMotion.SHEET_PILL_TOP_FRACTION
+                                val edgeNow = when {
+                                    sheetCard.holding -> sheetCard.dragEdge
+                                    sheetCard.owner != null && sheetCard.ready -> sheetCard.edge.coerceAtMost(top)
+                                    else -> top
+                                }
+                                val rise = (top - edgeNow).coerceIn(0f, top)
+                                translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx() - rise * rootView.height
+                                // Gone by the time the card is up, so it never sits on the player's own controls.
+                                val leaving = ((edgeNow - 0.08f) / 0.30f).coerceIn(0f, 1f)
+                                alpha = pAlpha * leaving * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                             }
                             .drawWithContent {
                                 if (pillBaseAlpha() > 0f && arrival.value > 0f) {
@@ -1400,6 +1443,9 @@ private fun PlayerPillHost(
     enabled: Boolean = true,
     showPageSwitch: Boolean = false,
     onPageSwitch: () -> Unit = {},
+    onOpenDragStart: () -> Unit = {},
+    onOpenDrag: (Float) -> Unit = {},
+    onOpenDragEnd: (Boolean) -> Unit = {},
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
@@ -1423,6 +1469,9 @@ private fun PlayerPillHost(
             onOpen = onOpenNowPlaying,
             onPrewarm = onPrewarm,
             onPrewarmCancel = onPrewarmCancel,
+            onOpenDragStart = onOpenDragStart,
+            onOpenDrag = onOpenDrag,
+            onOpenDragEnd = onOpenDragEnd,
             enabled = enabled,
             accentColor = dockAccent,
             progressProvider = {
