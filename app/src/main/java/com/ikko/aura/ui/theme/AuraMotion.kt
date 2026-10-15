@@ -113,10 +113,11 @@ object AuraMotion {
     const val SHEET_START_FRACTION = 0.264f
 
     /** Where it ends when it closes: the mini player's top edge. */
-    const val SHEET_PILL_TOP_FRACTION = 0.847f
+    const val SHEET_PILL_TOP_FRACTION = 0.863f
 
     /** How much narrower than the screen the card is, per unit of [SHEET_START_FRACTION]: 2.4% at the start, the pill's 9.7% at the end. */
-    const val SHEET_NARROWING = 0.115f
+    // The docked mini player is as wide as the screen: the card does not narrow towards it (it did for the floating pill).
+    const val SHEET_NARROWING = 0f
 
     /** The spring the card rises on, critically damped. */
     const val SHEET_STIFFNESS = 650f
@@ -148,7 +149,8 @@ object AuraMotion {
 
     /** The card's top corners while it is away from full screen. */
     val SheetCorner = 44.dp
-    val PillCorner = SheetCorner
+    /** The card's top corners where it sits on the dock: the screen's own, as the page above the dock has them. */
+    val PillCorner = 8.dp
 
     /** The card's corner radius when its top edge is [offset] (a fraction of the screen's height) down. */
     fun cornerAt(offset: Float): androidx.compose.ui.unit.Dp = when {

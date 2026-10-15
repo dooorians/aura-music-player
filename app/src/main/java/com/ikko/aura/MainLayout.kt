@@ -276,9 +276,8 @@ class SheetCard {
      * it, and the page under it comes back through it, so nothing is left to appear at once when it has gone.
      */
     val cardAlpha: Float
-        get() = if (owner == null || !sinking) 1f else 1f - (
-            (edge - AuraMotion.SHEET_CLEAR_FROM) / (AuraMotion.SHEET_PILL_TOP_FRACTION - AuraMotion.SHEET_CLEAR_FROM)
-            ).coerceIn(0f, 1f)
+        // Always whole: the docked mini player is an opaque bar the card sinks behind, so there is nothing to clear into.
+        get() = 1f
 
     /** True while the sheet card is actively traveling (animating open or closed), so underlying backdrops and glass freeze. */
     private var _frozen by mutableStateOf(false)
@@ -1457,6 +1456,8 @@ private fun PlayerPillHost(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            // An opaque bar, navigation bar included: it rides over the card as its handle and hides the card at rest.
+            .background(Color.Black)
             .windowInsetsPadding(WindowInsets.navigationBars),
     ) {
         FloatingPlayerPill(
