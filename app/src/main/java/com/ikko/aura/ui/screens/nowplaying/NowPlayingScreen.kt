@@ -974,24 +974,52 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
     val look = groundLook(art)
     canvas.drawColor(look.solid)
 
-    // The cover, centre-cropped to a square of the screen's width.
+    // The cover, centre-cropped to a square of the screen's width: sharp at the top, going soft as it goes down (a blurred
+    // copy under it, the sharp one dissolving into it), and only then into the record's flat colour — so the melt has no
+    // visible block edge.
     if (cover != null) {
         val side = minOf(cover.width, cover.height)
         val src = android.graphics.Rect((cover.width - side) / 2, (cover.height - side) / 2, (cover.width + side) / 2, (cover.height + side) / 2)
         val top = GROUND_COVER_TOP * u
-        canvas.drawBitmap(cover, src, android.graphics.RectF(0f, top, w.toFloat(), top + w.toFloat()), smooth)
+        val square = android.graphics.RectF(0f, top, w.toFloat(), top + w.toFloat())
+        // A blurred copy: the picture taken down to a few dozen pixels and drawn back up smoothly, twice.
+        val small = runCatching {
+            val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
+            val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 48, 48, true)
+            android.graphics.Bitmap.createScaledBitmap(a1, 18, 18, true)
+        }.getOrNull()
+        if (small != null) {
+            canvas.drawBitmap(small, null, square, smooth)
+            // A veil of the flat colour over the blurred copy, so it reads as a soft wash and not a second picture.
+            val wash = android.graphics.Paint().apply { color = (look.solid and 0x00FFFFFF) or (0x55 shl 24) }
+            canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, wash)
+        }
+        // The sharp cover, dissolving from 25 % down to 70 % of the square.
+        val layer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
+        canvas.drawBitmap(cover, src, square, smooth)
+        val mask = android.graphics.Paint().apply {
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+            shader = android.graphics.LinearGradient(
+                0f, top + 0.18f * w, 0f, top + 0.78f * w,
+                intArrayOf(-1, 0xE0FFFFFF.toInt(), 0x90FFFFFF.toInt(), 0x40FFFFFF, 0x00FFFFFF),
+                floatArrayOf(0f, 0.25f, 0.5f, 0.78f, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, mask)
+        canvas.restoreToCount(layer)
     }
 
-    // The melt into the flat colour.
-    val fadeTop = 300f * u
-    val fadeBottom = 1060f * u
+    // The melt into the flat colour: longer and later, over the blurred part.
+    val fadeTop = 520f * u
+    val fadeBottom = 1120f * u
     val c = look.solid
     fun withAlpha(a: Float) = (c and 0x00FFFFFF) or ((a * 255f).toInt().coerceIn(0, 255) shl 24)
     val fade = android.graphics.Paint().apply {
         shader = android.graphics.LinearGradient(
             0f, fadeTop, 0f, fadeBottom,
-            intArrayOf(withAlpha(0f), withAlpha(0.08f), withAlpha(0.22f), withAlpha(0.45f), withAlpha(0.70f), withAlpha(0.88f), withAlpha(0.97f), withAlpha(1f)),
-            floatArrayOf(0f, 0.15f, 0.30f, 0.45f, 0.60f, 0.75f, 0.90f, 1f),
+            intArrayOf(withAlpha(0f), withAlpha(0.10f), withAlpha(0.28f), withAlpha(0.52f), withAlpha(0.76f), withAlpha(0.92f), withAlpha(1f)),
+            floatArrayOf(0f, 0.18f, 0.36f, 0.55f, 0.74f, 0.9f, 1f),
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
