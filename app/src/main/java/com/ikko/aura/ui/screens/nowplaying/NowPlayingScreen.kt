@@ -986,9 +986,9 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
         val small = runCatching {
             val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
             val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 48, 48, true)
-            var step = android.graphics.Bitmap.createScaledBitmap(a1, 18, 18, true)
-            while (step.width < w / 3) {
-                step = android.graphics.Bitmap.createScaledBitmap(step, step.width * 4, step.height * 4, true)
+            var step = android.graphics.Bitmap.createScaledBitmap(a1, 9, 9, true)
+            while (step.width < w * 2 / 3) {
+                step = android.graphics.Bitmap.createScaledBitmap(step, step.width * 2, step.height * 2, true)
             }
             step
         }.getOrNull()
@@ -1015,14 +1015,35 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
             }
             canvas.drawRect(0f, h * 0.45f, w.toFloat(), h.toFloat(), deepen)
         }
-        // The sharp cover, dissolving from 25 % down to 70 % of the square.
+        // A middle stage, softer than the picture and sharper than the field below: the cover taken down to 90 px.
+        val mid = runCatching {
+            val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
+            var m = android.graphics.Bitmap.createScaledBitmap(cropped, 96, 96, true)
+            while (m.width < w * 2 / 3) m = android.graphics.Bitmap.createScaledBitmap(m, m.width * 2, m.height * 2, true)
+            m
+        }.getOrNull()
+        if (mid != null) {
+            val midLayer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
+            canvas.drawBitmap(mid, null, square, smooth)
+            val midMask = android.graphics.Paint().apply {
+                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+                shader = android.graphics.LinearGradient(
+                    0f, top + 0.30f * w, 0f, top + 0.92f * w,
+                    intArrayOf(-1, 0xC0FFFFFF.toInt(), 0x50FFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.35f, 0.7f, 1f),
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, midMask)
+            canvas.restoreToCount(midLayer)
+        }
+        // The sharp cover, dissolving earlier: from 12 % down to 52 % of the square.
         val layer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
         canvas.drawBitmap(cover, src, square, smooth)
         val mask = android.graphics.Paint().apply {
             xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
             shader = android.graphics.LinearGradient(
-                0f, top + 0.18f * w, 0f, top + 0.78f * w,
-                intArrayOf(-1, 0xE0FFFFFF.toInt(), 0x90FFFFFF.toInt(), 0x40FFFFFF, 0x00FFFFFF),
+                0f, top + 0.12f * w, 0f, top + 0.52f * w,
+                intArrayOf(-1, 0xC0FFFFFF.toInt(), 0x60FFFFFF, 0x20FFFFFF, 0x00FFFFFF),
                 floatArrayOf(0f, 0.25f, 0.5f, 0.78f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
