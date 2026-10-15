@@ -974,32 +974,6 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
     val look = groundLook(art)
     canvas.drawColor(look.solid)
 
-    // The record's own colours as one soft field over the whole screen: the cover taken down to a handful of pixels and
-    // drawn back up smoothly, so the colours below the picture are the ones that are in it, running into each other with
-    // no edge — and not flat colour with discs of light on it. Darkened towards the foot for the white type.
-    if (cover != null) {
-        val side = minOf(cover.width, cover.height)
-        val ambient = runCatching {
-            val cropped = android.graphics.Bitmap.createBitmap(cover, (cover.width - side) / 2, (cover.height - side) / 2, side, side)
-            val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 24, 24, true)
-            android.graphics.Bitmap.createScaledBitmap(a1, 5, 6, true)
-        }.getOrNull()
-        if (ambient != null) {
-            val sat = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
-                colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(1.25f) })
-            }
-            canvas.drawBitmap(ambient, null, android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()), sat)
-            val dark = android.graphics.Paint().apply {
-                shader = android.graphics.LinearGradient(
-                    0f, h * 0.30f, 0f, h.toFloat(),
-                    intArrayOf(0x00000000, 0x33000000, 0x66000000), floatArrayOf(0f, 0.5f, 1f),
-                    android.graphics.Shader.TileMode.CLAMP,
-                )
-            }
-            canvas.drawRect(0f, h * 0.30f, w.toFloat(), h.toFloat(), dark)
-        }
-    }
-
     // The cover, centre-cropped to a square of the screen's width: sharp at the top, going soft as it goes down (a blurred
     // copy under it, the sharp one dissolving into it), and only then into the record's flat colour — so the melt has no
     // visible block edge.
@@ -1012,13 +986,34 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
         val small = runCatching {
             val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
             val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 48, 48, true)
-            android.graphics.Bitmap.createScaledBitmap(a1, 18, 18, true)
+            var step = android.graphics.Bitmap.createScaledBitmap(a1, 18, 18, true)
+            while (step.width < w / 3) {
+                step = android.graphics.Bitmap.createScaledBitmap(step, step.width * 4, step.height * 4, true)
+            }
+            step
         }.getOrNull()
         if (small != null) {
+            // The same picture, blurred, in the same place: where the sharp cover melts, what is under it is its own colours.
             canvas.drawBitmap(small, null, square, smooth)
-            // A veil of the flat colour over the blurred copy, so it reads as a soft wash and not a second picture.
-            val wash = android.graphics.Paint().apply { color = (look.solid and 0x00FFFFFF) or (0x55 shl 24) }
-            canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, wash)
+            // And below the square, its bottom edge drawn on down to the foot of the screen: the cover "lengthened" by its
+            // own colours, column by column, so what is under the controls goes on from what is above them.
+            if (square.bottom < h) {
+                val edge = runCatching {
+                    android.graphics.Bitmap.createBitmap(small, 0, small.height - 4, small.width, 4)
+                }.getOrNull()
+                if (edge != null) {
+                    canvas.drawBitmap(edge, null, android.graphics.RectF(0f, square.bottom - 2f, w.toFloat(), h.toFloat()), smooth)
+                }
+            }
+            // Deepened a little towards the foot, for the white type and the controls.
+            val deepen = android.graphics.Paint().apply {
+                shader = android.graphics.LinearGradient(
+                    0f, h * 0.45f, 0f, h.toFloat(),
+                    intArrayOf(0x00000000, 0x40000000, 0x70000000), floatArrayOf(0f, 0.55f, 1f),
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, h * 0.45f, w.toFloat(), h.toFloat(), deepen)
         }
         // The sharp cover, dissolving from 25 % down to 70 % of the square.
         val layer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
@@ -1034,34 +1029,6 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
         }
         canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, mask)
         canvas.restoreToCount(layer)
-    }
-
-    // The pools of light: left, top, size, opacity, in design px.
-    val pools = arrayOf(
-        floatArrayOf(-290f, 410f, 820f, 0.85f),
-        floatArrayOf(600f, 460f, 760f, 0.80f),
-        floatArrayOf(90f, 610f, 900f, 0.75f),
-        floatArrayOf(-310f, 830f, 800f, 0.90f),
-        floatArrayOf(600f, 840f, 800f, 0.90f),
-        floatArrayOf(240f, 930f, 640f, 0.50f),
-    )
-    pools.forEachIndexed { i, p ->
-        val size = p[2] * u
-        val cx = (p[0] + p[2] / 2f) * u
-        val cy = (p[1] + extra + p[2] / 2f) * u
-        val r = size / 2f
-        val reach = r + 110f * u
-        val colour = look.pools[i % look.pools.size]
-        fun a(f: Float) = (colour and 0x00FFFFFF) or ((p[3] * 0.45f * f * 255f).toInt().coerceIn(0, 255) shl 24)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            shader = android.graphics.RadialGradient(
-                cx, cy, reach,
-                intArrayOf(a(1f), a(0.96f), a(0.55f), a(0.14f), a(0f)),
-                floatArrayOf(0f, (r - 70f * u) / reach, r / reach, (r + 55f * u) / reach, 1f),
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-        }
-        canvas.drawCircle(cx, cy, reach, paint)
     }
 
     // The dark fade at the top: the clock, the battery and the first row of buttons read over any cover.
