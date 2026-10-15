@@ -18,8 +18,41 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+
+/**
+ * Resolves the top-left corner radius of the physical iKKO screen (API 31+),
+ * falling back to [IKKO_SCREEN_CORNER] where the system gives none (as on the iKKO).
+ */
+@Composable
+fun rememberIkkoTopCornerRadius(): Dp {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    return remember(view, density) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val roundedCorner = view.rootWindowInsets?.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT)
+            if (roundedCorner != null && roundedCorner.radius > 0) {
+                with(density) { roundedCorner.radius.toDp() }
+            } else {
+                IKKO_SCREEN_CORNER
+            }
+        } else {
+            IKKO_SCREEN_CORNER
+        }
+    }
+}
+
+/**
+ * The iKKO MindOne reports no rounded corner to Android (every radius reads 0) and publishes none. Set by eye against the
+ * panel's own corners, from 23.2 dp (the height of its decoration overlay) down to this; measured on a photo of the lit panel: about 2 % of its width.
+ */
+private val IKKO_SCREEN_CORNER = 8.dp
 
 /**
  * One motion vocabulary for the whole app, so a transition's shape tells you what kind of move it
@@ -115,7 +148,7 @@ object AuraMotion {
 
     /** The card's top corners while it is away from full screen. */
     val SheetCorner = 44.dp
-    private val PillCorner = 24.dp
+    val PillCorner = SheetCorner
 
     /** The card's corner radius when its top edge is [offset] (a fraction of the screen's height) down. */
     fun cornerAt(offset: Float): androidx.compose.ui.unit.Dp = when {

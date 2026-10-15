@@ -3,6 +3,10 @@ package com.ikko.aura
 import android.net.Uri
 import androidx.navigation.NavBackStackEntry
 import com.ikko.aura.ui.theme.AuraMotion
+import com.ikko.aura.ui.theme.CupertinoIcons
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -125,6 +129,8 @@ import com.ikko.aura.ui.screens.ytm.RemoteArtistScreen
 import com.ikko.aura.ui.screens.ytm.YtmAlbumScreen
 import com.ikko.aura.ui.screens.ytm.YtmArtistScreen
 import com.ikko.aura.ui.screens.settings.SettingsScreen
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalNowPlayingMesh
 import com.ikko.aura.ui.theme.LocalPageTheme
@@ -633,17 +639,11 @@ fun MainLayout() {
     val pageTheme = remember { mutableStateOf<AlbumTheme?>(null) }
     // The palette a page that is lit with one of its own asks the background for (Home's moods, an album, a card's playlist).
     val immersivePage = remember { mutableStateOf<com.ikko.aura.ui.components.ImmersivePalette?>(null) }
-    // The page's palette, kept for a moment after it is withdrawn: between two pages that are both lit with one of their own
-    // (Home and a mood's playlist) the slot is empty for a few frames of the transition, and the playing track's colours
-    // would flash through them.
+    // Remember the last Album/Playlist immersive palette so that when closing back to AMOLED black,
+    // the page's own colours fade directly to black instead of switching to the playing track's palette mid-fade.
     val heldImmersive = remember { mutableStateOf<com.ikko.aura.ui.components.ImmersivePalette?>(null) }
     LaunchedEffect(immersivePage.value) {
-        val page = immersivePage.value
-        if (page != null) heldImmersive.value = page
-        else {
-            kotlinx.coroutines.delay(IMMERSIVE_HOLD_MS)
-            heldImmersive.value = null
-        }
+        immersivePage.value?.let { heldImmersive.value = it }
     }
     var albumAuroraTheme by remember { mutableStateOf<AlbumTheme?>(null) }
     LaunchedEffect(pageTheme.value) {
@@ -793,10 +793,13 @@ fun MainLayout() {
     BackHandler(enabled = searchOpen) { closeSearch() }
 
     val navigationBarHeight = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
-    val reservedPillHeight = navigationBarHeight +
-        if (showPill && backdrop.hasTrack) 76.dp else 0.dp
+    // The docked mini player: a bar of its own at the foot of the screen (black, with the progress along its bottom edge); the
+    // page is cut above it. Its height is not the page's to use, so nothing is reserved on top of the 16 dp of air.
+    val hasMiniPlayerDock = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack
+    val dockTotalHeight = if (hasMiniPlayerDock) com.ikko.aura.ui.components.DOCK_HEIGHT + navigationBarHeight else 0.dp
+    val reservedPillHeight = if (hasMiniPlayerDock) 16.dp else navigationBarHeight
 
-    Surface(color = AuraColors.Black, modifier = Modifier.fillMaxSize()) {
+    Surface(color = AuraColors.NonAmoledBlack, modifier = Modifier.fillMaxSize()) {
         PermissionGate {
         CompositionLocalProvider(
             LocalNowPlayingMesh provides backdrop.meshColors,
@@ -805,20 +808,68 @@ fun MainLayout() {
             LocalAuraBackdrop provides glassBackdrop,
             LocalSearchOpener provides ::openSearch,
             LocalPageTheme provides pageTheme,
-            com.ikko.aura.ui.components.LocalImmersivePalette provides immersivePage,
-            com.ikko.aura.ui.components.LocalImmersiveBackdrop provides immersiveBackdrop,
             com.ikko.aura.ui.theme.LocalCoverColors provides coverColors,
             LocalPageMotion provides pageMotion,
             LocalSheetDim provides { sheetCard.dim },
             LocalSheetCard provides sheetCard,
             LocalTabCapsule provides capsule,
         ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.fillMaxSize().pointerInput(Unit) {
+                // Seen, not taken: it only tells the aurora that somebody is using the screen (see AuroraPace).
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        com.ikko.aura.ui.components.AuroraPace.touched()
+                    }
+                }
+            },
+        ) {
+        // Outside the page's recorded layer: the background is its own surface, not something the
+        // mini player has to re-process when it changes. The pill loses nothing it could show — what
+        // it refracts is the page, and the background under it is smooth colour.
+        val isAlbumRoute = currentRoute?.let {
+            it.startsWith("album/") || it.startsWith("ytm_album/") || it.startsWith("remote_album/") ||
+                it.startsWith("playlist/")
+        } == true
+        val albumAuroraScrim by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isAlbumRoute) 0f else 1f,
+            animationSpec = tween(
+                durationMillis = 240,
+                delayMillis = if (isAlbumRoute) com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS else 40,
+                easing = androidx.compose.animation.core.CubicBezierEasing(0.33f, 0f, 0.15f, 1f),
+            ),
+            label = "album-aurora-scrim",
+        )
+        val albumAuroraVisible = !amoledBackgroundEnabled || (albumAuroraTheme != null && (isAlbumRoute || albumAuroraScrim < 1f))
+        if (albumAuroraVisible) {
+            val currentTheme = if (amoledBackgroundEnabled) {
+                pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
+            } else {
+                if (isAlbumRoute || albumAuroraScrim == 0f) {
+                    pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
+                } else {
+                    pageTheme.value ?: backdrop.theme
+                }
+            }
+            com.ikko.aura.ui.components.AuroraBackground(
+                theme = currentTheme,
+                active = !playerOpen && currentRoute !in AuraDestination.fullScreenRoutes && (!amoledBackgroundEnabled || isAlbumRoute || albumAuroraScrim < 1f),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (amoledBackgroundEnabled && albumAuroraScrim > 0f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(AuraColors.NonAmoledBlack.copy(alpha = albumAuroraScrim))
+            )
+        }
         val washClip = remember { androidx.compose.ui.graphics.Path() }
         val onPlayerScreen = currentRoute in AuraDestination.fullScreenRoutes
         val routeTrail = remember { object { var last: String? = null; var before: String? = null } }
         if (currentRoute != routeTrail.last) { routeTrail.before = routeTrail.last; routeTrail.last = currentRoute }
-        val fadingRoute = currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true
+        val fadingRoute = currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true || currentRoute?.startsWith("playlist/") == true
         val washFade by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (fadingRoute) 0f else 1f,
             animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
@@ -859,9 +910,48 @@ fun MainLayout() {
                     clipPath(washClip) { this@drawWithContent.drawContent() }
                 },
         )
+        // The page ends above the dock with the corners of the phone's own screen (the radius Android reports for it, as on
+        // the iKKO's), so the dock and the screen's edge read as one shape.
+        val screenCorner = com.ikko.aura.ui.theme.rememberIkkoTopCornerRadius()
+        val pageCutShape = remember(hasMiniPlayerDock, screenCorner) {
+            if (hasMiniPlayerDock) {
+                androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = screenCorner, bottomEnd = screenCorner)
+            } else {
+                androidx.compose.ui.graphics.RectangleShape
+            }
+        }
+        // The dock's own ground: pure black (AMOLED), so its pixels are off. It is the strip under the page plus what the page's
+        // rounded bottom corners leave bare, so the page's corners read against it (the page rests on the app's dark navy).
+        if (hasMiniPlayerDock) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(dockTotalHeight + screenCorner)
+                    .drawBehind {
+                        val corner = screenCorner.toPx()
+                        val pageBottom = size.height - dockTotalHeight.toPx()
+                        val strip = androidx.compose.ui.graphics.Path().apply { addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)) }
+                        val page = androidx.compose.ui.graphics.Path().apply {
+                            addRoundRect(
+                                androidx.compose.ui.geometry.RoundRect(
+                                    0f, -corner * 2f, size.width, pageBottom,
+                                    androidx.compose.ui.geometry.CornerRadius.Zero, androidx.compose.ui.geometry.CornerRadius.Zero,
+                                    androidx.compose.ui.geometry.CornerRadius(corner), androidx.compose.ui.geometry.CornerRadius(corner),
+                                ),
+                            )
+                        }
+                        val bare = androidx.compose.ui.graphics.Path()
+                        bare.op(strip, page, androidx.compose.ui.graphics.PathOperation.Difference)
+                        drawPath(bare, Color.Black)
+                    },
+            )
+        }
         Box(
             Modifier
                 .fillMaxSize()
+                .padding(bottom = dockTotalHeight)
+                .clip(pageCutShape)
                 .drawWithContent {
                     val coveredByPlayer = sheetCard.owner != null &&
                         !sheetCard.leavingSideways &&
@@ -872,39 +962,8 @@ fun MainLayout() {
                     if (!coveredByPlayer) {
                         drawContent()
                     }
-                }
-                .graphicsLayer { }
-                .layerBackdrop(
-                    pillBackdrop,
-                    enabledProvider = {
-                        showPill && !playerOpen && sheetCard.owner == null && !sheetCard.frozen
-                    },
-                ),
+                },
         ) {
-        // The F background, inside the recorded page so that the mini player's glass blurs it too. Out on the player's own
-        // full-screen sub-routes (lyrics, queue, equaliser), and kept alive (without disposal) when the player card covers it.
-        val immersiveAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (currentRoute in AuraDestination.fullScreenRoutes && currentRoute != AuraDestination.NowPlaying.route) 0f else 1f,
-            animationSpec = tween(160),
-            label = "immersive-alpha",
-        )
-        if (immersiveAlpha > 0f) {
-            val playing = backdrop.theme
-            val derived = remember(playing) {
-                val neutral = playing === AlbumTheme.Neutral || playing.hue == null
-                val (h, s) = com.ikko.aura.ui.components.hueAndSaturation(playing.accent)
-                com.ikko.aura.ui.components.immersiveFromCover(if (neutral) null else h, s, dark = true)
-            }
-            com.ikko.aura.ui.components.ImmersiveBackground(
-                palette = immersivePage.value ?: heldImmersive.value ?: derived,
-                alpha = immersiveAlpha,
-                pictureModifier = Modifier
-                    .layerBackdrop(
-                        immersiveBackdrop,
-                        enabledProvider = { !sheetCard.frozen },
-                    ),
-            )
-        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1255,7 +1314,6 @@ fun MainLayout() {
                     val pillInteractive = showPill && (!playerOpen || playerClosingToPill) && !searchOpen
                     PlayerPillHost(
                         playerViewModel = playerViewModel,
-                        backdrop = pillBackdrop,
                         enabled = pillInteractive,
                         showPageSwitch = pageSwitchButton,
                         onPageSwitch = {
@@ -1276,14 +1334,6 @@ fun MainLayout() {
                                     return@graphicsLayer
                                 }
                                 val a = arrival.value
-                                val speed = if (arrival.isRunning) {
-                                    min(abs(arrival.velocity) / PageMotionSpec.CAPSULE_STRETCH_FULL_AT, 1f)
-                                } else {
-                                    0f
-                                }
-                                val scale = PageMotionSpec.CAPSULE_SCALE_FROM + (1f - PageMotionSpec.CAPSULE_SCALE_FROM) * a
-                                scaleX = scale * (1f - PageMotionSpec.CAPSULE_STRETCH_X * speed)
-                                scaleY = scale * (1f + PageMotionSpec.CAPSULE_STRETCH_Y * speed)
                                 translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx()
                                 alpha = pAlpha * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                             }
@@ -1291,9 +1341,7 @@ fun MainLayout() {
                                 if (pillBaseAlpha() > 0f && arrival.value > 0f) {
                                     drawContent()
                                 }
-                            }
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            },
                     )
                 }
             }
@@ -1340,14 +1388,11 @@ private fun rememberBackdropState(playerViewModel: PlayerViewModel): State<Backd
 }
 
 /**
- * Owns the pill's subscription to the player state. Keeping it here rather than in [MainLayout]
- * means the twice-a-second progress updates recompose this one composable instead of the whole
- * navigation tree.
+ * Owns the docked mini-player's subscription to the player state.
  */
 @Composable
 private fun PlayerPillHost(
     playerViewModel: PlayerViewModel,
-    backdrop: LayerBackdrop,
     onOpenNowPlaying: () -> Unit,
     onPrewarm: () -> Unit,
     onPrewarmCancel: () -> Unit,
@@ -1358,13 +1403,16 @@ private fun PlayerPillHost(
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return
+    val positionState = playerViewModel.positionMs.collectAsStateWithLifecycle()
+    val durationState = playerViewModel.durationMs.collectAsStateWithLifecycle()
 
-    CompositionLocalProvider(LocalAuraBackdrop provides backdrop) {
-        androidx.compose.foundation.layout.Row(
-            modifier = modifier,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    val dockAccent = com.ikko.aura.ui.components.rememberPlayerAccent(followPage = false)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.navigationBars),
+    ) {
         FloatingPlayerPill(
             track = track,
             queueIndex = uiState.queueIndex,
@@ -1375,11 +1423,22 @@ private fun PlayerPillHost(
             onOpen = onOpenNowPlaying,
             onPrewarm = onPrewarm,
             onPrewarmCancel = onPrewarmCancel,
-            modifier = Modifier.weight(1f),
             enabled = enabled,
+            accentColor = dockAccent,
+            progressProvider = {
+                val dur = durationState.value
+                if (dur > 0L) (positionState.value.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+            },
+            hasRightButton = showPageSwitch,
+            endSlot = {
+                if (showPageSwitch) {
+                    PageSwitchPill(
+                        enabled = enabled,
+                        beforeSwitch = onPageSwitch,
+                    )
+                }
+            },
         )
-        if (showPageSwitch) PageSwitchPill(enabled = enabled, beforeSwitch = onPageSwitch)
-        }
     }
 }
 
@@ -1398,12 +1457,20 @@ private fun PlayerPillHost(
  * One page either side is kept composed. At zero the page being swiped to is blank until it
  * composes, which is exactly the frame the gesture makes you look at.
  */
+val LocalLibraryHeaderOffsetPx = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
+
 @Composable
 private fun TabPager(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
     motion: PageMotionState,
 ) {
+    val libraryCollapseOffsetPx = rememberSaveable { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val openSearch = LocalSearchOpener.current
+    val density = LocalDensity.current
+    val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val maxCollapsePx = with(density) { (statusBarTop + 48.dp).toPx() }
+
     // Kept across recompositions rather than rebuilt: a new list of new lambdas each time this ran made the pager
     // see three changed pages. It seldom re-runs (its inputs never change identity), so this only keeps the list's
     // identity stable when it does.
@@ -1420,10 +1487,64 @@ private fun TabPager(
             }
         }
     }
-    PagedContainer(
-        state = motion,
-        pages = pages,
-    )
+    CompositionLocalProvider(LocalLibraryHeaderOffsetPx provides libraryCollapseOffsetPx) {
+        Box(Modifier.fillMaxSize()) {
+            PagedContainer(
+                state = motion,
+                pages = pages,
+            )
+            // Shared top header common to both Home and Library: Search icon on the left, Settings gear on the right.
+            // Stays stationary during horizontal swipes, and collapses upward when scrolling down inside Library.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset {
+                        val libWeight = motion.p.coerceIn(0f, 1f)
+                        val dy = (libraryCollapseOffsetPx.floatValue * libWeight).roundToInt()
+                        IntOffset(0, dy)
+                    }
+                    .graphicsLayer {
+                        val libWeight = motion.p.coerceIn(0f, 1f)
+                        val dy = libraryCollapseOffsetPx.floatValue * libWeight
+                        alpha = if (maxCollapsePx > 0f) (1f + dy / maxCollapsePx).coerceIn(0f, 1f) else 1f
+                    }
+                    .padding(top = statusBarTop + 6.dp, start = 12.dp, end = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = openSearch),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Icon(
+                        imageVector = CupertinoIcons.Search,
+                        contentDescription = "Rechercher",
+                        tint = Color.White,
+                        modifier = Modifier.size(23.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true }
+                        },
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Icon(
+                        imageVector = CupertinoIcons.Gear,
+                        contentDescription = "Paramètres",
+                        tint = Color.White,
+                        modifier = Modifier.size(23.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**
