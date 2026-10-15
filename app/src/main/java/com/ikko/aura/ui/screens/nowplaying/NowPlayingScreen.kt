@@ -374,11 +374,17 @@ fun NowPlayingScreen(
                 }
                 settle.frozen = true
                 sheetCard.frozen = true
+                val handedVelocity = sheetCard.releaseVelocity
+                sheetCard.releaseVelocity = 0f
                 try {
                     animate(
                         initialValue = sheetCard.edge.coerceAtMost(AuraMotion.SHEET_PILL_TOP_FRACTION),
                         targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
-                        animationSpec = tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
+                        initialVelocity = handedVelocity,
+                        // From the finger's release: the same spring as the opening, carrying its speed. By a tap or the
+                        // back button: the eased fall.
+                        animationSpec = if (handedVelocity != 0f) spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f)
+                        else tween(AuraMotion.SHEET_EXIT_MS, easing = AuraMotion.EaseInOut),
                     ) { value, _ -> sheetCard.edge = value }
                     sheetCard.release(token)
                     onClosedState.value()
@@ -411,9 +417,12 @@ fun NowPlayingScreen(
                     sheetCard.frozen = true
                     try {
                         sheetCard.markReady()
+                        val handedVelocity = sheetCard.releaseVelocity
+                        sheetCard.releaseVelocity = 0f
                         animate(
                             initialValue = sheetCard.edge,
                             targetValue = 0f,
+                            initialVelocity = handedVelocity,
                             animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
                         ) { value, _ ->
                             sheetCard.edge = value
@@ -560,7 +569,9 @@ fun NowPlayingScreen(
                         }
                         if (followClose) {
                             val vy = tracker.calculateVelocity().y
-                            val commit = lifted && (dy >= 72.dp.toPx() || vy > 900f)
+                            // A short flick is enough: what decides is where it was going, not how far.
+                            val commit = lifted && (dy >= 120.dp.toPx() || (vy > 350f && dy >= 10.dp.toPx()))
+                            sheetCard.releaseVelocity = vy / composeView.height.coerceAtLeast(1)
                             sheetCard.holding = false
                             if (commit) {
                                 // Closes from where the finger left it.
@@ -568,9 +579,12 @@ fun NowPlayingScreen(
                             } else {
                                 // Not far enough: back up to the top.
                                 closeScope.launch {
+                                    val handed = sheetCard.releaseVelocity
+                                    sheetCard.releaseVelocity = 0f
                                     animate(
                                         initialValue = sheetCard.edge,
                                         targetValue = 0f,
+                                        initialVelocity = handed,
                                         animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
                                     ) { value, _ -> if (!closeRequested) sheetCard.dragTo(value) }
                                 }

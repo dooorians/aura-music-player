@@ -192,6 +192,9 @@ class SheetCard {
     var dragEdge by mutableFloatStateOf(1f)
         internal set
 
+    /** The card's speed when the finger let go, in screen heights per second (negative is up); used once, by the next move. */
+    var releaseVelocity: Float = 0f
+
     fun dragTo(edge: Float) {
         dragEdge = edge
         this.edge = edge
@@ -1350,8 +1353,11 @@ fun MainLayout() {
                                 sheetCard.dragTo((AuraMotion.SHEET_PILL_TOP_FRACTION - upFraction).coerceIn(0f, AuraMotion.SHEET_PILL_TOP_FRACTION))
                             }
                         },
-                        onOpenDragEnd = { commit ->
+                        onOpenDragEnd = { commit, velocityPxS ->
                             if (sheetCard.holding) {
+                                // The speed the finger left with goes on into the card's own motion (as a fraction of the
+                                // screen's height per second), so letting go does not change the pace.
+                                sheetCard.releaseVelocity = velocityPxS / rootView.height.coerceAtLeast(1)
                                 sheetCard.holding = false
                                 if (!commit) playerClosingToPill = true
                             }
@@ -1444,7 +1450,7 @@ private fun PlayerPillHost(
     onPageSwitch: () -> Unit = {},
     onOpenDragStart: () -> Unit = {},
     onOpenDrag: (Float) -> Unit = {},
-    onOpenDragEnd: (Boolean) -> Unit = {},
+    onOpenDragEnd: (Boolean, Float) -> Unit = { _, _ -> },
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val track = uiState.currentTrack ?: return

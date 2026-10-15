@@ -97,7 +97,7 @@ fun FloatingPlayerPill(
     /** A pull up on the bar: started, then how far up it has gone as a fraction of the screen's height, then let go ([commit]: carry on up). */
     onOpenDragStart: () -> Unit = {},
     onOpenDrag: (Float) -> Unit = {},
-    onOpenDragEnd: (Boolean) -> Unit = {},
+    onOpenDragEnd: (Boolean, Float) -> Unit = { _, _ -> },
     hasRightButton: Boolean = true,
     endSlot: @Composable () -> Unit = {},
 ) {
@@ -201,7 +201,8 @@ fun FloatingPlayerPill(
                             .pointerInput(Unit) {
                                 val threshold = 40.dp.toPx()
                                 val slop = 6.dp.toPx()
-                                val commitDistance = 72.dp.toPx()
+                                val commitDistance = 120.dp.toPx()
+                                val flickMin = 10.dp.toPx()
                                 var dx = 0f
                                 var dy = 0f
                                 var vertical: Boolean? = null
@@ -216,7 +217,12 @@ fun FloatingPlayerPill(
                                             val vy = tracker.calculateVelocity().y
                                             pulling = false
                                             scope.launch { playHalo.snapTo(0f); artScale.snapTo(1f) }
-                                            onOpenDragEnd(-dy >= commitDistance || vy < -900f)
+                                            // A short flick is enough: what decides is where it was going, not how far.
+                                            val up = -dy
+                                            onOpenDragEnd(
+                                                up >= commitDistance || (vy < -FLICK_PX_S && up >= flickMin),
+                                                vy,
+                                            )
                                             return@detectDragGestures
                                         }
                                         when {
@@ -234,7 +240,7 @@ fun FloatingPlayerPill(
                                     onDragCancel = {
                                         if (pulling) {
                                             pulling = false
-                                            onOpenDragEnd(false)
+                                            onOpenDragEnd(false, 0f)
                                         }
                                         if (prewarmed) {
                                             prewarmed = false
@@ -432,5 +438,7 @@ fun FloatingPlayerPill(
     }
 }
 
+/** A release faster than this is a flick: it goes the way it was thrown, whatever the distance. */
+private const val FLICK_PX_S = 350f
 private const val PREWARM_AFTER_MS = 40L
 private val PREWARM_MAX_TRAVEL = 3.dp
