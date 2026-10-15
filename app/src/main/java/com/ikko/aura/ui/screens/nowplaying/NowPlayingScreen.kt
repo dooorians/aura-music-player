@@ -1,5 +1,9 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import com.ikko.aura.ui.components.AuroraRenderer
+import com.ikko.aura.ui.components.neutralArt
+import com.ikko.aura.ui.components.AURORA_W
+import com.ikko.aura.ui.components.AURORA_PIXELS
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.layout
@@ -953,98 +957,45 @@ private suspend fun loadGround(context: android.content.Context, track: Track, w
 }
 
 /**
- * The "F" immersive ground, composed once into one image (design measures, 1080 px wide):
- *  - the flat deep colour of the record;
- *  - the cover, square across the top and bleeding off it ([GROUND_COVER_TOP] px);
- *  - the cover melting into that colour (a long eight-stop fade from 300 to 1060 px);
- *  - six large soft pools of the cover's own colours in the lower half, the glow the controls sit on;
- *  - a dark fade at the very top, for the clock and the first row of buttons;
- *  - a fine grain over everything.
- * The pools are drawn as radial gradients (a disc blurred by 110 px, which is what the design draws), so there is no blur
- * to run at draw time.
+ * The "F" immersive ground, composed once into one image: the app's own aurora over the whole screen (the record's colours
+ * as slow, very soft pools, made from the cover), the cover itself across the top, sharp, and melting from its middle
+ * into that aurora — so the colours below the picture are the aurora's, running on from it with no edge — then the dark
+ * fade at the top and a fine grain.
  */
 private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bitmap?, w: Int, h: Int): android.graphics.Bitmap {
     val out = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(out)
     val smooth = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG)
     val u = w / 1080f
-    // Taller screens than the design's 1240 keep the lower half's measures from the bottom, so the pools stay under the controls.
-    val extra = h / u - 1240f
 
-    val look = groundLook(art)
-    canvas.drawColor(look.solid)
+    // The aurora, over the whole screen, at its natural softness (it is a 64 px field drawn up smoothly).
+    val aurora = stillAurora(art)
+    canvas.drawBitmap(aurora, null, android.graphics.Rect(0, 0, w, h), smooth)
+    // A little deeper towards the foot, for the white type and the controls.
+    val veil = android.graphics.Paint().apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 0f, h.toFloat(),
+            intArrayOf(0x00000000, 0x22000000, 0x55000000), floatArrayOf(0f, 0.5f, 1f),
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), veil)
 
-    // The cover, centre-cropped to a square of the screen's width: sharp at the top, going soft as it goes down (a blurred
-    // copy under it, the sharp one dissolving into it), and only then into the record's flat colour — so the melt has no
-    // visible block edge.
+    // The cover: sharp across the top, as it is, bleeding off it; it melts into the aurora from its middle, over a long
+    // stretch, with an alpha that eases (no step): what shows through is the aurora, whose colours are its own.
     if (cover != null) {
         val side = minOf(cover.width, cover.height)
         val src = android.graphics.Rect((cover.width - side) / 2, (cover.height - side) / 2, (cover.width + side) / 2, (cover.height + side) / 2)
         val top = GROUND_COVER_TOP * u
         val square = android.graphics.RectF(0f, top, w.toFloat(), top + w.toFloat())
-        // A blurred copy: the picture taken down to a few dozen pixels and drawn back up smoothly, twice.
-        val small = runCatching {
-            val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
-            val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 48, 48, true)
-            var step = android.graphics.Bitmap.createScaledBitmap(a1, 9, 9, true)
-            while (step.width < w * 2 / 3) {
-                step = android.graphics.Bitmap.createScaledBitmap(step, step.width * 2, step.height * 2, true)
-            }
-            step
-        }.getOrNull()
-        if (small != null) {
-            // The same picture, blurred, in the same place: where the sharp cover melts, what is under it is its own colours.
-            canvas.drawBitmap(small, null, square, smooth)
-            // And below the square, its bottom edge drawn on down to the foot of the screen: the cover "lengthened" by its
-            // own colours, column by column, so what is under the controls goes on from what is above them.
-            if (square.bottom < h) {
-                val edge = runCatching {
-                    android.graphics.Bitmap.createBitmap(small, 0, small.height - 4, small.width, 4)
-                }.getOrNull()
-                if (edge != null) {
-                    canvas.drawBitmap(edge, null, android.graphics.RectF(0f, square.bottom - 2f, w.toFloat(), h.toFloat()), smooth)
-                }
-            }
-            // Deepened a little towards the foot, for the white type and the controls.
-            val deepen = android.graphics.Paint().apply {
-                shader = android.graphics.LinearGradient(
-                    0f, h * 0.45f, 0f, h.toFloat(),
-                    intArrayOf(0x00000000, 0x40000000, 0x70000000), floatArrayOf(0f, 0.55f, 1f),
-                    android.graphics.Shader.TileMode.CLAMP,
-                )
-            }
-            canvas.drawRect(0f, h * 0.45f, w.toFloat(), h.toFloat(), deepen)
-        }
-        // A middle stage, softer than the picture and sharper than the field below: the cover taken down to 90 px.
-        val mid = runCatching {
-            val cropped = android.graphics.Bitmap.createBitmap(cover, src.left, src.top, side, side)
-            var m = android.graphics.Bitmap.createScaledBitmap(cropped, 96, 96, true)
-            while (m.width < w * 2 / 3) m = android.graphics.Bitmap.createScaledBitmap(m, m.width * 2, m.height * 2, true)
-            m
-        }.getOrNull()
-        if (mid != null) {
-            val midLayer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
-            canvas.drawBitmap(mid, null, square, smooth)
-            val midMask = android.graphics.Paint().apply {
-                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
-                shader = android.graphics.LinearGradient(
-                    0f, top + 0.30f * w, 0f, top + 0.92f * w,
-                    intArrayOf(-1, 0xC0FFFFFF.toInt(), 0x50FFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.35f, 0.7f, 1f),
-                    android.graphics.Shader.TileMode.CLAMP,
-                )
-            }
-            canvas.drawRect(0f, 0f, w.toFloat(), square.bottom, midMask)
-            canvas.restoreToCount(midLayer)
-        }
-        // The sharp cover, dissolving earlier: from 12 % down to 52 % of the square.
         val layer = canvas.saveLayer(0f, 0f, w.toFloat(), square.bottom, null)
         canvas.drawBitmap(cover, src, square, smooth)
         val mask = android.graphics.Paint().apply {
             xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
             shader = android.graphics.LinearGradient(
-                0f, top + 0.12f * w, 0f, top + 0.52f * w,
-                intArrayOf(-1, 0xC0FFFFFF.toInt(), 0x60FFFFFF, 0x20FFFFFF, 0x00FFFFFF),
-                floatArrayOf(0f, 0.25f, 0.5f, 0.78f, 1f),
+                0f, top + 0.40f * w, 0f, square.bottom,
+                intArrayOf(-1, 0xD8FFFFFF.toInt(), 0xA8FFFFFF.toInt(), 0x70FFFFFF, 0x3CFFFFFF, 0x14FFFFFF, 0x00FFFFFF),
+                floatArrayOf(0f, 0.16f, 0.34f, 0.54f, 0.74f, 0.9f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
         }
@@ -1077,43 +1028,19 @@ private val grainTile: android.graphics.Bitmap by lazy {
     android.graphics.Bitmap.createBitmap(px, 256, 256, android.graphics.Bitmap.Config.ARGB_8888)
 }
 
-private class GroundLook(val solid: Int, val pools: IntArray)
-
-/**
- * The flat colour of the record and the colours its pools of light are made of, from the cover itself: the pools are its
- * own swatches (the most present first), kept deep enough that white type reads on them, and the flat colour is the
- * cover's overall hue taken dark — the one the rest of the app rests on. A cover with no colour gets a grey-blue.
- */
-private fun groundLook(art: android.graphics.Bitmap?): GroundLook {
-    val swatches = art?.let {
-        runCatching {
-            androidx.palette.graphics.Palette.from(it).maximumColorCount(24).resizeBitmapArea(64 * 64).generate().swatches
-        }.getOrNull()
-    }.orEmpty()
-        .filter { s -> FloatArray(3).also { androidx.core.graphics.ColorUtils.colorToHSL(s.rgb, it) }.let { it[1] > 0.18f && it[2] in 0.08f..0.92f } }
-        .sortedByDescending { it.population }
-    // The flat colour: the most present coloured swatch taken dark (the quick way: no aurora is rendered for it, so a
-    // change of record is not waiting on one). A cover with no colour gets a grey-blue.
-    val solid = swatches.firstOrNull()?.rgb?.let { rgb ->
-        val hsl = FloatArray(3)
-        androidx.core.graphics.ColorUtils.colorToHSL(rgb, hsl)
-        hsl[1] = hsl[1].coerceIn(0.30f, 0.60f)
-        hsl[2] = 0.16f
-        androidx.core.graphics.ColorUtils.HSLToColor(hsl)
-    } ?: 0xFF1B2230.toInt()
-    fun tone(rgb: Int, lightness: Float): Int {
-        val hsl = FloatArray(3)
-        androidx.core.graphics.ColorUtils.colorToHSL(rgb, hsl)
-        hsl[1] = hsl[1].coerceIn(0.35f, 0.72f)
-        hsl[2] = lightness
-        return androidx.core.graphics.ColorUtils.HSLToColor(hsl)
+/** The aurora of a cover as one still picture, the way the app's background makes it (see [AuroraRenderer]). */
+private fun stillAurora(art: android.graphics.Bitmap?): android.graphics.Bitmap {
+    val renderer = AuroraRenderer(art ?: neutralArt(AlbumTheme.Neutral))
+    renderer.render(AURORA_STILL_S)
+    val pixels = IntArray(AURORA_PIXELS) { i ->
+        (0xFF shl 24) or
+            ((renderer.outR[i] shr 8).coerceIn(0, 255) shl 16) or
+            ((renderer.outG[i] shr 8).coerceIn(0, 255) shl 8) or
+            (renderer.outB[i] shr 8).coerceIn(0, 255)
     }
-    val base = swatches.map { it.rgb }.ifEmpty { listOf(solid) }
-    // Alternating mid and deep tones of the cover's colours, as the design's pools alternate teal, blue, plum, red.
-    val lightness = floatArrayOf(0.25f, 0.31f, 0.22f, 0.20f, 0.27f, 0.36f)
-    val pools = IntArray(6) { i -> tone(base[i % base.size], lightness[i]) }
-    return GroundLook(solid, pools)
+    return android.graphics.Bitmap.createBitmap(pixels, AURORA_W, AURORA_H, android.graphics.Bitmap.Config.ARGB_8888)
 }
+
 
 /**
  * Makes the player's ground for the playing record, and the next, while nobody is looking: so that when the player opens
@@ -1157,6 +1084,9 @@ private const val GROUND_COVER_PX = 1024
 
 /** The size a cover is read at to make its aurora: it is scaled to 64 px and blurred, so no more is needed. */
 private const val AURORA_ART_PX = 192
+
+/** Where in its slow drift the still aurora is taken: any moment of it is the same kind of picture. */
+private const val AURORA_STILL_S = 12f
 
 /** Where the cover's square starts, in design px: it bleeds off the top, as the design draws it. */
 private const val GROUND_COVER_TOP = -70f
