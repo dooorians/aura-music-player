@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.asComposeRenderEffect
@@ -247,6 +248,8 @@ fun NowPlayingScreen(
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
     val isLiked by viewModel.isLiked.collectAsStateWithLifecycle()
     val albumScope = androidx.compose.runtime.rememberCoroutineScope()
+    val closeScope = androidx.compose.runtime.rememberCoroutineScope()
+    val composeView = androidx.compose.ui.platform.LocalView.current
     val albumContext = androidx.compose.ui.platform.LocalContext.current
     val positionMsState = viewModel.positionMs.collectAsStateWithLifecycle()
     val durationMsState = viewModel.durationMs.collectAsStateWithLifecycle()
@@ -531,20 +534,48 @@ fun NowPlayingScreen(
                         // Set once a vertical drag has taken hold of the queue sheet: it follows the finger up, and
                         // what the gesture means is then decided by the sheet, not by the swipe-down-to-close below.
                         var sheetDrag = false
+                        // Set while the card follows the finger down: the player closes under it (as it opened under it),
+                        // and what happens on release depends on how far and how fast it went.
+                        var followClose = false
+                        val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                         val slop = viewConfiguration.touchSlop
                         val lifted = drag(down.id) { change ->
                             val delta = change.positionChange()
                             dx += delta.x
                             dy += delta.y
+                            tracker.addPointerInputChange(change)
                             if (!started && hypot(dx, dy) > slop) started = true
                             if (started) {
                                 change.consume()
                                 if (!sheetDrag && dy < 0f && abs(dy) > abs(dx)) sheetDrag = true
                                 if (sheetDrag) queueSheet.dragBy(delta.y)
-                                // A swipe down closes the player as soon as it has gone far enough, not when the finger
-                                // lifts.
-                                if (!sheetDrag && dy >= threshold && dy > abs(dx)) close()
+                                if (!sheetDrag && !followClose && dy > 0f && dy > abs(dx) && activeState.value && !closeRequested) {
+                                    followClose = true
+                                    sheetCard.holding = true
+                                }
+                                if (followClose) {
+                                    sheetCard.dragTo((dy / composeView.height.coerceAtLeast(1)).coerceIn(0f, AuraMotion.SHEET_PILL_TOP_FRACTION))
+                                }
                             }
+                        }
+                        if (followClose) {
+                            val vy = tracker.calculateVelocity().y
+                            val commit = lifted && (dy >= 72.dp.toPx() || vy > 900f)
+                            sheetCard.holding = false
+                            if (commit) {
+                                // Closes from where the finger left it.
+                                close()
+                            } else {
+                                // Not far enough: back up to the top.
+                                closeScope.launch {
+                                    animate(
+                                        initialValue = sheetCard.edge,
+                                        targetValue = 0f,
+                                        animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
+                                    ) { value, _ -> if (!closeRequested) sheetCard.dragTo(value) }
+                                }
+                            }
+                            return@awaitEachGesture
                         }
                         if (!started) return@awaitEachGesture
                         when {
