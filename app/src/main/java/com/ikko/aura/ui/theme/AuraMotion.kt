@@ -153,12 +153,9 @@ object AuraMotion {
     val PillCorner = 8.dp
 
     /** The card's corner radius when its top edge is [offset] (a fraction of the screen's height) down. */
-    fun cornerAt(offset: Float): androidx.compose.ui.unit.Dp = when {
-        offset <= 0f -> 0.dp
-        offset < 0.10f -> SheetCorner * (offset / 0.10f)
-        offset < 0.60f -> SheetCorner
-        else -> SheetCorner + (PillCorner - SheetCorner) * ((offset - 0.60f) / (SHEET_PILL_TOP_FRACTION - 0.60f)).coerceIn(0f, 1f)
-    }
+    fun cornerAt(offset: Float): androidx.compose.ui.unit.Dp =
+        // The same all the way: the screen's own corners, from the dock to the top (nothing grows to 44 dp and comes back).
+        if (offset <= 0f) 0.dp else PillCorner
 
     // Placeholders for the navigation transition: they change nothing that can be seen, and only keep the
     // transition alive — and so the page under the card drawn — for as long as the card takes.
