@@ -974,6 +974,32 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
     val look = groundLook(art)
     canvas.drawColor(look.solid)
 
+    // The record's own colours as one soft field over the whole screen: the cover taken down to a handful of pixels and
+    // drawn back up smoothly, so the colours below the picture are the ones that are in it, running into each other with
+    // no edge — and not flat colour with discs of light on it. Darkened towards the foot for the white type.
+    if (cover != null) {
+        val side = minOf(cover.width, cover.height)
+        val ambient = runCatching {
+            val cropped = android.graphics.Bitmap.createBitmap(cover, (cover.width - side) / 2, (cover.height - side) / 2, side, side)
+            val a1 = android.graphics.Bitmap.createScaledBitmap(cropped, 24, 24, true)
+            android.graphics.Bitmap.createScaledBitmap(a1, 5, 6, true)
+        }.getOrNull()
+        if (ambient != null) {
+            val sat = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(1.25f) })
+            }
+            canvas.drawBitmap(ambient, null, android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()), sat)
+            val dark = android.graphics.Paint().apply {
+                shader = android.graphics.LinearGradient(
+                    0f, h * 0.30f, 0f, h.toFloat(),
+                    intArrayOf(0x00000000, 0x33000000, 0x66000000), floatArrayOf(0f, 0.5f, 1f),
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, h * 0.30f, w.toFloat(), h.toFloat(), dark)
+        }
+    }
+
     // The cover, centre-cropped to a square of the screen's width: sharp at the top, going soft as it goes down (a blurred
     // copy under it, the sharp one dissolving into it), and only then into the record's flat colour — so the melt has no
     // visible block edge.
@@ -1010,24 +1036,6 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
         canvas.restoreToCount(layer)
     }
 
-    // The melt into the flat colour: longer and later, over the blurred part.
-    val fadeTop = 520f * u
-    val fadeBottom = 1120f * u
-    val c = look.solid
-    fun withAlpha(a: Float) = (c and 0x00FFFFFF) or ((a * 255f).toInt().coerceIn(0, 255) shl 24)
-    val fade = android.graphics.Paint().apply {
-        shader = android.graphics.LinearGradient(
-            0f, fadeTop, 0f, fadeBottom,
-            intArrayOf(withAlpha(0f), withAlpha(0.10f), withAlpha(0.28f), withAlpha(0.52f), withAlpha(0.76f), withAlpha(0.92f), withAlpha(1f)),
-            floatArrayOf(0f, 0.18f, 0.36f, 0.55f, 0.74f, 0.9f, 1f),
-            android.graphics.Shader.TileMode.CLAMP,
-        )
-    }
-    canvas.drawRect(0f, fadeTop, w.toFloat(), fadeBottom, fade)
-    // Everything below the fade is the flat colour (a taller screen than the design's).
-    val flat = android.graphics.Paint().apply { color = c }
-    canvas.drawRect(0f, fadeBottom, w.toFloat(), h.toFloat(), flat)
-
     // The pools of light: left, top, size, opacity, in design px.
     val pools = arrayOf(
         floatArrayOf(-290f, 410f, 820f, 0.85f),
@@ -1044,7 +1052,7 @@ private fun bakeGround(art: android.graphics.Bitmap?, cover: android.graphics.Bi
         val r = size / 2f
         val reach = r + 110f * u
         val colour = look.pools[i % look.pools.size]
-        fun a(f: Float) = (colour and 0x00FFFFFF) or ((p[3] * f * 255f).toInt().coerceIn(0, 255) shl 24)
+        fun a(f: Float) = (colour and 0x00FFFFFF) or ((p[3] * 0.45f * f * 255f).toInt().coerceIn(0, 255) shl 24)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             shader = android.graphics.RadialGradient(
                 cx, cy, reach,
