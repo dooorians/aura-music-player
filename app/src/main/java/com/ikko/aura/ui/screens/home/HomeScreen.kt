@@ -119,7 +119,20 @@ fun HomeScreen(
     playerViewModel: PlayerViewModel,
     viewModel: HomeWidgetsViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.homeState.collectAsStateWithLifecycle()
+    // The carousels catch up with what was played only out of sight: with the app away, or Library showing.
+    // The activity's own lifecycle: this page's (its navigation entry's) stops each time an album is opened over it.
+    var host: android.content.Context = androidx.compose.ui.platform.LocalContext.current
+    while (host is android.content.ContextWrapper && host !is androidx.lifecycle.LifecycleOwner) host = host.baseContext
+    (host as? androidx.lifecycle.LifecycleOwner)?.let { activity ->
+        androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_STOP, activity) { viewModel.refreshCarousels() }
+    }
+    LocalPageMotion.current?.let { pages ->
+        LaunchedEffect(pages) {
+            androidx.compose.runtime.snapshotFlow { pages.p >= 0.999f }
+                .collect { away -> if (away) viewModel.refreshCarousels() }
+        }
+    }
     val profileUri by viewModel.profileImageUri.collectAsStateWithLifecycle()
     val u = designUnit()
     val openSearch = LocalSearchOpener.current

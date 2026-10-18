@@ -24,9 +24,11 @@ import com.ikko.aura.source.ytm.YtmLibrary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -294,6 +296,36 @@ class HomeWidgetsViewModel @Inject constructor(
             layout = built.map { CardSlot(it.id, it.heading, it.id in hidden) },
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
+
+    /** The carousels as the listener first saw them: what is played meanwhile does not move them (see [refreshCarousels]). */
+    private val frozenCarousels = MutableStateFlow<ForYouUiState?>(null)
+
+    init {
+        viewModelScope.launch { frozenCarousels.compareAndSet(null, uiState.first { it.loaded }) }
+    }
+
+    /**
+     * [uiState] with the Home carousels (the four tabs and their "il y a 2 h") held as they were when last
+     * [refreshCarousels]'d: a song played while Home is on screen, or an album opened and left, does not reorder them
+     * under the finger or under a returning transition.
+     */
+    val homeState: StateFlow<ForYouUiState> = combine(uiState, frozenCarousels) { live, held ->
+        // Nothing held until there is something to hold: a library still being read must not freeze empty carousels.
+        if (held == null || (held.resumeAlbums.isEmpty() && held.favoriteAlbums.isEmpty() && held.newAlbums.isEmpty() && held.discoveryAlbums.isEmpty())) live
+        else live.copy(
+            resumeAlbums = held.resumeAlbums,
+            lastPlayedAt = held.lastPlayedAt,
+            favoriteAlbums = held.favoriteAlbums,
+            newAlbums = held.newAlbums,
+            discoveryAlbums = held.discoveryAlbums,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
+
+    /** Takes the carousels up to date: called when Home is out of sight (another page, the app in the background). */
+    fun refreshCarousels() {
+        val live = uiState.value
+        if (live.loaded) frozenCarousels.value = live
+    }
 
     /** One card. [kind] is a selection the resolver knows; [pick] a selection made here, from the library's songs. */
     private class Spec(
