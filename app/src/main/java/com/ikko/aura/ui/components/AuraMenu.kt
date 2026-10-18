@@ -30,7 +30,7 @@ import com.ikko.aura.ui.theme.LocalCoverColors
 object AuraMenu {
     private val BaseTint = Color(0xFF080C1C)
     private const val COVER_SHARE = 0.18f
-    private const val OPACITY = 0.96f
+    private const val OPACITY = 1f
 
     // The design's menus: a 22 dp panel, rows 42 dp tall with 18 dp corners, on the colour of the page darkened.
     val Shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
@@ -56,7 +56,7 @@ object AuraMenu {
     @Composable
     fun fill(): Brush {
         val t = tint()
-        return Brush.verticalGradient(listOf(t.copy(alpha = OPACITY), lerp(t, Color.Black, 0.25f).copy(alpha = OPACITY)))
+        return Brush.verticalGradient(listOf(t, lerp(t, Color.Black, 0.25f)))
     }
 
     val rim: Brush

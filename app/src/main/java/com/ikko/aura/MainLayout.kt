@@ -1,5 +1,6 @@
 package com.ikko.aura
 
+import com.ikko.aura.ui.components.heroRipple
 import android.net.Uri
 import androidx.navigation.NavBackStackEntry
 import com.ikko.aura.ui.theme.AuraMotion
@@ -75,6 +76,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -537,6 +539,18 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
 }
 
 
+/** A page a trip of the hero ends on: an album, a playlist, an artist (of any source), the lyrics. */
+private fun isHeroPageRoute(route: String?): Boolean {
+    if (route == null) return false
+    return route == AuraDestination.Lyrics.route || HERO_PAGE_PREFIXES.any { route.startsWith(it) }
+}
+
+private val HERO_PAGE_PREFIXES = listOf(
+    "album/", "ytm_album/", "remote_album/", "playlist/", "artist/", "ytm_artist/", "remote_artist/",
+)
+
+private fun isAlbumRoute(entry: NavBackStackEntry): Boolean = isHeroPageRoute(entry.destination.route)
+
 private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.NowPlaying.route
 
 // Every push and pop starts a little late (PUSH_/POP_START_DELAY_MS), both pages together. The page coming in is built in
@@ -570,7 +584,8 @@ private fun popExit() =
 private fun isLyrics(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.Lyrics.route
 private fun isLyricsOrAlbum(entry: NavBackStackEntry): Boolean {
     val route = entry.destination.route ?: return false
-    return route == AuraDestination.Lyrics.route || route == AuraDestination.Queue.route || route.startsWith("album/")
+    // Every page the player opens over itself: the queue, the lyrics, an album or an artist of any source.
+    return route == AuraDestination.Queue.route || isHeroPageRoute(route)
 }
 
 // The incoming page's first frame is the heavy one (it is composed there), and the transition's clock runs through it:
@@ -594,6 +609,15 @@ private fun throughEnter(fromLeft: Boolean, startMs: Int = AuraMotion.PUSH_START
 private fun throughExit(toLeft: Boolean, startMs: Int = AuraMotion.PUSH_START_DELAY_MS) =
     slideOutHorizontally(tween(AuraMotion.PUSH_MS, delayMillis = startMs, easing = androidx.compose.animation.core.FastOutLinearInEasing)) { if (toLeft) -it / 4 else it / 4 } +
         fadeOut(tween(THROUGH_OUT_MS, delayMillis = startMs, easing = LinearEasing))
+
+/** How long a page that a trip leaves from (or returns to) stays composed, for the trip's clocks to run. */
+private const val HERO_KEEP_ALIVE_MS = 820
+
+/** The player stepping aside for a page a trip of the hero goes to, and back over it. */
+private const val PLAYER_STEP_ASIDE_MS = 180
+private const val PLAYER_STEP_BACK_MS = 160
+private const val PLAYER_LEAVE_MS = 200
+private const val PLAYER_WAIT_FOR_PAGE_MS = 700L
 
 private const val THROUGH_OUT_MS = 120
 private const val THROUGH_IN_MS = 150
@@ -707,58 +731,44 @@ fun MainLayout() {
     }
 
     val rootView = androidx.compose.ui.platform.LocalView.current
+    val hero = remember { com.ikko.aura.ui.components.HeroState() }
     val playerSidewaysOffset = remember { Animatable(0f) }
     val playerSidewaysAlpha = remember { Animatable(1f) }
+    // The player steps aside for a page it opens (the queue, the lyrics, an album, an artist) and comes back over it.
+    // It fades in place: it used to slide a quarter of the width as well, and on the way back that left a quarter of the
+    // screen uncovered on the right (a black band) while it came in. When a trip of the hero goes with it (its cover,
+    // title, artist travel), it goes and comes at once, on the copy's clock, instead of waiting out the pages' own delay.
     LaunchedEffect(playerOpen, playerLeavingSideways) {
+        playerSidewaysOffset.snapTo(0f)
         if (!playerOpen) {
-            playerSidewaysOffset.snapTo(0f)
             playerSidewaysAlpha.snapTo(1f)
         } else if (playerLeavingSideways) {
-            launch {
-                playerSidewaysOffset.animateTo(
-                    targetValue = -0.25f,
-                    animationSpec = tween(
-                        AuraMotion.PUSH_MS,
-                        delayMillis = AuraMotion.PUSH_START_DELAY_MS,
-                        easing = androidx.compose.animation.core.FastOutLinearInEasing,
-                    ),
-                )
+            val withHero = hero.fromPlayer && hero.phase == com.ikko.aura.ui.components.HeroPhase.Opening
+            // The page it goes to is built in a few frames: the player stays until the trip is under way (the page has
+            // said where things go), or the window's black showed between the two.
+            if (withHero) {
+                kotlinx.coroutines.withTimeoutOrNull(PLAYER_WAIT_FOR_PAGE_MS) {
+                    while (!(hero.running || hero.phase != com.ikko.aura.ui.components.HeroPhase.Opening)) withFrameNanos { }
+                }
             }
-            launch {
-                playerSidewaysAlpha.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(
-                        THROUGH_OUT_MS,
-                        delayMillis = AuraMotion.PUSH_START_DELAY_MS,
-                        easing = LinearEasing,
-                    ),
-                )
-            }
-        } else if (playerSidewaysAlpha.value < 1f || playerSidewaysOffset.value != 0f) {
-            playerSidewaysOffset.snapTo(-0.25f)
-            playerSidewaysAlpha.snapTo(0f)
-            launch {
-                playerSidewaysOffset.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(
-                        AuraMotion.PUSH_MS,
-                        delayMillis = AuraMotion.PUSH_START_DELAY_MS,
-                        easing = androidx.compose.animation.core.LinearOutSlowInEasing,
-                    ),
-                )
-            }
-            launch {
-                playerSidewaysAlpha.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(
-                        THROUGH_IN_MS,
-                        delayMillis = AuraMotion.PUSH_START_DELAY_MS + THROUGH_IN_LAG_MS,
-                        easing = LinearEasing,
-                    ),
-                )
-            }
+            playerSidewaysAlpha.animateTo(
+                targetValue = 0f,
+                animationSpec = if (withHero) {
+                    tween(PLAYER_STEP_ASIDE_MS, easing = com.ikko.aura.ui.components.TabMotion.Exit)
+                } else {
+                    // Out only once the page is coming in under it, and a little slower than it: never the bare window.
+                    tween(PLAYER_LEAVE_MS, delayMillis = AuraMotion.PUSH_START_DELAY_MS + THROUGH_IN_LAG_MS, easing = LinearEasing)
+                },
+            )
+        } else if (playerSidewaysAlpha.value < 1f) {
+            // Back at once, over the page still leaving: waiting for the page to have gone first left the window's
+            // black between the two.
+            playerSidewaysAlpha.animateTo(1f, tween(PLAYER_STEP_BACK_MS, easing = FastOutSlowInEasing))
         }
     }
+    // The player is all there again (not on its way back over a page): what decides that the page under it is cut for the
+    // dock. Cut while the player was still fading in, the page jumped and a black strip showed through at its foot.
+    val playerFullyBack by remember { derivedStateOf { playerSidewaysAlpha.value >= 1f } }
 
     if (!CAPSULE_HIDDEN) {
         LaunchedEffect(capsule, pageMotion, currentRoute, playerOpen, playerClosingToPill) {
@@ -800,12 +810,14 @@ fun MainLayout() {
     fun openSearch() {
         if (searchOpen) return
         searchOpen = true
-        scope.launch { searchPull.animateTo(1f, spring(stiffness = Spring.StiffnessMediumLow)) }
+        val dur = if (pageMotion.reduceMotion) 180 else 440
+        scope.launch { searchPull.animateTo(1f, tween(dur, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.9f, 0.2f, 1f))) }
     }
 
     fun closeSearch() {
         searchOpen = false
-        scope.launch { searchPull.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+        val dur = if (pageMotion.reduceMotion) 150 else 380
+        scope.launch { searchPull.animateTo(0f, tween(dur, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.9f, 0.2f, 1f))) }
     }
 
     BackHandler(enabled = searchOpen) { closeSearch() }
@@ -813,7 +825,9 @@ fun MainLayout() {
     val navigationBarHeight = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
     // The docked mini player: a bar of its own at the foot of the screen (black, with the progress along its bottom edge); the
     // page is cut above it. Its height is not the page's to use, so nothing is reserved on top of the 16 dp of air.
-    val hasMiniPlayerDock = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack
+    // No dock while the player is open but not all there (on its way back over a page): the page would be cut at its foot
+    // and the dock's black strip show through the player still fading in.
+    val hasMiniPlayerDock = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack && !(playerOpen && !playerFullyBack)
     val dockTotalHeight = if (hasMiniPlayerDock) com.ikko.aura.ui.components.DOCK_HEIGHT + navigationBarHeight else 0.dp
     val reservedPillHeight = if (hasMiniPlayerDock) 16.dp else navigationBarHeight
 
@@ -825,6 +839,7 @@ fun MainLayout() {
             LocalPlayerPillHeight provides reservedPillHeight,
             LocalAuraBackdrop provides glassBackdrop,
             LocalSearchOpener provides ::openSearch,
+            com.ikko.aura.ui.components.LocalHero provides hero,
             LocalPageTheme provides pageTheme,
             com.ikko.aura.ui.theme.LocalCoverColors provides coverColors,
             LocalPageMotion provides pageMotion,
@@ -1009,7 +1024,7 @@ fun MainLayout() {
                     .fillMaxWidth()
                     .weight(1f),
                 enterTransition = {
-                    when {
+                    val base: EnterTransition = when {
                         isSheet(targetState) -> { sheetFlags.opening = true; sheetFlags.away = false; AuraMotion.sheetEnter }
                         (isSheet(initialState) || isUnderPlayer(initialState)) && isLyricsOrAlbum(targetState) -> {
                             sheetFlags.closing = false
@@ -1023,10 +1038,16 @@ fun MainLayout() {
                         }
                         else -> pushEnter()
                     }
+                    // An album opened from a card or from the player: nothing of the page slides or fades as a whole.
+                    // The cover, the title and the artist travel (the hero), what the page brings rises by itself and
+                    // its background arrives on its own clock (see AlbumPageContent).
+                    if (hero.armed && isAlbumRoute(targetState) && hero.matchesEntry(targetState.destination.route, targetState.arguments)) {
+                        EnterTransition.None
+                    } else base
                 },
                 exitTransition = {
                     if (isSheet(initialState)) { sheetFlags.closing = false; sheetFlags.away = true }
-                    when {
+                    val base: ExitTransition = when {
                         isSheet(targetState) -> AuraMotion.sheetUnderExit
                         isUnderPlayer(initialState) -> {
                             sheetFlags.closing = false
@@ -1037,10 +1058,19 @@ fun MainLayout() {
                         isSheet(initialState) -> fadeOut(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.PUSH_START_DELAY_MS))
                         else -> pushExit()
                     }
+                    // The list stays composed until it has cleared (the ripple of the hero, 310 ms) and is not dimmed as a
+                    // whole: a transparent fade that does nothing but keep the page alive for as long.
+                    val fromHeroList = initialState.destination.route == AuraDestination.Tabs.route ||
+                        initialState.destination.route == AuraDestination.ArtistPattern.route
+                    if (hero.armed && isAlbumRoute(targetState) && fromHeroList &&
+                        hero.matchesEntry(targetState.destination.route, targetState.arguments)
+                    ) {
+                        fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
+                    } else base
                 },
                 popEnterTransition = {
                     if (isSheet(targetState)) { sheetFlags.opening = false; sheetFlags.away = false }
-                    when {
+                    val base: EnterTransition = when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
                         isUnderPlayer(targetState) -> {
                             sheetFlags.opening = false
@@ -1055,15 +1085,37 @@ fun MainLayout() {
                         isSheet(targetState) -> fadeIn(tween(com.ikko.aura.ui.theme.AuraMotion.PUSH_MS, delayMillis = com.ikko.aura.ui.theme.AuraMotion.POP_START_DELAY_MS))
                         else -> popEnter()
                     }
+                    // Back to the list: it is there, and each item comes back by itself from the one that was touched.
+                    val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
+                        targetState.destination.route == AuraDestination.ArtistPattern.route
+                    if (isAlbumRoute(initialState) && toHeroList &&
+                        hero.matchesEntry(initialState.destination.route, initialState.arguments) &&
+                        (hero.canClose || hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing)
+                    ) {
+                        EnterTransition.None
+                    } else base
                 },
                 popExitTransition = {
                     if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
-                    when {
+                    val matchesClosing = isAlbumRoute(initialState) &&
+                        hero.matchesEntry(initialState.destination.route, initialState.arguments)
+                    if (matchesClosing && hero.canClose) hero.startClosing()
+                    val base: ExitTransition = when {
                         isSheet(initialState) -> AuraMotion.sheetExit
                         (isSheet(targetState) || isUnderPlayer(targetState)) && isLyricsOrAlbum(initialState) ->
                             throughExit(toLeft = false, startMs = AuraMotion.PUSH_START_DELAY_MS)
                         else -> popExit()
                     }
+                    // The album page stays until what it brought has gone (140 ms), its background has faded (140 + 380)
+                    // and the cover is home (520): it is not slid or faded as a whole.
+                    // Back to the player: the page stays under it while the player comes back over it (no slide, no gap).
+                    val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
+                        targetState.destination.route == AuraDestination.ArtistPattern.route
+                    if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing &&
+                        (toHeroList || hero.fromPlayer)
+                    ) {
+                        fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
+                    } else base
                 },
             ) {
                 composable(AuraDestination.Settings.route) {
@@ -1172,6 +1224,7 @@ fun MainLayout() {
                 Box(
                     Modifier
                         .fillMaxSize()
+                        // Not placed while a page is over it: placed, its controls (invisible) would take the page's taps.
                         .layout { measurable, constraints ->
                             val placeable = measurable.measure(constraints)
                             val visible = !playerLeavingSideways || playerSidewaysAlpha.value > 0f
@@ -1183,11 +1236,7 @@ fun MainLayout() {
                                 layout(0, 0) {}
                             }
                         }
-                        .graphicsLayer {
-                            val a = playerSidewaysAlpha.value
-                            alpha = a
-                            translationX = playerSidewaysOffset.value * size.width
-                        }
+                        .graphicsLayer { alpha = playerSidewaysAlpha.value }
                         .drawWithContent {
                             if (playerSidewaysAlpha.value > 0f) {
                                 drawContent()
@@ -1226,6 +1275,9 @@ fun MainLayout() {
                 }
             }
 
+            // The cover that travels from a card to the album page (and back): over the pages, under the player and search.
+            com.ikko.aura.ui.components.HeroOverlay(hero, reduceMotion = pageMotion.reduceMotion)
+
             // Search, over everything the page is doing. Composed only while it is on its way in
             // or already there, so a shut search costs nothing at all.
             val searchVisible by remember {
@@ -1255,6 +1307,14 @@ fun MainLayout() {
                 }
             }
             val isTabsRoute = currentRoute == AuraDestination.Tabs.route
+            // A trip of the hero belongs to the page it ended on. Back to where it left from (the list, or the player over
+            // it), even while still on its way out: everything returns. Anywhere else: it is simply over.
+            LaunchedEffect(currentRoute) {
+                val onHeroPage = isHeroPageRoute(currentRoute)
+                if (hero.canClose && !onHeroPage) {
+                    if (currentRoute == AuraDestination.Tabs.route) hero.startClosing() else hero.reset()
+                }
+            }
             val hasPill = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack
             val arrival = remember { Animatable(if (backdrop.hasTrack) 1f else 0f) }
             LaunchedEffect(backdrop.hasTrack) {
@@ -1485,6 +1545,10 @@ private fun PlayerPillHost(
                 val dur = durationState.value
                 if (dur > 0L) (positionState.value.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
             },
+            onSeek = { f ->
+                val dur = durationState.value
+                if (dur > 0L) playerViewModel.seekTo((dur * f).toLong())
+            },
             hasRightButton = showPageSwitch,
             endSlot = {
                 if (showPageSwitch) {
@@ -1549,56 +1613,30 @@ private fun TabPager(
                 state = motion,
                 pages = pages,
             )
-            // Shared top header common to both Home and Library: Search icon on the left, Settings gear on the right.
-            // Stays stationary during horizontal swipes, and collapses upward when scrolling down inside Library.
-            Row(
+            // One header for Home and Library, outside the pager: it stays put while the pages slide under it.
+            val settingsVm: SettingsViewModel = hiltViewModel()
+            val profileUri by settingsVm.profileImageUri.collectAsStateWithLifecycle()
+            // It still folds away with the library's scroll, as before: slid up and faded by the same offset the
+            // library's header takes, weighted by how much of the Library page is showing (none on Home).
+            val unitPx = with(density) { com.ikko.aura.ui.components.designUnit().toPx() }
+            val fadeSpanPx = (com.ikko.aura.ui.components.PageHeader.SEARCH_TOP +
+                com.ikko.aura.ui.components.PageHeader.SEARCH_HEIGHT) * unitPx
+            com.ikko.aura.ui.components.CommonHeader(
+                profileUri = profileUri,
+                onSearch = openSearch,
+                onProfile = { navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true } },
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .heroRipple(fast = true)
                     .offset {
                         val libWeight = motion.p.coerceIn(0f, 1f)
-                        val dy = (libraryCollapseOffsetPx.floatValue * libWeight).roundToInt()
-                        IntOffset(0, dy)
+                        IntOffset(0, (libraryCollapseOffsetPx.floatValue * libWeight).roundToInt())
                     }
                     .graphicsLayer {
                         val libWeight = motion.p.coerceIn(0f, 1f)
                         val dy = libraryCollapseOffsetPx.floatValue * libWeight
-                        alpha = if (maxCollapsePx > 0f) (1f + dy / maxCollapsePx).coerceIn(0f, 1f) else 1f
-                    }
-                    .padding(top = statusBarTop + 6.dp, start = 12.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = openSearch),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Icon(
-                        imageVector = CupertinoIcons.Search,
-                        contentDescription = "Rechercher",
-                        tint = Color.White,
-                        modifier = Modifier.size(23.dp),
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true }
-                        },
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    Icon(
-                        imageVector = CupertinoIcons.Gear,
-                        contentDescription = "Paramètres",
-                        tint = Color.White,
-                        modifier = Modifier.size(23.dp),
-                    )
-                }
-            }
+                        alpha = (1f + dy / fadeSpanPx).coerceIn(0f, 1f)
+                    },
+            )
         }
     }
 }
@@ -1640,37 +1678,33 @@ private fun SearchOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.statusBars)
             // Above the keyboard: the panel is the height that is left, so the prompt is centred in what can be seen
-            // and not under the keys.
+            // and not under the keys. From the top of the screen: the field is laid out in the design's own units.
             .imePadding()
             .graphicsLayer {
-                val p = progressProvider()
-                alpha = p
-                // Comes forward rather than down: a touch smaller to start, full size once open. No vertical travel.
-                val scale = PANEL_ENTRY_SCALE + (1f - PANEL_ENTRY_SCALE) * p
-                scaleX = scale
-                scaleY = scale
+                // The field is the header's own, carried over: it must be there from the first frame, not fade in.
+                alpha = (progressProvider() * 4f).coerceAtMost(1f)
             },
     ) {
         // Built only once the gesture has committed: the field takes focus and raises the
         // keyboard the moment it exists, which is not something to do halfway through a drag that
         // may yet be pulled back.
-        if (open) {
-            SearchPanel(
-                navController = navController,
-                playerViewModel = playerViewModel,
-                onNavigate = onDismiss,
-            )
-        }
+        // Kept while the search closes: it has its own way out (the board's close is not its open played backwards).
+        SearchPanel(
+            navController = navController,
+            playerViewModel = playerViewModel,
+            onNavigate = onDismiss,
+            closing = !open,
+            progressProvider = progressProvider,
+        )
     }
 }
 
 /** How much the page shrinks and slides as it recedes. */
-private const val PAGE_RECEDE = 0.05f
+private const val PAGE_RECEDE = 0f
 
 /** The blur of the page behind the search, at full pull. */
-private const val SEARCH_BLUR_DP = 18f
+private const val SEARCH_BLUR_DP = 0f
 
 /**
  * Laid over the page while the search is open. Not a blur of the page: the background behind the
@@ -1678,7 +1712,7 @@ private const val SEARCH_BLUR_DP = 18f
  * a dark plate across the aurora. A light scrim keeps the aurora and dims the page enough to read
  * the field over it.
  */
-private val SEARCH_SCRIM = Color.Black.copy(alpha = 0.16f)
+private val SEARCH_SCRIM = Color.Black
 
 /** How big the panel is when it starts to arrive, against full size. */
 private const val PANEL_ENTRY_SCALE = 0.96f

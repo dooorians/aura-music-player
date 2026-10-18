@@ -40,6 +40,13 @@ import kotlinx.coroutines.flow.stateIn
 
 enum class SearchFilter { ALL, TRACKS, ALBUMS, ARTISTS }
 
+/** Where the search looks: the library, the sources, or both. */
+enum class SearchScope { LOCAL, ONLINE, ALL }
+
+/** One online source the search can use, and whether it is on. */
+@Immutable
+data class SearchSource(val id: String, val name: String, val enabled: Boolean)
+
 @Immutable
 data class SearchUiState(
     val query: String = "",
@@ -90,7 +97,7 @@ data class RemoteSection(
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: MusicRepository,
-    settings: SettingsStore,
+    private val settings: SettingsStore,
     private val ytmClient: YtmClient,
     private val ytmLibrary: YtmLibrary,
     private val remoteSources: com.ikko.aura.source.remote.RemoteSources,
@@ -361,6 +368,30 @@ class SearchViewModel @Inject constructor(
     fun setQuery(value: String) {
         query.value = value
     }
+
+    /** The online sources, YouTube Music first, then the ones the user added. */
+    val sources: StateFlow<List<SearchSource>> = combine(settings.ytmEnabled, remoteSources.configs) { ytmOn, configs ->
+        listOf(SearchSource(YTM_SOURCE_ID, "YouTube Music", ytmOn)) +
+            configs.sortedBy { it.createdAt }.map { SearchSource(it.id, it.name, it.enabled) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun toggleSource(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            if (id == YTM_SOURCE_ID) settings.setYtmEnabled(enabled) else remoteSources.setEnabled(id, enabled)
+        }
+    }
+
+    val recents: StateFlow<List<String>> = settings.searchRecents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Remembers a search the listener acted on (opened a result, or let it run). */
+    fun rememberQuery(value: String) {
+        viewModelScope.launch { settings.addSearchRecent(value) }
+    }
+
+    fun clearRecents() {
+        viewModelScope.launch { settings.clearSearchRecents() }
+    }
     
     fun setFilter(newFilter: SearchFilter) {
         filter.value = newFilter
@@ -373,5 +404,6 @@ class SearchViewModel @Inject constructor(
     private companion object {
         const val FILTER_DEBOUNCE_MS = 120L
         const val YTM_DEBOUNCE_MS = 300L
+        const val YTM_SOURCE_ID = "ytm"
     }
 }

@@ -81,7 +81,7 @@ fun MediaContextSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AuraMenu.tint().copy(alpha = 0.97f),
+        containerColor = AuraMenu.tint(),
         contentColor = AuraColors.TextPrimary,
         shape = AuraMenu.SheetShape,
         scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f),

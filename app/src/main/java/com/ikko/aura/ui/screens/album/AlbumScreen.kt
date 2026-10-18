@@ -1,5 +1,8 @@
 package com.ikko.aura.ui.screens.album
 
+import com.ikko.aura.ui.components.heroPageOut
+import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.heroTarget
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -115,7 +118,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-internal val PAGE_PADDING = 15.dp
+internal val PAGE_PADDING = 16.dp
 internal val ART_SIZE = 89.dp
 internal val ART_SHAPE = AuraShapes.AlbumCoverDetail
 internal val ACTION_HEIGHT = 42.dp
@@ -210,16 +213,6 @@ fun AlbumPageContent(
         pageTheme.value = theme
         onDispose { if (pageTheme.value === theme) pageTheme.value = null }
     }
-    // The "F" page is lit by blurred blobs of the cover's own colours (see Immersive.kt).
-    val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
-    val immersivePalette = remember(theme) {
-        val (h, sat) = com.ikko.aura.ui.components.hueAndSaturation(theme.accent)
-        com.ikko.aura.ui.components.immersiveFromCover(h, sat, dark = true)
-    }
-    DisposableEffect(immersivePalette) {
-        immersive.value = immersivePalette
-        onDispose { if (immersive.value === immersivePalette) immersive.value = null }
-    }
 
     val accent = rememberUpdatedState(theme.accent)
     val accentSoft = rememberUpdatedState(theme.accentSoft)
@@ -233,11 +226,13 @@ fun AlbumPageContent(
             applyStatusBarInset = false,
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                val groundArrival = com.ikko.aura.ui.components.rememberHeroGround()
+                AlbumGround(ground = theme.solid, listState = listState, arrival = groundArrival)
                 run {
 
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().heroPageOut(),
                     contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                     verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
@@ -284,6 +279,7 @@ fun AlbumPageContent(
                         )
                     }
                     itemsIndexed(uiState.tracks, key = { _, track -> track.id }) { index, track ->
+                        Box(Modifier.heroRise(3 + index)) {
                         AlbumTrackRow(
                             number = index + 1,
                             track = track,
@@ -299,10 +295,12 @@ fun AlbumPageContent(
                                 { DownloadBadge(controls.downloads[track.id], accent) { controls.onDownloadTrack(track) } }
                             },
                         )
+                        }
                     }
                 }
 
                 }
+                StatusBarScrim(solid = theme.solid, listState = listState, arrival = groundArrival)
             }
         }
 
@@ -381,13 +379,15 @@ private fun AlbumMoreMenu(
  * the translation of one layer.
  */
 @Composable
-internal fun AlbumGround(ground: Color, listState: LazyListState) {
+internal fun AlbumGround(ground: Color, listState: LazyListState, arrival: androidx.compose.runtime.State<Float>? = null) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
                 val fadeEnd = GROUND_SOLID_DP.dp.toPx()
                 translationY = -listState.headerScrollPx(fadeEnd)
+                // Arrives in 460 ms after a trip, leaves in 380 on the way back; always there otherwise.
+                alpha = arrival?.value ?: 1f
             }
             .drawWithCache {
                 val fadeStart = GROUND_CLEAR_DP.dp.toPx()
@@ -413,8 +413,8 @@ internal fun AlbumGround(ground: Color, listState: LazyListState) {
 }
 
 /** Where the aurora is fully clear, and where the flat colour is fully there, from the top. */
-private const val GROUND_CLEAR_DP = 170
-private const val GROUND_SOLID_DP = 360
+private const val GROUND_CLEAR_DP = 205
+private const val GROUND_SOLID_DP = 395
 
 /** Scrolled past the header: far enough that the flat colour covers the whole screen. */
 private const val GROUND_TRAVEL_PX = 2400f
@@ -428,14 +428,19 @@ private fun LazyListState.headerScrollPx(fallback: Float): Float =
  * the resting colour fading in as the header leaves.
  */
 @Composable
-internal fun StatusBarScrim(solid: Color, listState: LazyListState) {
+internal fun StatusBarScrim(
+    solid: Color,
+    listState: LazyListState,
+    arrival: androidx.compose.runtime.State<Float>? = null,
+) {
     val height = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(height)
             .graphicsLayer {
-                alpha = (listState.headerScrollPx(Float.MAX_VALUE) / SCRIM_RAMP_PX).coerceIn(0f, 1f)
+                alpha = (listState.headerScrollPx(Float.MAX_VALUE) / SCRIM_RAMP_PX).coerceIn(0f, 1f) *
+                    (arrival?.value ?: 1f)
             }
             .drawWithCache {
                 val brush = Brush.verticalGradient(
@@ -449,13 +454,15 @@ internal fun StatusBarScrim(solid: Color, listState: LazyListState) {
 
 private const val SCRIM_RAMP_PX = 260f
 
+/** Rows that come with the trip, one after another; the rest are simply there. */
+private const val ROWS_THAT_RISE = 8
+
 
 /**
- * The header starts where the other pages' titles do — Home's "Favoris", the library's "Bibliothèque",
- * "Réglages": 21 dp under the status bar (8 dp of margin, then a 56 dp title row centring a 30 sp line). At 10 dp
- * it sat noticeably higher than everything else in the app (the user's report).
+ * Positioned to align with the top menu line of Home and Library (~statusBar + 54.dp),
+ * giving the Aurora room to breathe under the status bar instead of crowding the clock.
  */
-internal val HEADER_TOP_BELOW_STATUS = 21.dp
+internal val HEADER_TOP_BELOW_STATUS = 54.dp
 
 @Composable
 private fun AlbumHeader(
@@ -478,16 +485,34 @@ private fun AlbumHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = com.ikko.aura.ui.components.designUnit() * 40f, end = com.ikko.aura.ui.components.designUnit() * 40f, top = com.ikko.aura.ui.components.designUnit() * 128f, bottom = com.ikko.aura.ui.components.designUnit() * 24f),
+            .padding(
+                start = com.ikko.aura.ui.components.designUnit() * 40f,
+                end = com.ikko.aura.ui.components.designUnit() * 40f,
+                top = statusTop + HEADER_TOP_BELOW_STATUS,
+                bottom = com.ikko.aura.ui.components.designUnit() * 24f,
+            ),
     ) {
         val u = com.ikko.aura.ui.components.designUnit()
         val accentInk = rememberPlayerAccent()
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val heroKey = "album:${uiState.tracks.firstOrNull()?.albumId}"
+            val heroDensity = androidx.compose.ui.platform.LocalDensity.current
+            val heroTitleStyle = androidx.compose.ui.text.TextStyle(
+                fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.ExtraBold,
+                fontSize = com.ikko.aura.ui.components.designSp(66f), lineHeight = com.ikko.aura.ui.components.designSp(76f),
+                letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f),
+            )
+            val heroSubStyle = androidx.compose.ui.text.TextStyle(
+                fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.Bold,
+                fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f),
+            )
             AlbumArt(
                 uri = uiState.tracks.firstOrNull()?.artworkUri,
                 contentDescription = uiState.title,
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(u * 50f),
-                modifier = Modifier.size(u * 240f),
+                modifier = Modifier
+                    .heroTarget(heroKey, radiusPx = with(heroDensity) { (u * 50f).toPx() })
+                    .size(u * 240f),
                 targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
             )
@@ -502,6 +527,7 @@ private fun AlbumHeader(
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
                 )
                 Text(
                     text = uiState.artist.trim(),
@@ -512,6 +538,7 @@ private fun AlbumHeader(
                     color = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.heroTarget(heroKey, isSub = true, text = com.ikko.aura.ui.components.HeroText(uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f))),
                 )
                 Text(
                     text = meta.ifEmpty { "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}" },
@@ -520,41 +547,86 @@ private fun AlbumHeader(
                     lineHeight = com.ikko.aura.ui.components.designSp(40f),
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
+                    modifier = Modifier.heroRise(1),
                 )
             }
         }
 
         Spacer(Modifier.height(u * 40f))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(u * 25f), verticalAlignment = Alignment.CenterVertically) {
-            PlayAllButton(onClick = onPlayAll, label = "Lire tout", modifier = Modifier.weight(1.15f))
-            AuraButton(
+        val btnColors = rememberAlbumButtonColors()
+        Row(
+            modifier = Modifier.heroRise(2),
+            horizontalArrangement = Arrangement.spacedBy(u * 20f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PlayAllButton(onClick = onPlayAll, label = "Lire tout", modifier = Modifier.weight(1f))
+            SecondaryPillButton(
                 onClick = onShuffle,
+                label = "Mélanger",
+                icon = CupertinoIcons.Shuffle,
                 modifier = Modifier.weight(1f),
-                shape = CircleShape,
-                minHeight = u * 112f,
-                contentPadding = PaddingValues(horizontal = u * 8f),
-            ) {
-                Icon(CupertinoIcons.Shuffle, contentDescription = null, tint = Color.White, modifier = Modifier.size(u * 44f))
-                Spacer(Modifier.width(u * 18f))
-                Text(text = "Mélanger", color = Color.White, fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
-            }
+            )
             CircleAction(onClick = onFavorite) {
                 FillableIcon(
                     outline = CupertinoIcons.Star,
                     filled = CupertinoIcons.StarFilled,
                     active = uiState.isFavorite,
                     contentDescription = "Favori",
-                    tint = Color.White,
-                    modifier = Modifier.size(u * 44f),
+                    tint = btnColors.secondaryContent,
+                    modifier = Modifier.size(u * 38f),
                 )
             }
             Box(moreAnchor) {
                 CircleAction(onClick = onMore) {
-                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(u * 44f))
+                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = btnColors.secondaryContent, modifier = Modifier.size(u * 38f))
                 }
                 moreMenu()
             }
+        }
+    }
+}
+
+internal data class AlbumButtonColors(
+    val primaryFill: Color,
+    val primaryInk: Color,
+    val secondaryFill: Color,
+    val secondaryBorder: Color,
+    val secondaryContent: Color,
+)
+
+@Composable
+internal fun rememberAlbumButtonColors(): AlbumButtonColors {
+    val pageTheme = com.ikko.aura.ui.theme.LocalPageTheme.current.value
+    val fallbackAccent = rememberPlayerAccent()
+    return remember(pageTheme, fallbackAccent) {
+        if (pageTheme != null && pageTheme !== com.ikko.aura.ui.components.AlbumTheme.Neutral) {
+            val hsl = FloatArray(3)
+            androidx.core.graphics.ColorUtils.colorToHSL(pageTheme.accent.toArgb(), hsl)
+            val deepInk = Color(
+                androidx.core.graphics.ColorUtils.HSLToColor(
+                    floatArrayOf(hsl[0], hsl[1].coerceIn(0.55f, 0.90f), 0.13f),
+                ),
+            )
+            // Deep dark onyx-velvet (much darker than the Aurora & solid ground so it never blends in),
+            // paired with a soft tonal contour in the album's own hue (never white).
+            val deepVelvet = androidx.compose.ui.graphics.lerp(Color(0xFF07080C), pageTheme.solid, 0.35f)
+            val tonalBorder = androidx.compose.ui.graphics.lerp(pageTheme.accent, pageTheme.accentSoft, 0.45f).copy(alpha = 0.32f)
+            AlbumButtonColors(
+                primaryFill = androidx.compose.ui.graphics.lerp(pageTheme.accentSoft, Color.White, 0.45f),
+                primaryInk = deepInk,
+                secondaryFill = deepVelvet,
+                secondaryBorder = tonalBorder,
+                secondaryContent = androidx.compose.ui.graphics.lerp(pageTheme.accentSoft, Color.White, 0.55f),
+            )
+        } else {
+            AlbumButtonColors(
+                primaryFill = Color(0xFFF2F2F7),
+                primaryInk = Color(0xFF0E0E12),
+                secondaryFill = Color(0xFF121318),
+                secondaryBorder = Color.White.copy(alpha = 0.16f),
+                secondaryContent = Color(0xFFF2F2F7),
+            )
         }
     }
 }
@@ -585,48 +657,85 @@ internal fun ActionRow(
     }
 }
 
+private const val ACTION_BTN_HEIGHT_U = 94f
+
 @Composable
 internal fun PlayAllButton(onClick: () -> Unit, label: String = "Lire", modifier: Modifier = Modifier, inkOverride: Color? = null) {
-    // The white capsule stays white; its text and icon take the accent's hue, deepened: the pale accent the other
-    // controls wear would not read on white.
-    val accent = rememberPlayerAccent()
-    val ink = inkOverride ?: remember(accent) {
-        val hsl = FloatArray(3)
-        androidx.core.graphics.ColorUtils.colorToHSL(accent.toArgb(), hsl)
-        Color(androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(hsl[0], hsl[1].coerceIn(0.45f, 0.85f), 0.28f)))
-    }
+    val colors = rememberAlbumButtonColors()
+    val ink = inkOverride ?: colors.primaryInk
+    val u = com.ikko.aura.ui.components.designUnit()
     Row(
         modifier = modifier
-            .height(com.ikko.aura.ui.components.designUnit() * 112f)
+            .height(u * ACTION_BTN_HEIGHT_U)
             .clip(CircleShape)
-            .background(Color.White)
-            .clickable(onClick = onClick),
+            .background(colors.primaryFill)
+            .clickable(onClick = onClick)
+            .padding(horizontal = u * 14f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(CupertinoIcons.Play, contentDescription = null, tint = ink, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
-        Spacer(Modifier.width(com.ikko.aura.ui.components.designUnit() * 18f))
-        Text(text = label, fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), fontWeight = FontWeight.ExtraBold, color = ink, maxLines = 1)
+        Icon(CupertinoIcons.Play, contentDescription = null, tint = ink, modifier = Modifier.size(u * 32f))
+        Spacer(Modifier.width(u * 12f))
+        Text(text = label, fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(40f), fontWeight = FontWeight.ExtraBold, color = ink, maxLines = 1)
+    }
+}
+
+@Composable
+internal fun SecondaryPillButton(
+    onClick: () -> Unit,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val colors = rememberAlbumButtonColors()
+    val u = com.ikko.aura.ui.components.designUnit()
+    Row(
+        modifier = modifier
+            .height(u * ACTION_BTN_HEIGHT_U)
+            .clip(CircleShape)
+            .background(colors.secondaryFill)
+            .border(1.dp, colors.secondaryBorder, CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = u * 14f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = colors.secondaryContent, modifier = Modifier.size(u * 36f))
+        Spacer(Modifier.width(u * 12f))
+        Text(
+            text = label,
+            color = colors.secondaryContent,
+            fontSize = com.ikko.aura.ui.components.designSp(34f),
+            lineHeight = com.ikko.aura.ui.components.designSp(40f),
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
 internal fun ShuffleButton(onClick: () -> Unit) {
+    val colors = rememberAlbumButtonColors()
     CircleAction(onClick = onClick) {
-        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = Color.White, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
+        Icon(CupertinoIcons.Shuffle, contentDescription = "Aléatoire", tint = colors.secondaryContent, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 38f))
     }
 }
 
 /**
- * The page's round button: frosted glass with a dark veil and a white glyph, so it stands out of a page lit with the same
- * hue as the cover (a glyph in the cover's colour over glass of that colour was close to invisible).
+ * Matte velvet round button tinted by the cover's palette, with a soft tonal contour so it stands out from the ground.
  */
 @Composable
 internal fun CircleAction(onClick: () -> Unit, content: @Composable () -> Unit) {
-    com.ikko.aura.ui.components.FrostedCircleButton(
-        onClick = onClick,
-        size = com.ikko.aura.ui.components.designUnit() * 112f,
-        scrim = 0.34f,
+    val colors = rememberAlbumButtonColors()
+    val u = com.ikko.aura.ui.components.designUnit()
+    Box(
+        modifier = Modifier
+            .size(u * ACTION_BTN_HEIGHT_U)
+            .clip(CircleShape)
+            .background(colors.secondaryFill)
+            .border(1.dp, colors.secondaryBorder, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) { content() }
 }
 

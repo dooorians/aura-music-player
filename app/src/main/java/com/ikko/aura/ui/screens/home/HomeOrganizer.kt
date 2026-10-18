@@ -51,7 +51,7 @@ fun HomeOrganizer(
                 .padding(horizontal = 12.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(28.dp))
-                .background(AuraMenu.tint().copy(alpha = 0.97f))
+                .background(AuraMenu.tint())
                 .padding(vertical = 14.dp),
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {

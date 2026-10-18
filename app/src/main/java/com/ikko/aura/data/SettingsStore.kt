@@ -166,6 +166,26 @@ class SettingsStore @Inject constructor(
      */
     val ytmEnabled = setting { prefs -> prefs[ytmKey] ?: false }
 
+    private val searchRecentsKey = stringPreferencesKey("search_recents")
+
+    /** The last searches, most recent first (at most [SEARCH_RECENTS_MAX]), shown when the search opens empty. */
+    val searchRecents = setting { prefs ->
+        prefs[searchRecentsKey].orEmpty().split('\n').filter { it.isNotBlank() }
+    }
+
+    suspend fun addSearchRecent(query: String) {
+        val q = query.trim()
+        if (q.length < 2) return
+        context.settingsDataStore.edit { prefs ->
+            val kept = prefs[searchRecentsKey].orEmpty().split('\n').filter { it.isNotBlank() && !it.equals(q, ignoreCase = true) }
+            prefs[searchRecentsKey] = (listOf(q) + kept).take(SEARCH_RECENTS_MAX).joinToString("\n")
+        }
+    }
+
+    suspend fun clearSearchRecents() {
+        context.settingsDataStore.edit { it.remove(searchRecentsKey) }
+    }
+
     suspend fun setYtmEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[ytmKey] = enabled }
     }
@@ -208,3 +228,5 @@ class SettingsStore @Inject constructor(
         }
     }
 }
+
+private const val SEARCH_RECENTS_MAX = 8

@@ -61,17 +61,17 @@ import com.ikko.aura.ui.theme.LibraryTypography
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
-internal val DOCK_HEIGHT = 68.dp
+internal val DOCK_HEIGHT = 78.dp
 private val HORIZONTAL_INSET = 16.dp
 private val POLE_SIZE = 44.dp
-private val ART_SIZE = 45.dp
+private val ART_SIZE = 46.dp
 private val ART_SHAPE = RoundedCornerShape(11.dp)
 private val ART_TEXT_GAP = 12.dp
 
 private val GLYPH_SIZE = 30.dp
 private val GLYPH_GAP = 14.dp
 private val RIGHT_SLOT_GAP = 12.dp
-private val BOTTOM_PROGRESS_HEIGHT = 2.8.dp
+private val BAR_TOUCH_HEIGHT = 26.dp
 
 /**
  * Option A docked mini-player (no liquid glass, no blur):
@@ -92,6 +92,8 @@ fun FloatingPlayerPill(
     enabled: Boolean = true,
     accentColor: Color = Color(0xFF2AD868),
     progressProvider: () -> Float = { 0f },
+    /** The bar was scrubbed to this fraction of the track. */
+    onSeek: (Float) -> Unit = {},
     onPrewarm: () -> Unit = {},
     onPrewarmCancel: () -> Unit = {},
     /** A pull up on the bar: started, then how far up it has gone as a fraction of the screen's height, then let go ([commit]: carry on up). */
@@ -125,7 +127,8 @@ fun FloatingPlayerPill(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = HORIZONTAL_INSET)
+                // The bar owns the top 16 dp (it sits at 8, as on the board); the content is centred in what is left.
+                .padding(start = HORIZONTAL_INSET, end = HORIZONTAL_INSET, top = 16.dp, bottom = 4.dp)
                 .then(
                     if (enabled) {
                         Modifier
@@ -412,27 +415,60 @@ fun FloatingPlayerPill(
             }
         }
 
-        // Bottom edge progress bar (at the very bottom of the mini-player / screen)
-        Canvas(
+        // Progress bar along the TOP of the dock (board: 8 px at 20 px from the top, 40 px in from the sides). Held, it
+        // thickens like the player's bar, and the finger scrubs it; the seek lands on release.
+        var scrub by remember { mutableStateOf<Float?>(null) }
+        val thick by animateFloatAsState(
+            targetValue = if (scrub != null) 1f else 0f,
+            animationSpec = tween(160, easing = FastOutSlowInEasing),
+            label = "dock-bar-thick",
+        )
+        val barInset = 16.dp
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.TopStart)
                 .fillMaxWidth()
-                .height(BOTTOM_PROGRESS_HEIGHT),
+                .height(BAR_TOUCH_HEIGHT)
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
+                    awaitPointerEventScope {
+                        while (true) {
+                            val down = awaitPointerEvent().changes.firstOrNull { it.pressed } ?: continue
+                            val inset = barInset.toPx()
+                            val span = (size.width - 2 * inset).coerceAtLeast(1f)
+                            fun frac(x: Float) = ((x - inset) / span).coerceIn(0f, 1f)
+                            down.consume()
+                            scrub = frac(down.position.x)
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val ch = ev.changes.firstOrNull() ?: break
+                                ch.consume()
+                                if (!ch.pressed) break
+                                scrub = frac(ch.position.x)
+                            }
+                            scrub?.let(onSeek)
+                            scrub = null
+                        }
+                    }
+                },
         ) {
-            val progress = progressProvider().coerceIn(0f, 1f)
-            // Subtle full-width track at bottom edge (same color/alpha as full-screen WavyProgressBar)
-            drawRect(
-                color = accentColor.copy(alpha = 0.26f),
-                topLeft = Offset.Zero,
-                size = size,
-            )
-            // Active progress bar (same color/alpha as full-screen WavyProgressBar)
-            if (progress > 0.001f) {
-                drawRect(
-                    color = accentColor.copy(alpha = 0.92f),
-                    topLeft = Offset.Zero,
-                    size = Size(width = size.width * progress, height = size.height),
+            Canvas(Modifier.fillMaxSize()) {
+                val inset = barInset.toPx()
+                val h = (3.2.dp.toPx()) + (4.dp.toPx()) * thick
+                val top = 8.dp.toPx() - 2.dp.toPx() * thick
+                val width = size.width - 2 * inset
+                val progress = (scrub ?: progressProvider()).coerceIn(0f, 1f)
+                val r = androidx.compose.ui.geometry.CornerRadius(h / 2f, h / 2f)
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.16f),
+                    topLeft = Offset(inset, top), size = Size(width, h), cornerRadius = r,
                 )
+                if (progress > 0.001f) {
+                    drawRoundRect(
+                        color = accentColor,
+                        topLeft = Offset(inset, top), size = Size(width * progress, h), cornerRadius = r,
+                    )
+                }
             }
         }
     }

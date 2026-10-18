@@ -2,20 +2,14 @@ package com.ikko.aura.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import kotlin.math.abs
-import kotlin.math.min
-import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -24,13 +18,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.theme.CupertinoIcons
+import com.ikko.aura.ui.theme.rememberIkkoTopCornerRadius
+import kotlin.math.abs
+import kotlin.math.min
+import kotlinx.coroutines.launch
 
 /**
- * A small glass pill beside the mini player that flips between Home and Bibliothèque: it shows where a tap goes
- * (the house on the library, the list on Home). Same glass and height as the mini player so the two read as a pair.
+ * A small AMOLED black pill beside the mini player that flips between Home and Bibliothèque: it shows where a tap goes
+ * (the house on the library, the list on Home). Same black surface, height and iKKO corner radius as the mini player so the two read as a pair.
  */
 @Composable
 fun PageSwitchPill(
@@ -44,15 +45,9 @@ fun PageSwitchPill(
     // White, whatever the cover: the pill's glyphs and text do not take the playing track's colour.
     val accent = Color.White
     val pressed = remember { Animatable(1f) }
-    val shape = RoundedCornerShape(16.dp)
-    LiquidGlassPanel(
-        shape = shape,
-        tint = Color(0xFF080C1C),
-        tintAlpha = 0.4f,
-        blurRadiusDp = 16f,
-        dropShadow = false,
-        edge = false,
-        lensScale = 0f,
+    val cornerRadius = rememberIkkoTopCornerRadius()
+    val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
+    Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .width(56.dp)
@@ -65,8 +60,8 @@ fun PageSwitchPill(
                 scaleY = pressed.value * (1f - PageMotionSpec.PLAYER_STRETCH_Y * w)
             }
             .clip(shape)
-            // As on the mini player: cleared first, so the glass is drawn over the bare window and not over the page.
-            .drawBehind { drawRect(Color.Transparent, blendMode = BlendMode.Clear) }
+            .background(Color.Black, shape)
+            .border(1.dp, Color.Black, shape)
             .sheen(
                 position = { val p = motion.p; 1.3f - 1.7f * (p - kotlin.math.floor(p)).coerceIn(-0.2f, 1.2f) },
                 strength = { if (motion.reduceMotion || !motion.inTransit) 0f else 1f },
@@ -92,8 +87,6 @@ fun PageSwitchPill(
                 },
             ),
     ) {
-        // The lit rim of the mini player's glass.
-        Spacer(Modifier.matchParentSize().clip(shape).pillEdge(shape))
         Icon(
             imageVector = if (onHome) CupertinoIcons.LibraryStack else CupertinoIcons.House,
             contentDescription = if (onHome) "Bibliothèque" else "Accueil",

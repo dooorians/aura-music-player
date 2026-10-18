@@ -1,5 +1,10 @@
 package com.ikko.aura.ui.screens.artist
 
+import com.ikko.aura.ui.components.heroPageOut
+import com.ikko.aura.ui.components.heroAnchor
+import com.ikko.aura.ui.components.heroRipple
+import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.heroTarget
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.WindowInsets
 import com.ikko.aura.ui.components.topScrollPx
@@ -60,7 +65,7 @@ fun ArtistScreen(
     artistViewModel: ArtistViewModel = hiltViewModel(),
 ) {
     val uiState by artistViewModel.uiState.collectAsStateWithLifecycle()
-    ArtistPageContent(uiState, navController, playerViewModel)
+    ArtistPageContent(uiState, navController, playerViewModel, heroKey = "artist:$artistId")
 }
 
 /**
@@ -72,6 +77,7 @@ fun ArtistPageContent(
     uiState: ArtistUiState,
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
+    heroKey: String? = "artist:page",
 ) {
     val statusBarTop = with(androidx.compose.ui.platform.LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -83,11 +89,11 @@ fun ArtistPageContent(
       MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heroPageOut(),
             contentPadding = PaddingValues(top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
-                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
                     Text(
                         text = uiState.name,
                         style = MaterialTheme.typography.headlineLarge,
@@ -95,17 +101,26 @@ fun ArtistPageContent(
                         color = AuraColors.TextPrimary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.heroTarget(
+                            heroKey ?: "",
+                            text = com.ikko.aura.ui.components.HeroText(
+                                uiState.name, androidx.compose.ui.geometry.Rect.Zero,
+                                MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold), AuraColors.TextPrimary,
+                                maxLines = 2,
+                            ),
+                        ),
                     )
                     Text(
                         text = "${uiState.albums.size} album${if (uiState.albums.size > 1) "s" else ""} · " +
                             "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}",
                         style = MaterialTheme.typography.bodyLarge,
                         color = AuraColors.TextSecondary,
+                        modifier = Modifier.heroRise(0),
                     )
 
                     Spacer(Modifier.height(16.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.heroRise(1)) {
                         AuraButton(
                             onClick = {
                                 if (uiState.tracks.isNotEmpty()) {
@@ -139,16 +154,22 @@ fun ArtistPageContent(
                         text = "Albums",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.heroRise(2).padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
                 item {
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(uiState.albums, key = { it.id }) { album ->
-                            ArtistAlbumCard(album = album, navController = navController, onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) })
+                        itemsIndexed(uiState.albums, key = { _, it -> it.id }) { index, album ->
+                            ArtistAlbumCard(
+                                album = album,
+                                index = index,
+                                artistHeroKey = heroKey,
+                                navController = navController,
+                                onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) },
+                            )
                         }
                     }
                 }
@@ -160,7 +181,7 @@ fun ArtistPageContent(
                     text = "Titres",
                     style = MaterialTheme.typography.headlineMedium,
                     color = AuraColors.TextPrimary,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.heroRise(5).padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
 
@@ -174,7 +195,9 @@ fun ArtistPageContent(
                     // The artist is the page's own title: the album is what tells the rows apart.
                     subtitle = track.album,
                     onLongClick = { menu.show(track) },
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier
+                        .heroRise(6 + index)
+                        .padding(horizontal = 16.dp),
                 )
             }
         }
@@ -183,22 +206,71 @@ fun ArtistPageContent(
 }
 
 @Composable
-private fun ArtistAlbumCard(album: Album, navController: NavHostController, onLongClick: () -> Unit) {
-    Column(modifier = Modifier.width(140.dp)) {
+private fun ArtistAlbumCard(
+    album: Album,
+    index: Int,
+    artistHeroKey: String?,
+    navController: NavHostController,
+    onLongClick: () -> Unit,
+) {
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    val heroKey = "album:${album.id}"
+    val coverAnchor = androidx.compose.runtime.remember { com.ikko.aura.ui.components.HeroAnchor() }
+    val titleAnchor = androidx.compose.runtime.remember { com.ikko.aura.ui.components.HeroAnchor() }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val titleStyle = MaterialTheme.typography.labelLarge
+    // The card the player's cover lands on when the artist was opened from the player.
+    val landing = artistHeroKey != null && hero.fromPlayer && hero.landsOn(album.id, album.title)
+    // And the cards beside it, then the rest, come in one after the other once it is there.
+    val rise = if (!landing && artistHeroKey != null) {
+        Modifier.heroRise(1 + index)
+    } else Modifier
+    Column(modifier = Modifier.width(140.dp).heroRipple(heroKey, pageKey = artistHeroKey).then(rise)) {
         SquircleCard(
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            onClick = { navController.navigate(album.route()) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .heroAnchor(heroKey, coverAnchor)
+                .then(
+                    if (landing) Modifier.heroTarget(artistHeroKey!!, radiusPx = with(density) { 8.dp.toPx() }) else Modifier,
+                ),
+            onClick = {
+                if (hero.begin(
+                    key = heroKey,
+                    uri = album.artworkUri,
+                    cacheKey = album.id.toString(),
+                    cover = coverAnchor,
+                    radiusPx = with(density) { 8.dp.toPx() },
+                    title = titleAnchor to com.ikko.aura.ui.components.HeroText(album.title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, androidx.compose.ui.graphics.Color.White),
+                    sub = null,
+                    sizeDp = 140.dp,
+                )) navController.navigate(album.route())
+            },
             onLongClick = onLongClick,
         ) {
             AlbumArt(uri = album.artworkUri, contentDescription = album.title, modifier = Modifier.fillMaxWidth().aspectRatio(1f), targetSizeDp = 140.dp, cacheKey = album.id.toString())
         }
         Text(
             text = album.title,
-            style = MaterialTheme.typography.labelLarge,
+            style = titleStyle,
             color = AuraColors.TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .heroAnchor(heroKey, titleAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE)
+                // From the player, the song's title lands here as this card's caption.
+                .then(
+                    if (landing) {
+                        Modifier.heroTarget(
+                            artistHeroKey!!,
+                            isSub = true,
+                            text = com.ikko.aura.ui.components.HeroText(
+                                album.title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, AuraColors.TextPrimary,
+                            ),
+                        )
+                    } else Modifier,
+                ),
         )
     }
 }

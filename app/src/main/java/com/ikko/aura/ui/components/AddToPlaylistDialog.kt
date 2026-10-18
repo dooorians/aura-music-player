@@ -87,7 +87,7 @@ fun AddToPlaylistDialog(
             .fillMaxWidth()
             .fillMaxHeight(0.92f)
             .clip(AuraMenu.SheetShape)
-            .background(AuraMenu.tint().copy(alpha = 0.97f)),
+            .background(AuraMenu.tint()),
       ) {
         Box(Modifier.fillMaxHeight()) {
             Column(Modifier.fillMaxWidth()) {

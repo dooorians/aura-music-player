@@ -1,5 +1,8 @@
 package com.ikko.aura.ui.screens.playlist
 
+import com.ikko.aura.ui.components.heroPageOut
+import com.ikko.aura.ui.components.heroTarget
+import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.components.listTopBlur
 import com.ikko.aura.ui.components.AuraMenu
 import com.ikko.aura.ui.components.DesignMenu
@@ -117,32 +120,48 @@ fun PlaylistScreen(
     )
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val autoKey by playlistDetailViewModel.autoKey.collectAsStateWithLifecycle()
     val ambience = autoKey?.let { cardAmbienceOf(it) }
-    // The "F" page is lit by blurred blobs: the weekly card's own mood when it is one, else the page's default (player-lit).
-    val immersive = com.ikko.aura.ui.components.LocalImmersivePalette.current
-    val immersivePalette = remember(autoKey, ambience) {
-        (com.ikko.aura.ui.components.immersiveOfKey(autoKey) ?: ambience?.let { com.ikko.aura.ui.components.immersiveOfAmbience(it) })
-            ?.let { com.ikko.aura.ui.components.ImmersivePalette(it.base, it.blobs) }
+    val cardArt = ambience?.let { rememberCardArt(it) }
+    val firstTrack = detail?.tracks?.firstOrNull()
+    var theme by remember(ambience, firstTrack?.albumId, firstTrack?.artworkUri) {
+        mutableStateOf<com.ikko.aura.ui.components.AlbumTheme?>(
+            when {
+                cardArt != null && ambience != null -> albumThemeFromBitmap(cardArt, seed = ambience.ordinal * 31 + 7)
+                firstTrack == null && detail != null -> com.ikko.aura.ui.components.AlbumTheme.Neutral
+                else -> null
+            },
+        )
     }
-    DisposableEffect(immersivePalette) {
-        immersive.value = immersivePalette
-        onDispose { if (immersive.value === immersivePalette) immersive.value = null }
+    androidx.compose.runtime.LaunchedEffect(cardArt, ambience, firstTrack?.albumId, firstTrack?.artworkUri, detail != null) {
+        if (theme == null) {
+            theme = when {
+                cardArt != null && ambience != null -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    albumThemeFromBitmap(cardArt, seed = ambience.ordinal * 31 + 7)
+                }
+                firstTrack != null -> com.ikko.aura.ui.components.buildAlbumTheme(context, firstTrack)
+                detail != null -> com.ikko.aura.ui.components.AlbumTheme.Neutral
+                else -> null
+            }
+        }
+    }
+    val pageTheme = LocalPageTheme.current
+    val localPageThemeState = remember(theme) { mutableStateOf(theme) }
+    DisposableEffect(theme) {
+        theme?.let { pageTheme.value = it }
+        onDispose { if (pageTheme.value === theme) pageTheme.value = null }
     }
     val listState = rememberLazyListState()
-    val derivedAccent = remember(immersivePalette) {
-        immersivePalette?.blobs?.firstOrNull()?.let { com.ikko.aura.ui.components.vividAccent(it) ?: it }
-            ?: AuraColors.TextPrimary.copy(alpha = 0.9f)
-    }
-    val accent = rememberUpdatedState(derivedAccent)
+    val accent = rememberUpdatedState(theme?.accent ?: AuraColors.TextPrimary.copy(alpha = 0.9f))
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalPageTheme provides localPageThemeState) {
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(applyStatusBarInset = false) {
             val current = detail
-            if (current == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Playlist introuvable", style = MaterialTheme.typography.bodyLarge, color = AuraColors.TextSecondary)
-                }
+            val resolvedTheme = theme
+            if (current == null || resolvedTheme == null) {
+                Box(modifier = Modifier.fillMaxSize())
                 return@GradientScreenScaffold
             }
             val isFavorites = current.id == FAVORITES_PLAYLIST_ID
@@ -153,10 +172,12 @@ fun PlaylistScreen(
                 if (current.tracks.isEmpty()) count else "$count · $length"
             }
 
+            val groundArrival = com.ikko.aura.ui.components.rememberHeroGround()
             Box(Modifier.fillMaxSize()) {
+            AlbumGround(ground = resolvedTheme.solid, listState = listState, arrival = groundArrival)
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().heroPageOut(),
                 contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
@@ -164,9 +185,23 @@ fun PlaylistScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = com.ikko.aura.ui.components.designUnit() * 40f, end = com.ikko.aura.ui.components.designUnit() * 40f, top = com.ikko.aura.ui.components.designUnit() * 128f, bottom = com.ikko.aura.ui.components.designUnit() * 48f),
+                            .padding(
+                                start = com.ikko.aura.ui.components.designUnit() * 40f,
+                                end = com.ikko.aura.ui.components.designUnit() * 40f,
+                                top = statusTop + HEADER_TOP_BELOW_STATUS,
+                                bottom = com.ikko.aura.ui.components.designUnit() * 48f,
+                            ),
                     ) {
                         Column {
+                            val heroKey = "playlist:$playlistId"
+                            val heroNameStyle = androidx.compose.ui.text.TextStyle(
+                                fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.ExtraBold,
+                                fontSize = com.ikko.aura.ui.components.designSp(80f), lineHeight = com.ikko.aura.ui.components.designSp(88f),
+                            )
+                            val heroMetaStyle = androidx.compose.ui.text.TextStyle(
+                                fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.SemiBold,
+                                fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
+                            )
                             Text(
                                 text = current.name,
                                 fontWeight = FontWeight.ExtraBold,
@@ -176,6 +211,10 @@ fun PlaylistScreen(
                                 color = Color.White,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.heroTarget(
+                                    heroKey,
+                                    text = com.ikko.aura.ui.components.HeroText(current.name, androidx.compose.ui.geometry.Rect.Zero, heroNameStyle.copy(letterSpacing = com.ikko.aura.ui.components.designSp(80f * -0.03f)), Color.White, maxLines = 2),
+                                ),
                             )
                             Text(
                                 text = (if (isFavorites) "Tes favoris" else "Playlist") + " · " + meta,
@@ -183,7 +222,13 @@ fun PlaylistScreen(
                                 fontSize = com.ikko.aura.ui.components.designSp(34f),
                                 lineHeight = com.ikko.aura.ui.components.designSp(42f),
                                 color = Color.White.copy(alpha = 0.78f),
-                                modifier = Modifier.padding(top = com.ikko.aura.ui.components.designUnit() * 6f),
+                                modifier = Modifier
+                                    .padding(top = com.ikko.aura.ui.components.designUnit() * 6f)
+                                    .heroTarget(
+                                        heroKey,
+                                        isSub = true,
+                                        text = com.ikko.aura.ui.components.HeroText((if (isFavorites) "Tes favoris" else "Playlist") + " · " + meta, androidx.compose.ui.geometry.Rect.Zero, heroMetaStyle, Color.White.copy(alpha = 0.78f)),
+                                    ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -196,7 +241,9 @@ fun PlaylistScreen(
                                         .format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH))
                                 } else "Pas encore mis à jour"
                                 Row(
-                                    modifier = Modifier.padding(top = com.ikko.aura.ui.components.designUnit() * 10f),
+                                    modifier = Modifier
+                                        .padding(top = com.ikko.aura.ui.components.designUnit() * 10f)
+                                        .heroRise(0),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 20f),
                                 ) {
@@ -233,20 +280,26 @@ fun PlaylistScreen(
                         }
                         Spacer(Modifier.height(com.ikko.aura.ui.components.designUnit() * 52f))
                         if (current.tracks.isNotEmpty()) Row(
-                            horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 25f),
+                            modifier = Modifier.heroRise(1),
+                            horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 22f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ShuffleButton(onClick = { playerViewModel.playShuffled(current.tracks, context = autoKey) })
                             PlayAllButton(
                                 onClick = { playerViewModel.playQueue(current.tracks, 0, context = autoKey) },
-                                label = "Lire",
+                                label = "Lire tout",
                                 modifier = Modifier.weight(1f),
-                                inkOverride = com.ikko.aura.ui.components.immersiveInkOfKey(autoKey),
+                            )
+                            com.ikko.aura.ui.screens.album.SecondaryPillButton(
+                                onClick = { playerViewModel.playShuffled(current.tracks, context = autoKey) },
+                                label = "Mélanger",
+                                icon = CupertinoIcons.Shuffle,
+                                modifier = Modifier.weight(1f),
                             )
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
+                                val btnColors = com.ikko.aura.ui.screens.album.rememberAlbumButtonColors()
                                 CircleAction(onClick = { menuState.open() }) {
-                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = Color.White, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 44f))
+                                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = btnColors.secondaryContent, modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 42f))
                                 }
                                 // The design's playlist menu (600 px wide, the page's colour at 24 %).
                                 DesignMenu(state = menuState, width = 240.dp, shade = 0.24f) {
@@ -274,11 +327,14 @@ fun PlaylistScreen(
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
                             style = MaterialTheme.typography.bodyLarge,
                             color = AuraColors.TextSecondary,
-                            modifier = Modifier.padding(horizontal = com.ikko.aura.ui.components.designUnit() * 40f, vertical = 24.dp),
+                            modifier = Modifier
+                                .heroRise(2)
+                                .padding(horizontal = com.ikko.aura.ui.components.designUnit() * 40f, vertical = 24.dp),
                         )
                     }
                 }
                 itemsIndexed(current.tracks, key = { _, track -> track.id }) { index, track ->
+                    Box(Modifier.heroRise(2 + index)) {
                     AlbumTrackRow(
                         number = index + 1,
                         track = track,
@@ -315,13 +371,18 @@ fun PlaylistScreen(
                             }
                         },
                     )
+                    }
                 }
                 items(current.unavailable, key = { "gone-${it.id}" }) { entry ->
-                    UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
+                    Box(Modifier.heroRise(9)) {
+                        UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
+                    }
                 }
             }
+            StatusBarScrim(solid = resolvedTheme.solid, listState = listState, arrival = groundArrival)
             }
         }
+    }
     }
 }
 
@@ -358,7 +419,7 @@ private fun RenameField(initialName: String, onConfirm: (String) -> Unit, onCanc
 @Composable
 private fun UnavailableTrackRow(entry: UnavailableEntry, onRemove: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_PADDING, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.width(62.dp))

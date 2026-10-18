@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.runtime.LaunchedEffect
@@ -376,7 +377,10 @@ fun PagedContainer(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .graphicsLayer { translationX = (index - state.p) * state.widthPx }
+                        .graphicsLayer {
+                            translationX = (index - state.p) * state.widthPx
+                            clip = true
+                        }
                         .drawWithContent {
                             if (abs(index - state.p) < 1f) drawContent()
                         },
@@ -426,7 +430,10 @@ suspend fun Animatable<Float, androidx.compose.animation.core.AnimationVector1D>
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect?): Modifier {
+fun Modifier.keepsDragInRow(
+    effect: androidx.compose.foundation.OverscrollEffect?,
+    maxDragY: Float = Float.POSITIVE_INFINITY,
+): Modifier {
     val state = LocalPageMotion.current ?: return this
     val scope = rememberCoroutineScope()
     val connection = remember(state) {
@@ -445,22 +452,21 @@ fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect
             }
         }
     }
-    // A gesture that starts in the row is the row's, from the first touch to the last: the pages never see it, whether the
-    // row can still scroll or is at its end. Decided at the touch (Initial pass, before anything has been consumed), not
-    // from what the row happens to claim afterwards.
-    val guard = Modifier.pointerInput(state) {
+    // A gesture that starts in the row (within maxDragY) is the row's, from the first touch to the last: the pages never
+    // see it, whether the row can still scroll or is at its end. Touches below maxDragY (e.g. on text labels under covers)
+    // are consumed in the Initial pass so the row cannot scroll from them, and handed to the page switcher instead.
+    val guard = Modifier.pointerInput(state, maxDragY) {
         var generation = 0
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                if (event.changes.any { it.pressed }) {
-                    // Any finger down on the row: the gesture is the row's until the row has finished with it.
-                    generation++
-                    state.rowKeepsDrag = true
+                val pressedChange = event.changes.firstOrNull { it.pressed }
+                if (pressedChange != null) {
+                    if (pressedChange.position.y <= maxDragY) {
+                        generation++
+                        state.rowKeepsDrag = true
+                    }
                 } else if (state.rowKeepsDrag) {
-                    // Let go. The row's fling may still be running and, at its end, hands its leftover to the pages (a
-                    // drag that was the row's turned, a moment later, into a page change): the flag is kept until the
-                    // fling is over (see onPostFling), or after a moment if there was no fling.
                     val mine = generation
                     scope.launch {
                         kotlinx.coroutines.delay(RELEASE_GRACE_MS)
@@ -470,9 +476,47 @@ fun Modifier.keepsDragInRow(effect: androidx.compose.foundation.OverscrollEffect
             }
         }
     }
-    return nestedScroll(connection).then(guard).pointerInput(effect) {
+    return nestedScroll(connection).then(guard).pointerInput(effect, state, maxDragY) {
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
+            val down = awaitFirstDown(
+                requireUnconsumed = false,
+                pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial,
+            )
+            if (down.position.y > maxDragY) {
+                state.rowKeepsDrag = false
+                val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
+                tracker.addPointerInputChange(down)
+                down.consume()
+                var total = Offset.Zero
+                var claimed = false
+                while (true) {
+                    val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    tracker.addPointerInputChange(change)
+                    if (!change.pressed) {
+                        change.consume()
+                        break
+                    }
+                    val d = change.positionChange()
+                    change.consume()
+                    total += d
+                    if (state.swipeEnabled) {
+                        if (!claimed && abs(total.x) > viewConfiguration.touchSlop && abs(total.x) > abs(total.y)) {
+                            claimed = true
+                            state.stop()
+                        }
+                        if (claimed && d.x != 0f) {
+                            state.dragBy(-d.x / state.widthPx)
+                        }
+                    }
+                }
+                if (claimed && state.swipeEnabled) {
+                    val vx = tracker.calculateVelocity().x
+                    state.release(scope, -vx / state.widthPx)
+                }
+                return@awaitEachGesture
+            }
+
             var total = Offset.Zero
             var claimed = false
             while (true) {

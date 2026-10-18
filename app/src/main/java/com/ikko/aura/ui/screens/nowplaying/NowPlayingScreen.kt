@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.nowplaying
 
+import com.ikko.aura.ui.components.heroAnchor
 import com.ikko.aura.ui.components.AuroraRenderer
 import com.ikko.aura.ui.components.neutralArt
 import com.ikko.aura.ui.components.AURORA_W
@@ -255,6 +256,64 @@ fun NowPlayingScreen(
     val closeScope = androidx.compose.runtime.rememberCoroutineScope()
     val composeView = androidx.compose.ui.platform.LocalView.current
     val albumContext = androidx.compose.ui.platform.LocalContext.current
+    val heroState = com.ikko.aura.ui.components.LocalHero.current
+    val heroTitleAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+    val heroSubAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+    // Written exactly as the player writes them (shadows included), so that the copy leaves without a seam.
+    val heroTitleStyle = MaterialTheme.typography.titleLarge.copy(
+        fontWeight = FontWeight.ExtraBold, fontSize = designSp(60f), lineHeight = designSp(68f),
+        letterSpacing = designSp(60f * -0.02f),
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.35f), Offset(0f, 4f), 24f),
+    )
+    val heroSubStyle = MaterialTheme.typography.bodyLarge.copy(
+        fontWeight = FontWeight.Bold, fontSize = designSp(38f), lineHeight = designSp(46f),
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.3f), Offset(0f, 3f), 16f),
+    )
+    val groundPicture = remember { androidx.compose.runtime.mutableStateOf<GroundPicture?>(null) }
+    val heroLyricAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+    // Each time the player comes back from a page it opened, the parts that keep changing while it is away (the line
+    // being sung, the progress, the toolbar's states) are built again: kept as they were, they came back blank for a third
+    // of a second, until their next tick redrew them.
+    var backEpoch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    LaunchedEffect(leavingSideways) { if (!leavingSideways) backEpoch++ }
+    val heroLyricStyle = MaterialTheme.typography.titleMedium
+    val heroAccent = rememberPlayerAccent()
+    // The ground's cover is a picture of the whole screen; the copy starts as that very picture.
+    fun groundCoverRect(): androidx.compose.ui.geometry.Rect {
+        val dm = albumContext.resources.displayMetrics
+        val top = GROUND_COVER_TOP * (dm.widthPixels / 1080f)
+        return androidx.compose.ui.geometry.Rect(0f, top, dm.widthPixels.toFloat(), top + dm.widthPixels)
+    }
+    fun startAlbumTrip(playing: Track, albumId: Long): Boolean = heroState.beginFromPlayer(
+        key = "album:$albumId",
+        uri = playing.artworkUri,
+        cacheKey = playing.albumId.toString(),
+        cover = groundCoverRect(),
+        picture = groundPicture.value?.baked,
+        title = heroTitleAnchor to com.ikko.aura.ui.components.HeroText(
+            playing.title, androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2,
+        ),
+        sub = heroSubAnchor to com.ikko.aura.ui.components.HeroText(
+            playing.artist, androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, heroAccent.copy(alpha = 0.8f),
+        ),
+    )
+    // The artist's name rises to the page's head; the cover slips into the card of this album among the artist's (or
+    // fades towards the name if it is not there); the title goes under it as its caption.
+    fun startArtistTrip(playing: Track, artistId: Long): Boolean = heroState.beginFromPlayer(
+        key = "artist:$artistId",
+        uri = playing.artworkUri,
+        cacheKey = playing.albumId.toString(),
+        cover = groundCoverRect(),
+        picture = groundPicture.value?.baked,
+        title = heroSubAnchor to com.ikko.aura.ui.components.HeroText(
+            playing.artist, androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, heroAccent.copy(alpha = 0.8f),
+        ),
+        sub = heroTitleAnchor to com.ikko.aura.ui.components.HeroText(
+            playing.title, androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2,
+        ),
+        coverAlbumId = playing.albumId,
+        coverAlbumTitle = playing.album,
+    )
     val positionMsState = viewModel.positionMs.collectAsStateWithLifecycle()
     val durationMsState = viewModel.durationMs.collectAsStateWithLifecycle()
 
@@ -451,7 +510,6 @@ fun NowPlayingScreen(
     val playerTint = remember(uiState.albumTheme.solid) {
         androidx.compose.ui.graphics.lerp(uiState.albumTheme.solid, Color.Black, 0.5f).copy(alpha = 0.34f)
     }
-    val groundPicture = remember { androidx.compose.runtime.mutableStateOf<GroundPicture?>(null) }
     CompositionLocalProvider(LocalGlassSettle provides settle, LocalPlayerGlassTint provides playerTint, LocalGroundPicture provides groundPicture) {
     Box(
         Modifier
@@ -625,7 +683,9 @@ fun NowPlayingScreen(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = designUnit() * 40f)
-                    .offset(y = designUnit() * 110f - statusTop - 10.dp),
+                    .offset(y = designUnit() * 110f - statusTop - 10.dp)
+                    // The player's own controls go while the cover, the title and the artist travel, and come back after.
+                    .graphicsLayer { alpha = heroState.playerUiAlpha(); translationY = heroState.playerUiRise() * 12.dp.toPx() },
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 PlayerRoundButton(
@@ -644,6 +704,7 @@ fun NowPlayingScreen(
             }
 
             Box(Modifier.weight(1f).padding(horizontal = SCREEN_PADDING).offset(y = TRANSPORT_EXTRA), contentAlignment = Alignment.BottomStart) {
+                androidx.compose.runtime.key(backEpoch) {
                 HeroPanel(
                     currentTrack = uiState.currentTrack,
                     queueIndex = uiState.queueIndex,
@@ -653,37 +714,56 @@ fun NowPlayingScreen(
                     onLikeToggle = viewModel::toggleLike,
                     automixEnabled = uiState.automixEnabled,
                     onAutomixToggle = viewModel::toggleAutomix,
-                    onOpenAlbum = { albumId ->
+                    onOpenAlbum = HeroPanelOpenAlbum@{ albumId ->
                         val playing = uiState.currentTrack
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
                                 // A streamed song's album is the source's: the one it came through, or else the one found by its name.
+                                // Once it is known, the cover, title and artist travel to it as for an album of the device.
                                 albumScope.launch {
                                     val route = viewModel.streamedAlbumRouteOf(playing)
-                                    if (route != null) onNavigateFromPlayerState.value(route)
-                                    else android.widget.Toast.makeText(albumContext, "Album introuvable", android.widget.Toast.LENGTH_SHORT).show()
+                                    if (route != null) {
+                                        if (sheetCard.cardTop <= 10f) startAlbumTrip(playing, playing.albumId)
+                                        onNavigateFromPlayerState.value(route)
+                                    } else {
+                                        android.widget.Toast.makeText(albumContext, "Album introuvable", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             } else {
+                                // The cover, title and artist travel to the album page (and back).
+                                if (playing != null && !startAlbumTrip(playing, albumId)) return@HeroPanelOpenAlbum
                                 onNavigateFromPlayerState.value(AuraDestination.AlbumPattern.route(albumId.toString()))
                             }
                         }
                     },
-                    onOpenArtist = { artistId ->
+                    heroTitleAnchor = heroTitleAnchor,
+                    heroSubAnchor = heroSubAnchor,
+                    heroUiAlpha = { heroState.playerUiAlpha() },
+                    onOpenArtist = HeroPanelOpenArtist@{ artistId ->
                         val playing = uiState.currentTrack
                         if (sheetCard.cardTop <= 10f) {
                             if (playing != null && YtmLibrary.isStreamed(playing)) {
+                                if (!startArtistTrip(playing, artistId)) return@HeroPanelOpenArtist
                                 onNavigateFromPlayerState.value(playing.streamedArtistRoute())
                             } else {
+                                if (playing != null && !startArtistTrip(playing, artistId)) return@HeroPanelOpenArtist
                                 onNavigateFromPlayerState.value(AuraDestination.ArtistPattern.route(artistId.toString()))
                             }
                         }
                     },
                 )
+                }
             }
 
             // Above the playback row in the stacking order: where their touch areas overlap — the transport reaches up under
             // the bar — the bar wins, so a touch on the seek bar can never press pause, next or previous.
-            Column(Modifier.zIndex(1f).offset(y = TRANSPORT_EXTRA)) {
+            androidx.compose.runtime.key(backEpoch) {
+            Column(
+                Modifier
+                    .zIndex(1f)
+                    .offset(y = TRANSPORT_EXTRA)
+                    .graphicsLayer { alpha = heroState.playerUiAlpha(); translationY = heroState.playerUiRise() * 12.dp.toPx() },
+            ) {
                 // Nudged down into the bar's own touch margin, so the line reads as sitting on it.
                 Box(Modifier.padding(horizontal = SCREEN_PADDING).offset(y = 6.dp)) {
                     LyricStrip(
@@ -693,7 +773,31 @@ fun NowPlayingScreen(
                         playerActive = active && !leavingSideways,
                         pauseAnimation = { !activeState.value || sheetCard.frozen || leavingSidewaysState.value },
                         // The line being sung is the way into the lyrics.
-                        onClick = { if (sheetCard.cardTop <= 10f) onNavigateFromPlayerState.value(AuraDestination.Lyrics.route) },
+                        heroAnchor = heroLyricAnchor,
+                        onClick = LyricStripClick@{
+                            if (sheetCard.cardTop <= 10f) {
+                                // The cover goes out of focus and clears; the line being sung travels to its place among the
+                                // lyrics, which come in around it.
+                                val playing = uiState.currentTrack
+                                if (playing != null && !heroState.beginFromPlayer(
+                                        key = "lyrics",
+                                        uri = playing.artworkUri,
+                                        cacheKey = playing.albumId.toString(),
+                                        cover = groundCoverRect(),
+                                        picture = groundPicture.value?.baked,
+                                        title = heroLyricAnchor.label?.let { line ->
+                                            heroLyricAnchor to com.ikko.aura.ui.components.HeroText(
+                                                line, androidx.compose.ui.geometry.Rect.Zero, heroLyricStyle, heroAccent,
+                                                align = TextAlign.Center,
+                                            )
+                                        },
+                                        sub = null,
+                                        lyrics = true,
+                                    )
+                                ) return@LyricStripClick
+                                onNavigateFromPlayerState.value(AuraDestination.Lyrics.route)
+                            }
+                        },
                     )
                 }
                 WavyProgressBar(
@@ -715,10 +819,16 @@ fun NowPlayingScreen(
                     edgeInset = SCREEN_PADDING,
                 )
             }
+            }
 
             // 8 dp less on the sides: the shuffle and repeat glyphs sit ~13 dp inside their 48 dp touch areas, so they then
             // line up with the page margin.
-            Box(Modifier.padding(horizontal = designUnit() * 40f), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .padding(horizontal = designUnit() * 40f)
+                    .graphicsLayer { alpha = heroState.playerUiAlpha(); translationY = heroState.playerUiRise() * 12.dp.toPx() },
+                contentAlignment = Alignment.Center,
+            ) {
                 TransportRow(
                     isPlaying = uiState.isPlaying,
                     shuffleEnabled = uiState.shuffleEnabled,
@@ -757,6 +867,7 @@ private fun LyricStrip(
     playerActive: Boolean,
     pauseAnimation: () -> Boolean,
     onClick: () -> Unit,
+    heroAnchor: com.ikko.aura.ui.components.HeroAnchor? = null,
 ) {
     val lines = (lyricsState as? LyricsUiState.Available)?.lines
     val readPos = androidx.compose.runtime.rememberUpdatedState(livePosition)
@@ -844,7 +955,14 @@ private fun LyricStrip(
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     plain = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (heroAnchor != null) {
+                                heroAnchor.label = shown.text
+                                Modifier.heroAnchor("lyrics", heroAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE, fromPlayer = true)
+                            } else Modifier,
+                        ),
                 )
             }
         }
@@ -911,10 +1029,23 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color) {
     // The two round buttons at the top take their blurred backdrop from the picture itself (see PlayerRoundButton).
     val holder = LocalGroundPicture.current
     androidx.compose.runtime.SideEffect { if (holder != null && holder.value !== current) holder.value = current }
-    Box(Modifier.fillMaxSize().then(if (current == null) Modifier.background(solid) else Modifier)) {
-        current?.let { GroundLayer(it) }
-        outgoing?.let { old ->
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) { GroundLayer(old) }
+    // A trip from the player that is still out (on a page it opened) goes back as the player's ground of now.
+    val heroForGround = com.ikko.aura.ui.components.LocalHero.current
+    androidx.compose.runtime.SideEffect { heroForGround.updatePlayerPicture(current?.baked, track?.artworkUri, track?.albumId?.toString()) }
+    // During a trip from the player the ground's cover is the copy that travels: the ground gives way to the record's
+    // flat colour (the album page's own ground) while it is away, and is back as it lands.
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    Box(
+        Modifier
+            .fillMaxSize()
+            .then(if (current == null) Modifier.background(solid) else Modifier)
+            .drawBehind { if (hero.playerGroundAlpha() < 1f) drawRect(solid) },
+    ) {
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = hero.playerGroundAlpha() }) {
+            current?.let { GroundLayer(it) }
+            outgoing?.let { old ->
+                Box(Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) { GroundLayer(old) }
+            }
         }
     }
 }
@@ -1098,6 +1229,9 @@ private fun HeroPanel(
     queueIndex: Int,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
+    heroTitleAnchor: com.ikko.aura.ui.components.HeroAnchor,
+    heroSubAnchor: com.ikko.aura.ui.components.HeroAnchor,
+    heroUiAlpha: () -> Float,
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
     isLiked: Boolean,
@@ -1132,7 +1266,9 @@ private fun HeroPanel(
             ) { (_, shown) ->
                 // The names at the left, the toolbar (Automix, favourite) at the right, its top at the title's.
                 Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(designUnit() * 25f)) {
-                    Column(Modifier.weight(1f)) {
+                    // On the way to the lyrics the names step aside with the controls (the line being sung is what travels).
+                    val namesHero = com.ikko.aura.ui.components.LocalHero.current
+                    Column(Modifier.weight(1f).graphicsLayer { if (namesHero.lyricsMode) alpha = heroUiAlpha() }) {
                         // Three destinations from one block: the title opens the album it is on, the artist opens the artist.
                         // Each is the thing the words already name, so nothing needs a chevron to say so.
                         Text(
@@ -1150,6 +1286,13 @@ private fun HeroPanel(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
+                                .then(
+                                    if (shown != null) {
+                                        Modifier
+                                            .heroAnchor("album:${shown.albumId}", heroTitleAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE, text = shown.title, fromPlayer = true)
+                                            .heroAnchor("artist:${shown.artistId}", heroTitleAnchor, com.ikko.aura.ui.components.HeroState.ROLE_SUB, text = shown.title, fromPlayer = true)
+                                    } else Modifier,
+                                )
                                 .clip(RoundedCornerShape(6.dp))
                                 .then(
                                     if (shown == null) {
@@ -1171,6 +1314,13 @@ private fun HeroPanel(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
+                                .then(
+                                    if (shown != null) {
+                                        Modifier
+                                            .heroAnchor("album:${shown.albumId}", heroSubAnchor, com.ikko.aura.ui.components.HeroState.ROLE_SUB, text = shown.artist, fromPlayer = true)
+                                            .heroAnchor("artist:${shown.artistId}", heroSubAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE, text = shown.artist, fromPlayer = true)
+                                    } else Modifier,
+                                )
                                 .padding(top = designUnit() * 6f)
                                 .clip(RoundedCornerShape(6.dp))
                                 .then(
@@ -1189,7 +1339,9 @@ private fun HeroPanel(
                         onLikeToggle = onLikeToggle,
                         isFavorite = isFavorite,
                         onFavoriteToggle = onFavoriteToggle,
-                        modifier = Modifier.offset(y = designUnit() * -8f),
+                        modifier = Modifier
+                            .offset(y = designUnit() * -8f)
+                            .graphicsLayer { alpha = heroUiAlpha() },
                     )
                 }
             }
@@ -1337,8 +1489,8 @@ private fun RowScope.TransportTile(
                 onClick = onClick,
             ),
     ) {
-        if (framed) {
-            // The button the glyph sits in: 136 design px across, centred on the glyph.
+        if (framed && false) {
+            // No glass any more (kept for the record): the button the glyph sits in: 136 design px across, centred on the glyph.
             Box(
                 Modifier
                     .padding(bottom = glyphCenter - width / 2)
@@ -1478,68 +1630,22 @@ private fun PlayerRoundButton(
     left: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // No glass: the glyph alone, with a soft drop-shadow, in a 112 design px touch area.
+    @Suppress("UNUSED_PARAMETER") val unusedSide = left
     val u = designUnit()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val metrics = androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics
-    val picture = LocalGroundPicture.current?.value
-    val diameter = u * 112f
-    val sizePx = with(density) { diameter.roundToPx() }
-    val unitPx = metrics.widthPixels / 1080f
-    // Where the button sits on the screen, as drawn: 40 px from its edge, 110 from the top.
-    val originX = if (left) (40f * unitPx).toInt() else metrics.widthPixels - (40f * unitPx).toInt() - sizePx
-    val originY = (110f * unitPx).toInt()
-    // Blur only the local patch around the button (sizePx + 3*sigma margin on each side) rather than a full 1080x1240 FBO.
-    val padPx = (78f * unitPx).toInt()
-    val patchSize = sizePx + 2 * padPx
-    val blur = remember(unitPx) {
-        val blurEffect = android.graphics.RenderEffect.createBlurEffect(26f * unitPx, 26f * unitPx, android.graphics.Shader.TileMode.CLAMP)
-        val saturate = android.graphics.RenderEffect.createColorFilterEffect(
-            android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(1.6f) }),
-            blurEffect,
-        )
-        saturate.asComposeRenderEffect()
-    }
-    val tint = LocalPlayerGlassTint.current
-    val rimPx = with(density) { (u * 1.5f).toPx() }
-    val linePx = with(density) { (u * 2f).toPx() }
     Box(
         modifier = modifier
-            .size(diameter)
-            .androidx_shadow(u * 10f, CircleShape)
+            .size(u * 112f)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (picture != null) {
-            Box(
-                Modifier
-                    .layout { measurable, _ ->
-                        val placeable = measurable.measure(
-                            androidx.compose.ui.unit.Constraints.fixed(patchSize, patchSize),
-                        )
-                        layout(sizePx, sizePx) { placeable.place(-padPx, -padPx) }
-                    }
-                    .graphicsLayer { renderEffect = blur }
-                    .drawBehind {
-                        drawImage(
-                            picture.baked,
-                            dstOffset = androidx.compose.ui.unit.IntOffset(-(originX - padPx), -(originY - padPx)),
-                            dstSize = androidx.compose.ui.unit.IntSize(metrics.widthPixels, metrics.heightPixels),
-                        )
-                    },
-            )
-        }
-        Box(
-            Modifier
-                .matchParentSize()
-                .background(tint)
-                .background(FrostedWhiteGradient)
-                .drawWithContent {
-                    drawContent()
-                    drawGlassRim(CircleShape, rimPx, linePx)
-                },
+        com.ikko.aura.ui.components.ShadowedGlyph(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            size = u * 52f,
+            tint = rememberPlayerAccent(),
         )
-        Icon(icon, contentDescription = contentDescription, tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
     }
 }
 

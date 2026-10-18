@@ -152,7 +152,6 @@ fun Modifier.glassMenuAnchor(state: GlassMenuState): Modifier = this
         val bounds = it.boundsInWindow()
         if (bounds != state.anchor) state.anchor = bounds
     }
-    .graphicsLayer { alpha = state.buttonAlpha }
 
 /**
  * What the rows are cut to while the glass travels: the glass's own outline, expressed in the rows' box. That box is

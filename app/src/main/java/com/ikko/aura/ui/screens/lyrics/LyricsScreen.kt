@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.lyrics
 
+import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.rememberPlayerAccent
 import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.animation.core.Animatable
@@ -242,13 +243,42 @@ private fun LyricsPanel(
                     onClick = { onSeek(line.timeMs) },
                 )
             } else {
+                val lineHero = com.ikko.aura.ui.components.LocalHero.current
+                val unitPx = with(androidx.compose.ui.platform.LocalDensity.current) { com.ikko.aura.ui.components.designUnit().toPx() }
+                // Coming from the player, the line being sung is the one that travels (it is hidden until it lands); the
+                // others come in around it: the nearer first, 70 ms per line after 380, rising 28 design px.
+                val arrival = remember(lines) {
+                    val fromTrip = lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Opening && !isActive
+                    androidx.compose.animation.core.Animatable(if (fromTrip) 0f else 1f)
+                }
+                LaunchedEffect(lines, index) {
+                    if (arrival.value < 1f) {
+                        val d = abs(index - focus.value).toInt().coerceIn(1, 8)
+                        kotlinx.coroutines.delay(380L + (d - 1) * 70L)
+                        arrival.animateTo(1f, androidx.compose.animation.core.tween(420, easing = androidx.compose.animation.core.CubicBezierEasing(0.16f, 1f, 0.3f, 1f)))
+                    }
+                }
+                val heroTarget = if (isActive) {
+                    Modifier.heroTarget(
+                        "lyrics",
+                        text = com.ikko.aura.ui.components.HeroText(
+                            line.text, androidx.compose.ui.geometry.Rect.Zero, activeStyle, rememberPlayerAccent(), maxLines = Int.MAX_VALUE,
+                        ),
+                    )
+                } else Modifier
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 7.dp)
                         .graphicsLayer {
+                            // On the way back they leave together in 140 ms, a little lower.
+                            val out = if (lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) lineHero.contentOut.value else 0f
+                            translationY = (1f - arrival.value) * 28f * unitPx + out * 16f * unitPx
+                        }
+                        .graphicsLayer {
                             val distance = abs(index - focus.value)
-                            alpha = alphaAt(distance)
+                            val out = if (lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) lineHero.contentOut.value else 0f
+                            alpha = alphaAt(distance) * arrival.value * (1f - out)
                             val s = scaleAt(distance)
                             scaleX = s
                             scaleY = s
@@ -264,7 +294,7 @@ private fun LyricsPanel(
                             litColor = rememberPlayerAccent(),
                             dimColor = rememberPlayerAccent().copy(alpha = 0.40f),
                             textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(heroTarget),
                         )
                     } else {
                         Text(
@@ -272,7 +302,7 @@ private fun LyricsPanel(
                             style = if (isActive) activeStyle else inactiveStyle,
                             color = rememberPlayerAccent(),
                             textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(heroTarget),
                         )
                     }
 

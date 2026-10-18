@@ -63,7 +63,7 @@ fun QueueScreen(
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
     GradientScreenScaffold {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -78,7 +78,7 @@ fun QueueScreen(
                     onClick = playerViewModel::clearQueue,
                     tone = ButtonTone.Neutral,
                     minHeight = 36.dp,
-                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
                 ) {
                     Text(text = "Vider", style = MaterialTheme.typography.labelLarge)
                 }

@@ -43,12 +43,34 @@ data class ForYouCard(
 )
 
 @Immutable
+data class UserPlaylistCard(
+    val id: Long,
+    val name: String,
+    val trackCount: Int,
+    val artworkUris: List<android.net.Uri> = emptyList(),
+)
+
+@Immutable
 data class ForYouUiState(
     /** False until the library has been read: nothing is drawn before that, rather than an empty Home. */
     val loaded: Boolean = false,
     val cards: List<ForYouCard> = emptyList(),
     /** The albums played lately, most recent first. */
     val recent: List<Album> = emptyList(),
+    /** Onglet "Reprendre": derniers albums/titres écoutés. */
+    val resumeAlbums: List<Album> = emptyList(),
+    /** When each album was last played (epoch ms), for the "Il y a 2 h" line of the recents. */
+    val lastPlayedAt: Map<Long, Long> = emptyMap(),
+    /** Onglet "Favoris": albums favoris + albums des titres favoris + albums les plus écoutés. */
+    val favoriteAlbums: List<Album> = emptyList(),
+    /** Onglet "Nouveautés": albums les plus récents. */
+    val newAlbums: List<Album> = emptyList(),
+    /** Onglet "Découvertes": albums à redécouvrir. */
+    val discoveryAlbums: List<Album> = emptyList(),
+    /** Titres "En boucle" (derniers titres écoutés / favoris / plus écoutés). */
+    val quickTracks: List<Track> = emptyList(),
+    /** Playlists créées par l'utilisateur. */
+    val userPlaylists: List<UserPlaylistCard> = emptyList(),
     /** Every card there is, in the listener's order, hidden ones included: what the organiser shows. */
     val layout: List<CardSlot> = emptyList(),
 )
@@ -85,6 +107,16 @@ class HomeWidgetsViewModel @Inject constructor(
 
     val profileImageUri: StateFlow<String?> = settingsStore.profileImageUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Crée une nouvelle playlist utilisateur et renvoie son identifiant. */
+    fun createUserPlaylist(name: String, onCreated: (Long) -> Unit = {}) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            val id = playlistRepository.createPlaylist(trimmed)
+            onCreated(id)
+        }
+    }
 
     /** Moves a card one place up (-1) or down (+1) in the organiser. */
     fun moveCard(id: String, delta: Int) {
@@ -191,10 +223,74 @@ class HomeWidgetsViewModel @Inject constructor(
                 }
                 if (content.isEmpty) null else ForYouCard(spec.id, spec.ambience, spec.heading, spec.kicker, artistsOf(content.tracks), content)
         }
+        val recentAlbums = recentAlbumIds.mapNotNull { albumsById[it] }.take(MAX_RECENT)
+        val resumeAlbums = (recentAlbums + recentTrackIds.mapNotNull { byId[it]?.albumId?.let(albumsById::get) })
+            .distinctBy { it.id }
+            .ifEmpty { allAlbums }
+            .take(MAX_RECENT)
+
+        val favTrackAlbumIds = playlists.firstOrNull { it.isFavorites }?.trackIds.orEmpty().mapNotNull { byId[it]?.albumId }
+        val topPlayedAlbumIds = plays.sortedByDescending { it.playCount }.map { it.albumId }
+        val favoriteAlbums = (
+            allAlbums.filter { it.id in favoriteIds } +
+                favTrackAlbumIds.mapNotNull { albumsById[it] } +
+                topPlayedAlbumIds.mapNotNull { albumsById[it] }
+            )
+            .distinctBy { it.id }
+            .ifEmpty { allAlbums }
+            .take(MAX_RECENT)
+
+        val newAlbums = (
+            allTracks.filter { it.year > 0 }
+                .sortedWith(compareByDescending<Track> { it.year }.thenBy { HomeWidgetRules.dailyRank(it.id, data.day) })
+                .mapNotNull { albumsById[it.albumId] } +
+                allTracks.sortedBy { HomeWidgetRules.dailyRank(it.id, data.day) }.mapNotNull { albumsById[it.albumId] }
+            )
+            .distinctBy { it.id }
+            .ifEmpty { allAlbums }
+            .take(MAX_RECENT)
+
+        val discoveryAlbums = (
+            HomeWidgetResolver.resolve(HomeWidget("disc", WidgetKind.REDISCOVER), data).tracks
+                .mapNotNull { albumsById[it.albumId] } +
+                allAlbums.filter { it.id !in data.recentAlbumIds }
+                    .sortedBy { HomeWidgetRules.dailyRank(it.id.toString(), data.day) }
+            )
+            .distinctBy { it.id }
+            .ifEmpty { allAlbums }
+            .take(MAX_RECENT)
+
+        val autoIds = playlistRepository.autoPlaylistIds()
+        val autoHeadings = CARDS.map { it.heading }.toSet() + setOf("Découvertes", "Tes préférés")
+        val allTracksAndKeptById = (allTracks + kept).associateBy { it.id }
+        val userPlaylists = playlists
+            .filter { !it.isFavorites && it.id !in autoIds && it.name !in autoHeadings }
+            .map { p ->
+                UserPlaylistCard(
+                    id = p.id,
+                    name = p.name,
+                    trackCount = p.trackCount,
+                    artworkUris = p.trackIds.mapNotNull { allTracksAndKeptById[it]?.artworkUri }.distinct().take(4),
+                )
+            }
+
+        val favTracks = playlists.firstOrNull { it.isFavorites }?.trackIds.orEmpty().mapNotNull { byId[it] }
+        val topTracks = HomeWidgetResolver.resolve(HomeWidget("top", WidgetKind.TOP_PLAYED), data).tracks
+        val quickTracks = (data.recentTracks + favTracks + topTracks + allTracks)
+            .distinctBy { it.id }
+            .take(MAX_RECENT)
+
         ForYouUiState(
             loaded = true,
             cards = built.filter { it.id !in hidden },
-            recent = recentAlbumIds.mapNotNull { albumsById[it] }.take(MAX_RECENT),
+            recent = recentAlbums,
+            resumeAlbums = resumeAlbums,
+            lastPlayedAt = plays.associate { it.albumId to it.lastPlayedAtMs },
+            favoriteAlbums = favoriteAlbums,
+            newAlbums = newAlbums,
+            discoveryAlbums = discoveryAlbums,
+            quickTracks = quickTracks,
+            userPlaylists = userPlaylists,
             layout = built.map { CardSlot(it.id, it.heading, it.id in hidden) },
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())

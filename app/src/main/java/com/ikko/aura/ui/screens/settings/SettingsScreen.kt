@@ -386,7 +386,7 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { profilePicker.launch(arrayOf("image/*")) }
-                        .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
+                        .padding(horizontal = PAGE_MARGIN, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ProfileAvatar(
@@ -427,7 +427,7 @@ fun SettingsScreen(
 }
 
 /** The margin and title height of the other pages (see HomeScreen). */
-private val PAGE_MARGIN = 12.dp
+private val PAGE_MARGIN = 16.dp
 private val PAGE_HEADER_HEIGHT = 56.dp
 
 // Rows set like the lists on the other pages: the title as a track's (white, bold), the line under it as its
@@ -448,7 +448,7 @@ private fun SectionLabel(text: String) {
         text = text.uppercase(),
         style = LibraryTypography.PageCount,
         alpha = 0.66f,
-        modifier = Modifier.padding(start = PAGE_MARGIN, end = PAGE_MARGIN, top = 14.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = PAGE_MARGIN, end = PAGE_MARGIN, top = 28.dp, bottom = 6.dp),
     )
 }
 
@@ -463,11 +463,11 @@ private fun SettingsSwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 18.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(end = 20.dp)) {
             RowTitle(title)
             RowSubtitle(subtitle)
         }
@@ -486,11 +486,11 @@ private fun SettingsActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = PAGE_MARGIN, vertical = 12.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 18.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(end = 20.dp)) {
             RowTitle(title)
             RowSubtitle(subtitle)
         }
@@ -503,7 +503,7 @@ private fun SettingsInfoRow(title: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = PAGE_MARGIN, vertical = 10.dp),
+            .padding(horizontal = PAGE_MARGIN, vertical = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         RowTitle(title)

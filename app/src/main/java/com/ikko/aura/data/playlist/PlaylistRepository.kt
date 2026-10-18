@@ -15,7 +15,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 
 @Immutable
-data class PlaylistSummary(val id: Long, val name: String, val trackCount: Int) {
+data class PlaylistSummary(
+    val id: Long,
+    val name: String,
+    val trackCount: Int,
+    val trackIds: List<String> = emptyList(),
+) {
     /** The Favoris playlist: pinned first, and neither renamed nor deleted. */
     val isFavorites: Boolean get() = id == FAVORITES_PLAYLIST_ID
 }
@@ -88,7 +93,12 @@ class PlaylistRepository @Inject constructor(
 
     private fun countFlow(entity: PlaylistEntity) =
         playlistDao.observeTracksForPlaylist(entity.id).map { tracks ->
-            PlaylistSummary(entity.id, entity.name, tracks.size)
+            PlaylistSummary(
+                id = entity.id,
+                name = entity.name,
+                trackCount = tracks.size,
+                trackIds = tracks.sortedBy { it.position }.map { it.trackId },
+            )
         }
 
     fun playlistDetail(playlistId: Long): Flow<PlaylistDetail?> = combine(
@@ -160,9 +170,13 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
+    /** The IDs of all auto-managed playlists. */
+    suspend fun autoPlaylistIds(): Set<Long> =
+        AUTO_KEYS.mapNotNull { autoPlaylistId(it) }.toSet()
+
     /** Every entry of every playlist but Favoris and the ones Aura keeps: what the listener put somewhere on purpose. */
     suspend fun userPlaylistEntries(): List<PlaylistTrackEntity> {
-        val auto = AUTO_KEYS.mapNotNull { autoPlaylistId(it) }.toSet()
+        val auto = autoPlaylistIds()
         return playlistDao.allEntries().filter { it.playlistId != FAVORITES_PLAYLIST_ID && it.playlistId !in auto }
     }
 

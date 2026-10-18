@@ -465,6 +465,10 @@ fun AlbumArt(
     // Items that share one cover (every track on an album) should share one cache entry, rather
     // than each decoding the same embedded artwork out of its own audio file.
     cacheKey: String? = null,
+    // A carousel flung past its cards composes and drops them within a few frames: a decode that is cancelled with
+    // its card is thrown away, and the card is found empty on the way back. With this on, the decode finishes into
+    // the cache whatever happens to the card. Off for dense grids, where wasted decodes would cost the scroll.
+    keepLoading: Boolean = false,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -489,7 +493,13 @@ fun AlbumArt(
 
     LaunchedEffect(effectiveKey, targetSizePx) {
         if (bitmap == null) {
-            bitmap = AlbumArtCache.load(context, uri, targetSizePx, effectiveKey, shrink = true)
+            bitmap = if (keepLoading) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    AlbumArtCache.load(context, uri, targetSizePx, effectiveKey, shrink = true)
+                }
+            } else {
+                AlbumArtCache.load(context, uri, targetSizePx, effectiveKey, shrink = true)
+            }
             settled = true
         }
         if (bitmap != null) reveal.animateTo(1f, tween(REVEAL_MS))

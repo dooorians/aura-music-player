@@ -49,4 +49,8 @@ object CupertinoIcons {
     val Queue: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_list_bullet)
     val Headphones: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_headphones)
     val Sort: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_arrow_up_arrow_down)
+    val Gear: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_gear)
+    val ClockFilled: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_clock_fill)
+    val ArrowDownCircleFilled: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_arrow_down_circle_fill)
+    val PlaylistsStackFilled: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_cu_playlists_stack_fill)
 }
