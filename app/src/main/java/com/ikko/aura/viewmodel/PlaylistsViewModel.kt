@@ -24,10 +24,18 @@ class PlaylistsViewModel @Inject constructor(
     val playlists: StateFlow<List<PlaylistSummary>> = playlistRepository.playlists
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun createPlaylist(name: String) {
+    val customArtworks: StateFlow<Map<Long, String>> = playlistRepository.playlistCustomArtworks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun createPlaylist(name: String, customArtworkUri: String? = null) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
-        viewModelScope.launch { playlistRepository.createPlaylist(trimmed) }
+        viewModelScope.launch {
+            val id = playlistRepository.createPlaylist(trimmed)
+            if (customArtworkUri != null) {
+                playlistRepository.setPlaylistCustomArtwork(id, customArtworkUri)
+            }
+        }
     }
 
     fun addTrack(playlistId: Long, trackId: String) {

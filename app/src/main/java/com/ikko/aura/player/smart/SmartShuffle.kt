@@ -42,6 +42,44 @@ object SmartShuffle {
     /** What an unmeasured pairing scores: neither preferred nor penalised. */
     private const val NEUTRAL = 0.5
 
+    private class Cue(
+        val bpm: Double,
+        val key: String,
+        val headEnergy: Double?,
+        val tailEnergy: Double?,
+    )
+
+    private fun cueOf(a: TrackAnalysis?): Cue? {
+        if (a == null || !a.isUsable) return null
+        return Cue(
+            bpm = a.bpm,
+            key = trustedKey(a),
+            headEnergy = a.energyCurve.headMean(),
+            tailEnergy = a.energyCurve.tailMean(),
+        )
+    }
+
+    private fun compatibility(current: Cue?, next: Cue?): Double {
+        if (current == null || next == null) return NEUTRAL
+        val kScore = if (current.key.isBlank() || next.key.isBlank()) {
+            NEUTRAL
+        } else if (harmonicallyCompatible(current.key, next.key)) {
+            1.0
+        } else {
+            val distance = keyDistance(current.key, next.key)
+            if (distance == null) NEUTRAL else (1.0 - distance / 7.0).coerceIn(0.0, 1.0)
+        }
+        val eScore = run {
+            val leaving = current.tailEnergy ?: return@run NEUTRAL
+            val arriving = next.headEnergy ?: return@run NEUTRAL
+            val louder = maxOf(leaving, arriving)
+            if (louder <= 0.0) NEUTRAL else (1.0 - abs(leaving - arriving) / louder).coerceIn(0.0, 1.0)
+        }
+        return TEMPO_WEIGHT * tempoScore(current.bpm, next.bpm) +
+            KEY_WEIGHT * kScore +
+            ENERGY_WEIGHT * eScore
+    }
+
     fun order(
         tracks: List<Track>,
         analysisOf: (Track) -> TrackAnalysis?,
@@ -49,31 +87,67 @@ object SmartShuffle {
     ): List<Track> {
         if (tracks.size <= 2) return tracks.shuffled(random)
 
-        val remaining = tracks.toMutableList()
-        val analyses = HashMap<String, TrackAnalysis?>(tracks.size)
-        fun analysis(track: Track) = analyses.getOrPut(track.id) { analysisOf(track) }
+        val cues = HashMap<String, Cue>(tracks.size)
+        for (t in tracks) {
+            cueOf(analysisOf(t))?.let { cues[t.id] = it }
+        }
+        if (cues.isEmpty()) return tracks.shuffled(random)
+
+        val remaining = ArrayList<Track>(tracks)
+        fun removeAtFast(index: Int): Track {
+            val picked = remaining[index]
+            val last = remaining.removeAt(remaining.lastIndex)
+            if (index < remaining.size) remaining[index] = last
+            return picked
+        }
 
         // Seeded on something measured where anything is: the first pairing is the one with the
         // most tracks to choose between, so it is the one worth spending the evidence on.
-        val seedPool = remaining.filter { analysis(it)?.isUsable == true }.ifEmpty { remaining }
+        val seedIndices = remaining.indices.filter { cues.containsKey(remaining[it].id) }
+        val firstIdx = if (seedIndices.isNotEmpty()) seedIndices.random(random) else random.nextInt(remaining.size)
         val ordered = ArrayList<Track>(tracks.size)
-        var current = seedPool.random(random)
-        remaining.remove(current)
+        var current = removeAtFast(firstIdx)
         ordered += current
 
+        val bestIndices = IntArray(CANDIDATE_POOL)
+        val bestScores = DoubleArray(CANDIDATE_POOL)
+
         while (remaining.isNotEmpty()) {
-            val sample = if (remaining.size <= SAMPLE_SIZE) {
-                remaining
-            } else {
-                List(SAMPLE_SIZE) { remaining[random.nextInt(remaining.size)] }.distinct()
+            val currentCue = cues[current.id]
+            if (currentCue == null || remaining.size == 1) {
+                current = removeAtFast(random.nextInt(remaining.size))
+                ordered += current
+                continue
             }
-            val pool = sample
-                .sortedByDescending { compatibility(analysis(current), analysis(it)) }
-                .take(CANDIDATE_POOL)
-            val next = pool.random(random)
-            remaining.remove(next)
-            ordered += next
-            current = next
+            val count = minOf(remaining.size, SAMPLE_SIZE)
+            var poolSize = 0
+            for (s in 0 until count) {
+                val idx = if (remaining.size <= SAMPLE_SIZE) s else random.nextInt(remaining.size)
+                val score = compatibility(currentCue, cues[remaining[idx].id])
+                if (poolSize < CANDIDATE_POOL) {
+                    var pos = poolSize
+                    while (pos > 0 && score > bestScores[pos - 1]) {
+                        bestScores[pos] = bestScores[pos - 1]
+                        bestIndices[pos] = bestIndices[pos - 1]
+                        pos--
+                    }
+                    bestScores[pos] = score
+                    bestIndices[pos] = idx
+                    poolSize++
+                } else if (score > bestScores[CANDIDATE_POOL - 1]) {
+                    var pos = CANDIDATE_POOL - 1
+                    while (pos > 0 && score > bestScores[pos - 1]) {
+                        bestScores[pos] = bestScores[pos - 1]
+                        bestIndices[pos] = bestIndices[pos - 1]
+                        pos--
+                    }
+                    bestScores[pos] = score
+                    bestIndices[pos] = idx
+                }
+            }
+            val chosenIdx = bestIndices[random.nextInt(poolSize)]
+            current = removeAtFast(chosenIdx)
+            ordered += current
         }
         return ordered
     }

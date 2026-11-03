@@ -1,6 +1,8 @@
 package com.ikko.aura.source.ytm
 
 import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.reco.ArtistNames
+import com.ikko.aura.reco.authority.CompilationTitles
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -154,6 +156,12 @@ class YtmClient @Inject constructor(
         extractor.fetchPage()
         val title = extractor.name.removePrefix("Album – ").removePrefix("Album - ")
         val pageCover = runCatching { extractor.thumbnails.maxByOrNull { it.width }?.url }.getOrNull()
+        // The square cover is asked for while the songs are read, not after them (it was a second round trip in a row);
+        // found by the album's id, so a namesake cannot stand in for it.
+        val earlyArtist = runCatching { extractor.uploaderName }.getOrNull().orEmpty().removeSuffix(" - Topic")
+        val coverAhead = java.util.concurrent.CompletableFuture.supplyAsync {
+            runCatching { searchAlbums("$title $earlyArtist".trim()).firstOrNull { it.id == albumId }?.thumbnailUrl }.getOrNull()
+        }
         var page: org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage<StreamInfoItem> = extractor.initialPage
         val items = ArrayList<StreamInfoItem>(page.items)
         var pages = 1
@@ -165,7 +173,8 @@ class YtmClient @Inject constructor(
         val artist = items.firstOrNull()?.uploaderName.orEmpty().removeSuffix(" - Topic")
         // The album's own page only carries a small widescreen picture; the search lists the square cover, which can
         // be asked for at any size. Found by the album's id, so a namesake cannot stand in for it.
-        val cover = runCatching { searchAlbums("$title $artist").firstOrNull { it.id == albumId }?.thumbnailUrl }.getOrNull()
+        val cover = runCatching { coverAhead.get(4, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
+            ?: runCatching { searchAlbums("$title $artist").firstOrNull { it.id == albumId }?.thumbnailUrl }.getOrNull()
             ?: YtmImages.sized(pageCover)
         val songs = items.mapNotNull { item ->
             val id = videoIdOf(item.url) ?: return@mapNotNull null
@@ -176,15 +185,29 @@ class YtmClient @Inject constructor(
 
     /** What an artist has, by name: their songs (the search's results whose artist is that name) and their albums. */
     fun artistSongs(name: String): List<YtmSong> {
-        val key = name.lowercase()
+        val key = ArtistNames.key(name)
+        val credits = ArtistNames.split(name)
         val first = search(name)
         val more = first.next?.let { runCatching { searchMore(name, it) }.getOrNull() }
-        return (first.songs + more?.songs.orEmpty()).filter { it.artist.lowercase().contains(key) || key.contains(it.artist.lowercase()) }
+        val unwanted = listOf("tribute", "karaoke", "cover", "instrumental", "parody", "lullaby")
+        return (first.songs + more?.songs.orEmpty()).filter { song ->
+            val titleLow = song.title.lowercase()
+            if (CompilationTitles.matches(song.title) || unwanted.any { titleLow.contains(it) }) return@filter false
+            val songArtist = song.artist.removeSuffix(" - Topic")
+            ArtistNames.key(songArtist) == key || ArtistNames.anyCompatible(credits, ArtistNames.split(songArtist))
+        }
     }
 
     fun artistAlbums(name: String): List<YtmAlbumRef> {
-        val key = name.lowercase()
-        return searchAlbums(name).filter { it.artist.removeSuffix(" - Topic").lowercase().let { a -> a.contains(key) || key.contains(a) } }
+        val key = ArtistNames.key(name)
+        val credits = ArtistNames.split(name)
+        val unwanted = listOf("tribute", "karaoke", "cover", "instrumental", "parody", "lullaby")
+        return searchAlbums(name).filter { ref ->
+            val titleLow = ref.title.lowercase()
+            if (CompilationTitles.matches(ref.title) || unwanted.any { titleLow.contains(it) }) return@filter false
+            val refArtist = ref.artist.removeSuffix(" - Topic")
+            ArtistNames.key(refArtist) == key || ArtistNames.anyCompatible(credits, ArtistNames.split(refArtist))
+        }
     }
 
     /** Songs only, never videos or clips. [YtmPage.next] opens the following page of the same search. */

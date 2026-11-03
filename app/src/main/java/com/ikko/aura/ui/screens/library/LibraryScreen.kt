@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.library
 
+import com.ikko.aura.ui.screens.home.underHeaderScrim
 import com.ikko.aura.ui.components.tabFade
 import com.ikko.aura.ui.components.heroRipple
 import com.ikko.aura.ui.components.heroSideLine
@@ -87,6 +88,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -140,6 +145,7 @@ import com.ikko.aura.ui.components.LocalPageMotion
 import com.ikko.aura.ui.components.PageMotionSpec
 import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.BlendMode
@@ -183,6 +189,8 @@ fun LibraryScreen(
 ) {
     val uiState by libraryViewModel.uiState.collectAsStateWithLifecycle()
     val playlists by playlistsViewModel.playlists.collectAsStateWithLifecycle()
+    val customArtworks by playlistsViewModel.customArtworks.collectAsStateWithLifecycle()
+    val tracksById = remember(uiState.tracks) { uiState.tracks.associateBy { it.id } }
     val homeViewModel: com.ikko.aura.viewmodel.HomeWidgetsViewModel = hiltViewModel()
     val profileUri by homeViewModel.profileImageUri.collectAsStateWithLifecycle()
 
@@ -190,7 +198,7 @@ fun LibraryScreen(
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     // The header folds away with the status bar's height included: the page runs under the bar (see HomeScreen),
     // so once folded the list goes on up beneath it and melts into it. At rest the list starts where it did.
-    val headerHeight = com.ikko.aura.ui.components.designUnit() * 432f
+    val headerHeight = com.ikko.aura.ui.components.designUnit() * 236f
     val headerHeightPx = with(density) { headerHeight.toPx() }
     var headerOffsetPx by rememberCollapseOffset()
     val sharedHeaderOffset = com.ikko.aura.LocalLibraryHeaderOffsetPx.current
@@ -237,19 +245,108 @@ fun LibraryScreen(
     val albumsGridState = rememberLazyGridState()
     val artistsListState = rememberLazyListState()
     val playlistsListState = rememberLazyListState()
-    // A new view starts at its top, so its header is back, and the capsule with it.
-    // Only on a real change of filter, though: this also runs when the page comes back into composition — back
-    // from an album opened further down — and it used to reopen the header there over a list still scrolled
-    // where it had been left. The filter last seen is saved with the page, so coming back is told apart.
-    var lastFilter by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<LibraryFilter?>(null) }
-    androidx.compose.runtime.LaunchedEffect(uiState.filter) {
-        if (lastFilter != null && lastFilter != uiState.filter) {
-            headerOffsetPx = 0f
-            sharedHeaderOffset?.floatValue = 0f
+    val accent = com.ikko.aura.ui.components.rememberPlayerAccent()
+
+    // Header visibility on scroll for the 4 sub-menus:
+    // Disappears on scroll down, reappears even on very slight scroll up.
+    val subMenuHeaderVisible = remember { androidx.compose.animation.core.Animatable(1f) }
+    var subMenuScrollAccumulator by remember { mutableFloatStateOf(0f) }
+    val densityFactor = density.density
+    val subMenuScrollConnection = remember(densityFactor) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val dy = available.y
+                if (dy < -4f) {
+                    // Scrolling down (finger moves up, list moves down) -> hide header
+                    if (subMenuScrollAccumulator > 0f) subMenuScrollAccumulator = 0f
+                    subMenuScrollAccumulator += dy
+                    if (subMenuScrollAccumulator < -10f * densityFactor && subMenuHeaderVisible.targetValue > 0f) {
+                        scope.launch {
+                            subMenuHeaderVisible.animateTo(
+                                0f,
+                                androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
+                            )
+                        }
+                    }
+                } else if (dy > 2f) {
+                    // Scrolling up (finger moves down, scrolling back to top) -> instantly reappear on very slight scroll
+                    if (subMenuScrollAccumulator < 0f) subMenuScrollAccumulator = 0f
+                    subMenuScrollAccumulator += dy
+                    if (subMenuScrollAccumulator > 4f * densityFactor && subMenuHeaderVisible.targetValue < 1f) {
+                        scope.launch {
+                            subMenuHeaderVisible.animateTo(
+                                1f,
+                                androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
+                            )
+                        }
+                    }
+                }
+                return Offset.Zero
+            }
         }
-        lastFilter = uiState.filter
     }
 
+    // The library is a menu; its four pages (Titres, Albums, Artistes, Playlists) grow out of the pastille they open
+    // from. `shown` is the page that is up (kept with the screen, so coming back from an album finds it where it was),
+    // `clip` how far open it is: 0 at the pastille, 1 as a whole page.
+    var shown by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val page = shown?.let { name -> LibraryFilter.values().firstOrNull { it.name == name } }
+    val clip = remember { androidx.compose.animation.core.Animatable(if (page != null) 1f else 0f) }
+    var origin by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var closing by remember { mutableStateOf(false) }
+    val containerOrigin = remember { arrayOf(Offset.Zero) }
+    var creatingPlaylist by remember { mutableStateOf(false) }
+    fun ms(v: Int) = if (reduceMotion) (v * 0.2f).toInt().coerceAtLeast(1) else v
+
+    // Where each row of the menu is, for a page asked for from elsewhere (Home's "Tout voir") to open from its row.
+    val rowBounds = remember { HashMap<LibraryFilter, androidx.compose.ui.geometry.Rect>() }
+    // Each page is opened from its top: what was scrolled before is forgotten, as it would be for any new screen.
+    fun resetScrolls() {
+        tracksGridState.requestScrollToItem(0)
+        albumsGridState.requestScrollToItem(0)
+        artistsListState.requestScrollToItem(0)
+        playlistsListState.requestScrollToItem(0)
+    }
+    fun openPage(filter: LibraryFilter, bounds: androidx.compose.ui.geometry.Rect) {
+        if (shown != null) return
+        resetScrolls()
+        libraryViewModel.setFilter(filter)
+        origin = bounds.translate(-containerOrigin[0])
+        headerOffsetPx = 0f
+        sharedHeaderOffset?.floatValue = 0f
+        closing = false
+        shown = filter.name
+        scope.launch { subMenuHeaderVisible.snapTo(1f) }
+        subMenuScrollAccumulator = 0f
+    }
+    androidx.compose.runtime.LaunchedEffect(shown) {
+        if (shown != null && clip.value < 1f) {
+            clip.animateTo(1f, tween(ms(PUSH_MS), easing = PushEasing))
+        }
+    }
+    val openRequest by libraryViewModel.openRequest.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(openRequest) {
+        val wanted = openRequest ?: return@LaunchedEffect
+        libraryViewModel.clearOpenRequest()
+        if (shown == null) openPage(wanted, rowBounds[wanted] ?: androidx.compose.ui.geometry.Rect.Zero)
+    }
+    fun closePage() {
+        if (shown == null || closing) return
+        closing = true
+        // The page leaves as it is (scrolled, its header folded): what is put back to the top is put back once it is gone.
+        // Except the common header's fold (shared with the page's), which it has no reason to keep: the header is on its way
+        // back as the page goes, and must not wait for the end of it, slid up and faded, to appear.
+        sharedHeaderOffset?.floatValue = 0f
+        scope.launch {
+            clip.animateTo(0f, tween(ms(PUSH_MS), easing = PushEasing))
+            shown = null
+            headerOffsetPx = 0f
+            sharedHeaderOffset?.floatValue = 0f
+            resetScrolls()
+            closing = false
+            creatingPlaylist = false
+        }
+    }
     /**
      * Puts the header where the new scroll position says it should be, after a jump the nested
      * scroll never saw. At the top the header belongs open; anywhere else it belongs out of the
@@ -260,13 +357,28 @@ fun LibraryScreen(
         headerOffsetPx = next
         sharedHeaderOffset?.floatValue = next
     }
-
-    val countText = when (uiState.filter) {
-        LibraryFilter.PLAYLISTS -> countLabel(playlists.size, "playlist")
-        LibraryFilter.ALBUMS -> countLabel(uiState.albums.size, "album")
-        LibraryFilter.ARTISTS -> countLabel(uiState.artists.size, "artiste")
-        LibraryFilter.TRACKS -> countLabel(uiState.tracks.size, "titre")
+    // The player opened over the page owns the back; a page of the library is closed by it otherwise.
+    androidx.activity.compose.BackHandler(enabled = shown != null && com.ikko.aura.LocalSheetCard.current.owner == null) {
+        closePage()
     }
+    // The common header (search, profile) gives way to the page's own while it is up.
+    val pageProgress = com.ikko.aura.LocalLibraryPageProgress.current
+    androidx.compose.runtime.LaunchedEffect(clip) {
+        androidx.compose.runtime.snapshotFlow { clip.value }.collect { pageProgress?.floatValue = it }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { pageProgress?.floatValue = 0f } }
+
+    val counts = remember(uiState.tracks.size, uiState.albums.size, uiState.artists.size, playlists.size) {
+        listOf(
+            LibraryFilter.TRACKS to uiState.tracks.size,
+            LibraryFilter.ALBUMS to uiState.albums.size,
+            LibraryFilter.ARTISTS to uiState.artists.size,
+            LibraryFilter.PLAYLISTS to playlists.size,
+        )
+    }
+    val nowPlayingId by remember(playerViewModel) {
+        playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     MediaContextHost(
         navController = navController,
@@ -276,133 +388,181 @@ fun LibraryScreen(
     val stripTopPx = with(density) { (statusBarTop + STRIP_RELATIVE_TOP).toPx() }
     val listTopBasePx = headerHeightPx
     androidx.compose.runtime.CompositionLocalProvider(
-        // The strip holds still on the screen — 119 dp from the top — while the header above the list folds.
+        // The strip holds still on the screen while the header above the list folds.
         LocalIndexStripShift provides { stripTopPx - (listTopBasePx + headerOffsetPx) },
     ) {
     Box(Modifier.fillMaxSize()) {
     GradientScreenScaffold(
         applyStatusBarInset = false,
-        // On the whole page, not only the list: the header folds up under the status bar too, and has to melt into
-        // it the same way rather than slide under it sharp. Grows as the header collapses (see scrollTopBlur).
-        modifier = Modifier.scrollTopBlur(topInset = statusBarTop) { -headerOffsetPx },
     ) {
+        val rootScrollState = androidx.compose.foundation.rememberScrollState()
+        val sharedLibScroll = com.ikko.aura.LocalLibraryScrollPx.current
+        androidx.compose.runtime.LaunchedEffect(page, rootScrollState, tracksGridState, albumsGridState, artistsListState, playlistsListState) {
+            androidx.compose.runtime.snapshotFlow {
+                if (page == null) {
+                    rootScrollState.value.toFloat()
+                } else {
+                    when (page) {
+                        LibraryFilter.TRACKS -> if (tracksGridState.firstVisibleItemIndex > 0) 1000f else tracksGridState.firstVisibleItemScrollOffset.toFloat()
+                        LibraryFilter.ALBUMS -> if (albumsGridState.firstVisibleItemIndex > 0) 1000f else albumsGridState.firstVisibleItemScrollOffset.toFloat()
+                        LibraryFilter.ARTISTS -> if (artistsListState.firstVisibleItemIndex > 0) 1000f else artistsListState.firstVisibleItemScrollOffset.toFloat()
+                        LibraryFilter.PLAYLISTS -> if (playlistsListState.firstVisibleItemIndex > 0) 1000f else playlistsListState.firstVisibleItemScrollOffset.toFloat()
+                    }
+                }
+            }.collect { px ->
+                sharedLibScroll?.floatValue = px
+            }
+        }
+        val scanning = uiState.isScanning && uiState.tracks.isEmpty()
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .collapsingHeight(headerHeightPx) { headerOffsetPx }
-                .clipToBounds(),
+            Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { containerOrigin[0] = it.positionInRoot() },
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset { IntOffset(0, headerOffsetPx.roundToInt()) },
-            ) {
-                LibraryHeader(
-                    statusBarTop = statusBarTop,
-                    countText = countText,
-                    sortMenu = sortMenu,
-                    filter = uiState.filter,
-                    onFilter = libraryViewModel::setFilter,
-                    onSearch = LocalSearchOpener.current,
-                    profileUri = profileUri,
-                    sort = uiState.sort,
-                    onProfile = { navController.navigate(AuraDestination.Settings.route) },
-                    onSmartShuffle = {
-                        scope.launch {
-                            val queue = libraryViewModel.smartShuffle()
-                            if (queue.isNotEmpty()) {
-                                playerViewModel.playQueue(queue, 0, shuffle = true)
+            // The menu stays composed under the page (taken out it would have to be rebuilt as the page leaves, one frame
+            // late). Material's shared axis: it goes 30 dp to the left as the page comes in, and fades back - not all the way:
+            // it stays in sight under the page.
+            run {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val c = clip.value
+                            translationX = -AXIS_SHIFT.toPx() * c
+                            alpha = 1f - (1f - AXIS_MENU_REST) * c
+                        },
+                ) {
+                    if (scanning) {
+                        ScanningState()
+                    } else {
+                        LibraryRoot(
+                            counts = counts,
+                            recent = uiState.recentlyAdded,
+                            navController = navController,
+                            onAlbumLongPress = { album ->
+                                context.show(LibraryContextTarget.AlbumTarget(album, uiState.tracks.filter { it.albumId == album.id }))
+                            },
+                            onOpen = ::openPage,
+                            rowBounds = rowBounds,
+                            scrollState = rootScrollState,
+                        )
+                    }
+                }
+            }
+
+            if (page != null) {
+                // A page of the library is the other end of a shared axis (Material): it comes in from the right, 30 dp, fading
+                // in once the menu has begun to leave, over its own ground (the same mesh); and goes back out to the right.
+                // [clip] is how far in it is, 0 gone, 1 in place.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val c = clip.value
+                            translationX = (1f - c) * AXIS_SHIFT.toPx()
+                            alpha = c
+                        },
+                ) {
+                    com.ikko.aura.ui.components.EctoMesh(com.ikko.aura.ui.components.LocalEctoPalette.current, drifting = false)
+                    Box(Modifier.fillMaxSize()) {
+                    LibraryPageArrival {
+                        val pageCount = when (page) {
+                            LibraryFilter.PLAYLISTS -> playlists.size
+                            LibraryFilter.ALBUMS -> uiState.albums.size
+                            LibraryFilter.ARTISTS -> uiState.artists.size
+                            LibraryFilter.TRACKS -> uiState.tracks.size
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .nestedScroll(subMenuScrollConnection),
+                        ) {
+                            com.ikko.aura.ui.components.EndTabEntryWhenScrolled(
+                                when (page) {
+                                    LibraryFilter.TRACKS -> tracksGridState.isScrollInProgress
+                                    LibraryFilter.ALBUMS -> albumsGridState.isScrollInProgress
+                                    LibraryFilter.ARTISTS -> artistsListState.isScrollInProgress
+                                    LibraryFilter.PLAYLISTS -> playlistsListState.isScrollInProgress
+                                },
+                            )
+                            when (page) {
+                                LibraryFilter.TRACKS -> TrackList(
+                                    tracks = uiState.tracks,
+                                    sort = uiState.sort,
+                                    layoutMode = uiState.trackLayoutMode,
+                                    gridState = tracksGridState,
+                                    nowPlayingId = nowPlayingId,
+                                    accent = accent,
+                                    onTrackClick = { index -> playerViewModel.playQueue(uiState.tracks, index) },
+                                    onTrackLongPress = { context.show(it) },
+                                    onJumped = ::settleHeaderAfterJump,
+                                )
+                                LibraryFilter.ALBUMS -> AlbumGrid(
+                                    albums = uiState.albums,
+                                    sort = uiState.sort,
+                                    layoutMode = uiState.albumLayoutMode,
+                                    gridState = albumsGridState,
+                                    navController = navController,
+                                    onAlbumLongPress = { album ->
+                                        context.show(
+                                            LibraryContextTarget.AlbumTarget(
+                                                album = album,
+                                                tracks = uiState.tracks.filter { it.albumId == album.id },
+                                            ),
+                                        )
+                                    },
+                                    onJumped = ::settleHeaderAfterJump,
+                                )
+                                LibraryFilter.ARTISTS -> ArtistList(
+                                    artists = uiState.artists,
+                                    listState = artistsListState,
+                                    navController = navController,
+                                    onJumped = ::settleHeaderAfterJump,
+                                )
+                                LibraryFilter.PLAYLISTS -> PlaylistsList(
+                                    playlists = playlists,
+                                    customArtworks = customArtworks,
+                                    tracksById = tracksById,
+                                    listState = playlistsListState,
+                                    creating = false,
+                                    onCreate = { name -> playlistsViewModel.createPlaylist(name); creatingPlaylist = false },
+                                    onCancelCreate = { creatingPlaylist = false },
+                                    onOpen = { id -> navController.navigate(AuraDestination.PlaylistPattern.route(id.toString())) },
+                                )
                             }
                         }
-                    },
-                )
-            }
-        }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .nestedScroll(headerScrollConnection),
-        ) {
-            // The four filters are peers, exactly like the top tabs, so they animate with the
-            // same vocabulary — switching them used to swap content instantly with nothing at all.
-            val scanning = uiState.isScanning && uiState.tracks.isEmpty()
-            val filterDir = remember { intArrayOf(chipIndex(uiState.filter), 1) }
-            chipIndex(uiState.filter).let { if (filterDir[0] != it) { filterDir[1] = if (it > filterDir[0]) 1 else -1; filterDir[0] = it } }
-            AnimatedContent(
-                targetState = if (scanning) null else uiState.filter,
-                transitionSpec = run {
-                    val tabs = com.ikko.aura.ui.components.tabPanelTransition<LibraryFilter?>(reduceMotion) { from, to ->
-                        if (from == null || to == null || chipIndex(to) >= chipIndex(from)) 1 else -1
+                        LibraryPageHeader(
+                            filter = page,
+                            count = pageCount,
+                            accent = accent,
+                            sort = uiState.sort,
+                            sortMenu = sortMenu,
+                            onBack = ::closePage,
+                            onSearch = LocalSearchOpener.current,
+                            onShuffle = {
+                                scope.launch {
+                                    val queue = libraryViewModel.smartShuffle()
+                                    if (queue.isNotEmpty()) playerViewModel.playQueue(queue, 0, shuffle = true, alreadyShuffled = true)
+                                }
+                            },
+                            onCreate = { creatingPlaylist = true },
+                            visibleProgress = subMenuHeaderVisible.value,
+                        )
                     }
-                    val scan: AnimatedContentTransitionScope<LibraryFilter?>.() -> ContentTransform = {
-                        if (initialState == null || targetState == null) {
-                            AuraMotion.peerEnter togetherWith AuraMotion.peerExit
-                        } else {
-                            tabs()
-                        }
                     }
-                    scan
-                },
-                label = "library-filter",
-            ) { filter ->
-                val changing = transition.currentState == androidx.compose.animation.EnterExitState.PreEnter
-                com.ikko.aura.ui.components.ProvideTabEntry(changing, filterDir[1]) {
-                com.ikko.aura.ui.components.EndTabEntryWhenScrolled(
-                    when (filter) {
-                        LibraryFilter.TRACKS -> tracksGridState.isScrollInProgress
-                        LibraryFilter.ALBUMS -> albumsGridState.isScrollInProgress
-                        LibraryFilter.ARTISTS -> artistsListState.isScrollInProgress
-                        LibraryFilter.PLAYLISTS -> playlistsListState.isScrollInProgress
-                        null -> false
-                    },
-                )
-                when (filter) {
-                    null -> ScanningState()
-                    LibraryFilter.TRACKS -> TrackList(
-                        tracks = uiState.tracks,
-                        sort = uiState.sort,
-                        layoutMode = uiState.trackLayoutMode,
-                        gridState = tracksGridState,
-                        onTrackClick = { index ->
-                            playerViewModel.playQueue(uiState.tracks, index)
-                        },
-                        onTrackLongPress = { context.show(it) },
-                        onJumped = ::settleHeaderAfterJump,
-                    )
-                    LibraryFilter.ALBUMS -> AlbumGrid(
-                        albums = uiState.albums,
-                        sort = uiState.sort,
-                        layoutMode = uiState.albumLayoutMode,
-                        gridState = albumsGridState,
-                        navController = navController,
-                        onAlbumLongPress = { album ->
-                            context.show(
-                                LibraryContextTarget.AlbumTarget(
-                                    album = album,
-                                    tracks = uiState.tracks.filter { it.albumId == album.id },
-                                ),
-                            )
-                        },
-                        onJumped = ::settleHeaderAfterJump,
-                    )
-                    LibraryFilter.ARTISTS -> ArtistList(
-                        artists = uiState.artists,
-                        listState = artistsListState,
-                        navController = navController,
-                        onJumped = ::settleHeaderAfterJump,
-                    )
-                    LibraryFilter.PLAYLISTS -> PlaylistsList(
-                        playlists = playlists,
-                        listState = playlistsListState,
-                        onCreate = playlistsViewModel::createPlaylist,
-                        onOpen = { id -> navController.navigate(AuraDestination.PlaylistPattern.route(id.toString())) },
-                    )
-                }
                 }
             }
         }
+    }
+    if (creatingPlaylist) {
+        com.ikko.aura.ui.components.CreatePlaylistDialog(
+            onDismiss = { creatingPlaylist = false },
+            onCreate = { name, artworkUri ->
+                playlistsViewModel.createPlaylist(name, artworkUri)
+                creatingPlaylist = false
+            },
+        )
     }
     // Over the whole page and outside the header's clip: the glass has to be able to leave the header's bounds.
     // The design's sort menu: a check button above it, three rows, the chosen one on a lit bed in the accent.
@@ -430,7 +590,7 @@ fun LibraryScreen(
 /** Where a view sits among the header's chips, left to right — the direction the list slides when it changes. */
 private val CHIP_ORDER = listOf(LibraryFilter.TRACKS, LibraryFilter.ALBUMS, LibraryFilter.ARTISTS, LibraryFilter.PLAYLISTS)
 private val LIBRARY_CHIPS = listOf(
-    LibraryFilter.TRACKS to "Titres",
+    LibraryFilter.TRACKS to "Morceaux",
     LibraryFilter.ALBUMS to "Albums",
     LibraryFilter.ARTISTS to "Artistes",
     LibraryFilter.PLAYLISTS to "Playlists",
@@ -457,116 +617,20 @@ private val LibraryTabInactiveStyle = androidx.compose.ui.text.TextStyle(
 )
 
 @Composable
-private fun LibraryHeader(
-    @Suppress("UNUSED_PARAMETER") statusBarTop: androidx.compose.ui.unit.Dp,
-    countText: String,
-    sortMenu: GlassMenuState,
-    onSmartShuffle: () -> Unit,
-    filter: LibraryFilter,
-    onFilter: (LibraryFilter) -> Unit,
-    onSearch: () -> Unit,
-    profileUri: String?,
-    sort: LibrarySort,
-    onProfile: () -> Unit,
-) {
-    val u = com.ikko.aura.ui.components.designUnit()
-    val muted = Color(0xFF7F7F89)
-    Box(Modifier.fillMaxWidth().height(u * 432f).heroRipple(fast = true)) {
-        // Onglets 40/48, 44 px entre eux; le gris devient blanc en 220 ms.
-        Row(
-            modifier = Modifier.padding(start = u * 40f, top = u * com.ikko.aura.ui.components.PageHeader.TABS_TOP)
-                .height(u * com.ikko.aura.ui.components.PageHeader.TABS_HEIGHT),
-            horizontalArrangement = Arrangement.spacedBy(u * com.ikko.aura.ui.components.PageHeader.TAB_GAP),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LIBRARY_CHIPS.forEach { (f, label) ->
-                val color by androidx.compose.animation.animateColorAsState(
-                    if (f == filter) Color.White else muted, tween(220), label = "library-tab-color",
-                )
-                Text(
-                    text = label,
-                    color = color,
-                    fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = com.ikko.aura.ui.components.designSp(com.ikko.aura.ui.components.PageHeader.TAB_TEXT),
-                    lineHeight = com.ikko.aura.ui.components.designSp(com.ikko.aura.ui.components.PageHeader.TAB_LINE),
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                    ) { onFilter(f) },
-                )
-            }
-        }
-
-        // Aléatoire et Trier: 104 px, glyphe seul avec une ombre, collés à 16 px du bord.
-        Row(Modifier.align(Alignment.TopEnd).padding(end = u * 12f, top = u * (com.ikko.aura.ui.components.PageHeader.TABS_TOP + (com.ikko.aura.ui.components.PageHeader.TABS_HEIGHT - com.ikko.aura.ui.components.PageHeader.ACTION) / 2f))) {
-            Box(
-                Modifier.size(u * com.ikko.aura.ui.components.PageHeader.ACTION).clip(CircleShape).clickable(onClick = onSmartShuffle),
-                contentAlignment = Alignment.Center,
-            ) {
-                com.ikko.aura.ui.components.ShadowedGlyph(CupertinoIcons.Shuffle, "Lecture aléatoire", size = u * com.ikko.aura.ui.components.PageHeader.ACTION_GLYPH)
-            }
-            Box(
-                Modifier.size(u * com.ikko.aura.ui.components.PageHeader.ACTION).clip(CircleShape).glassMenuAnchor(sortMenu).clickable(onClick = sortMenu::open),
-                contentAlignment = Alignment.Center,
-            ) {
-                com.ikko.aura.ui.components.ShadowedGlyph(CupertinoIcons.Sort, "Trier", size = u * com.ikko.aura.ui.components.PageHeader.ACTION_GLYPH)
-            }
-        }
-
-        // Le sélecteur: « 423 titres · Nom A–Z ».
-        val sortLabel = when (sort) {
-            LibrarySort.NAME -> "Nom A–Z"
-            LibrarySort.ARTIST -> "Artiste A–Z"
-            LibrarySort.DATE_ADDED -> "Date d'ajout"
-        }
-        // « 423 titres · Nom A–Z »: the count changes with the tab and the sort.
-        val unitPx = with(androidx.compose.ui.platform.LocalDensity.current) { u.toPx() }
-        androidx.compose.animation.AnimatedContent(
-            targetState = countText to sortLabel,
-            modifier = Modifier.padding(start = u * 40f, top = u * com.ikko.aura.ui.components.PageHeader.COUNT_TOP).height(u * 44f),
-            transitionSpec = {
-                // The board's: the old count leaves upwards in 120 ms, then the new one comes from below in 260.
-                val outPx = (8f * unitPx).toInt()
-                val inPx = (10f * unitPx).toInt()
-                (androidx.compose.animation.fadeIn(tween(260, delayMillis = 120, easing = com.ikko.aura.ui.components.TabMotion.Enter)) +
-                    androidx.compose.animation.slideInVertically(tween(260, delayMillis = 120, easing = com.ikko.aura.ui.components.TabMotion.Enter)) { inPx }) togetherWith
-                    (androidx.compose.animation.fadeOut(tween(120, easing = com.ikko.aura.ui.components.TabMotion.Exit)) +
-                        androidx.compose.animation.slideOutVertically(tween(120, easing = com.ikko.aura.ui.components.TabMotion.Exit)) { -outPx })
-            },
-            label = "library-count",
-        ) { (count, sortName) ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(u * 12f),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val st = androidx.compose.ui.text.TextStyle(
-                    fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.Bold,
-                    fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f),
-                )
-                Text(count, style = st, color = muted, maxLines = 1)
-                Text("·", style = st, color = muted)
-                Text(sortName, style = st, color = Color(0xFFB9B9C2), maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
 private fun TrackList(
     tracks: List<Track>,
     sort: LibrarySort,
     layoutMode: TrackLayoutMode,
     gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    nowPlayingId: String?,
+    accent: Color,
     onTrackClick: (Int) -> Unit,
     onTrackLongPress: (Track) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
-    @Suppress("UNUSED_VARIABLE") val unusedLayout = layoutMode
     val u = com.ikko.aura.ui.components.designUnit()
-    val columns = 2
+    // The setting of the Réglages: a list (one column of rows) or two columns of them.
+    val columns = if (layoutMode == TrackLayoutMode.LIST) 1 else 2
     IndexedList(
         target = rememberScrollTarget(gridState),
         indexKeys = remember(tracks, sort) { tracks.indexKeysFor(sort) { it.title to it.artist } },
@@ -576,15 +640,22 @@ private fun TrackList(
             state = gridState,
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(// Rows carry 4 dp of their own: taken off, the covers sit on the title's line.
-            start = u * 40f, end = u * 40f, top = 0.dp, bottom = listBottomPadding() + 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(u * 32f),
+            contentPadding = PaddingValues(
+                start = u * 40f,
+                end = u * 40f,
+                top = u * 236f,
+                bottom = listBottomPadding() + 12.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(u * 40f),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             gridItemsIndexed(tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
-                Box(Modifier.tabStagger(index, TabMotion.ROW_STEP_MS, TabMotion.ROW_MS)) {
+                Box(Modifier.tabStagger(index, 12, 300, risePx = 16f, baseMs = 0)) {
                 LibraryTrackRow(
                     track = track,
+                    playing = track.id == nowPlayingId,
+                    accent = accent,
+                    compact = columns > 1,
                     onClick = { onTrackClick(index) },
                     onLongClick = { onTrackLongPress(track) },
                 )
@@ -596,36 +667,101 @@ private fun TrackList(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryTrackRow(track: Track, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun LibraryTrackRow(
+    track: Track, playing: Boolean, accent: Color, compact: Boolean,
+    onClick: () -> Unit, onLongClick: () -> Unit,
+) {
+    val m = track.durationMs / 1000
+    LibraryListRow(
+        coverUri = track.artworkUri, coverKey = track.albumId.toString(), coverDescription = track.album,
+        title = track.title, subtitle = track.artist,
+        trailingText = if (track.durationMs > 0) "${m / 60}:${(m % 60).toString().padStart(2, '0')}" else null,
+        playing = playing, accent = accent, compact = compact,
+        onClick = onClick, onLongClick = onLongClick,
+    )
+}
+
+/**
+ * A row of the lists (songs, albums): a rounded cover, the title in bold and the line under it paler, a figure on the right
+ * (a song's length, an album's count) and three dots that open the menu; a hairline under it starts where the words do
+ * and runs to the margin. A song that is playing has its cover veiled with the three bars of the level in the accent.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LibraryListRow(
+    coverUri: android.net.Uri?, coverKey: String, coverDescription: String?,
+    title: String, subtitle: String, trailingText: String?,
+    playing: Boolean, accent: Color, compact: Boolean,
+    onClick: () -> Unit, onLongClick: () -> Unit,
+) {
     val u = com.ikko.aura.ui.components.designUnit()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(u * 148f)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(u * 22f),
-    ) {
-        com.ikko.aura.ui.components.AlbumArt(
-            uri = track.artworkUri,
-            contentDescription = track.album,
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(u * 28f),
-            modifier = Modifier.size(u * 124f),
-            targetSizeDp = u * 124f,
-            cacheKey = track.albumId.toString(),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(
-                track.title, color = Color.White, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(40f),
-                lineHeight = com.ikko.aura.ui.components.designSp(48f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                track.artist, color = Color(0xFF8B8B95), fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                fontWeight = FontWeight.SemiBold, fontSize = com.ikko.aura.ui.components.designSp(34f),
-                lineHeight = com.ikko.aura.ui.components.designSp(42f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+    // Every album cover has Apple Music's small corners, the same everywhere (the Home's four cards and the mini player aside).
+    val coverShape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover
+    val face = com.ikko.aura.ui.theme.AuraFontFamily
+    Box(Modifier.fillMaxWidth().height(u * 138f).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Row(
+            Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(u * 28f),
+        ) {
+            Box(Modifier.size(u * 116f).clip(coverShape)) {
+                com.ikko.aura.ui.components.AlbumArt(
+                    uri = coverUri, contentDescription = coverDescription, shape = coverShape,
+                    modifier = Modifier.fillMaxSize(), targetSizeDp = u * 116f, cacheKey = coverKey,
+                )
+                if (playing) {
+                    Box(Modifier.fillMaxSize().background(Color(0x8C080E45)), contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.size(u * 44f)) {
+                            val k = size.width / 24f
+                            // The level's three bars, as the design draws them (a 24 grid, bottoms on 20).
+                            listOf(Triple(3.5f, 9f, 11f), Triple(10.2f, 4f, 16f), Triple(16.9f, 12f, 8f)).forEach { (x, y, h) ->
+                                drawRoundRect(
+                                    accent, topLeft = Offset(x * k, y * k), size = androidx.compose.ui.geometry.Size(3.6f * k, h * k),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.8f * k),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title, color = if (playing) accent else LibInk, fontFamily = face, fontWeight = FontWeight.Bold,
+                    fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    subtitle, color = LibMuted, fontFamily = face, fontWeight = FontWeight.Medium,
+                    fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (!compact) {
+                if (trailingText != null) {
+                    Text(
+                        trailingText, color = LibMuted, fontFamily = face, fontWeight = FontWeight.Medium,
+                        fontSize = com.ikko.aura.ui.components.designSp(34f), maxLines = 1,
+                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
+                // The menu: three dots in a 76 touch area (a long press does the same).
+                Box(Modifier.size(u * 76f).clickable(onClick = onLongClick), contentAlignment = Alignment.Center) {
+                    androidx.compose.foundation.Canvas(Modifier.size(width = u * 44f, height = u * 10f)) {
+                        val r = size.height / 2f
+                        repeat(3) { i -> drawCircle(Color.White.copy(alpha = 0.7f), r, Offset(r + i * (size.width - 2 * r) / 2f, r)) }
+                    }
+                }
+            }
         }
+        // The hairline starts under the words, not under the cover.
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .padding(start = u * (116f + 28f))
+                .fillMaxWidth()
+                .height(u * 1.5f)
+                .background(Color.White.copy(alpha = 0.16f)),
+        )
     }
 }
 
@@ -639,19 +775,23 @@ private fun AlbumGrid(
     onAlbumLongPress: (Album) -> Unit,
     onJumped: (Boolean) -> Unit,
 ) {
-    @Suppress("UNUSED_VARIABLE") val unusedAlbumLayout = layoutMode
-    val isList = false
-    val columns = 3
+    // The setting of the Réglages: two or three columns of covers, or a list of rows.
+    val isList = layoutMode == AlbumLayoutMode.LIST
+    val columns = when (layoutMode) {
+        AlbumLayoutMode.GRID_2 -> 2
+        AlbumLayoutMode.GRID_3 -> 3
+        AlbumLayoutMode.LIST -> 1
+    }
     val u = com.ikko.aura.ui.components.designUnit()
-    val coverShape = remember(u) { androidx.compose.foundation.shape.RoundedCornerShape(u * 30f) }
-    val titleFontSize = com.ikko.aura.ui.components.designSp(38f)
-    val titleLineHeight = com.ikko.aura.ui.components.designSp(46f)
-    val artistFontSize = com.ikko.aura.ui.components.designSp(34f)
-    val artistLineHeight = com.ikko.aura.ui.components.designSp(42f)
+    val coverShape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover
+    val titleFontSize = com.ikko.aura.ui.components.designSp(34f)
+    val titleLineHeight = com.ikko.aura.ui.components.designSp(42f)
+    val artistFontSize = com.ikko.aura.ui.components.designSp(30f)
+    val artistLineHeight = com.ikko.aura.ui.components.designSp(38f)
     val titleStyle = remember(titleFontSize, titleLineHeight) {
         androidx.compose.ui.text.TextStyle(
             fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-            color = Color.White,
+            color = LibInk,
             fontSize = titleFontSize,
             lineHeight = titleLineHeight,
             fontWeight = FontWeight.ExtraBold,
@@ -660,13 +800,12 @@ private fun AlbumGrid(
     val artistStyle = remember(artistFontSize, artistLineHeight) {
         androidx.compose.ui.text.TextStyle(
             fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-            color = Color(0xFF8B8B95),
+            color = LibMuted,
             fontSize = artistFontSize,
             lineHeight = artistLineHeight,
             fontWeight = FontWeight.SemiBold,
         )
     }
-    val rimColor = Color.White.copy(alpha = 0.1f)
     val targetArtDp = if (columns == 2) 260.dp else 180.dp
     IndexedList(
         target = rememberScrollTarget(gridState),
@@ -682,14 +821,14 @@ private fun AlbumGrid(
             contentPadding = PaddingValues(
                 start = u * 40f,
                 end = u * 40f,
-                top = 0.dp,
+                top = u * 236f,
                 bottom = listBottomPadding() + 12.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(u * 26f),
             verticalArrangement = Arrangement.spacedBy(u * 32f),
         ) {
             itemsIndexed(albums, key = { _, album -> album.id }, contentType = { _, _ -> if (isList) "album_row" else "album_cell" }) { albumIndex, album ->
-                Box(Modifier.tabStagger(albumIndex, TabMotion.ROW_STEP_MS, TabMotion.ROW_MS)) {
+                Box(Modifier.tabStagger(albumIndex, 12, 300, risePx = 16f, baseMs = 0)) {
                 if (isList) {
                     AlbumListItem(
                         album = album,
@@ -706,8 +845,8 @@ private fun AlbumGrid(
                     val tileDensity = androidx.compose.ui.platform.LocalDensity.current
                     Column(
                         modifier = Modifier.heroRipple(heroKey),
-                        verticalArrangement = Arrangement.spacedBy(u * 14f),
-                    ) { // 316 px cover, 14 px under it
+                        verticalArrangement = Arrangement.spacedBy(u * 12f),
+                    ) { // 316 px cover, 12 px under it
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -721,10 +860,11 @@ private fun AlbumGrid(
                                             uri = album.artworkUri,
                                             cacheKey = album.id.toString(),
                                             cover = coverAnchor,
-                                            radiusPx = with(tileDensity) { (u * 30f).toPx() },
-                                            title = titleAnchor to com.ikko.aura.ui.components.HeroText(album.title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, Color.White),
-                                            sub = subAnchor to com.ikko.aura.ui.components.HeroText(album.artist, androidx.compose.ui.geometry.Rect.Zero, artistStyle, Color(0xFF8B8B95)),
+                                            radiusPx = with(tileDensity) { 8.dp.toPx() },
+                                            title = titleAnchor to com.ikko.aura.ui.components.HeroText(album.title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, LibInk),
+                                            sub = subAnchor to com.ikko.aura.ui.components.HeroText(album.artist, androidx.compose.ui.geometry.Rect.Zero, artistStyle, LibMuted),
                                             sizeDp = targetArtDp,
+                                            anyOfKind = album.remoteId != null,
                                         )) navController.navigate(album.route())
                                     },
                                     onLongClick = { onAlbumLongPress(album) },
@@ -738,7 +878,6 @@ private fun AlbumGrid(
                                 targetSizeDp = targetArtDp,
                                 cacheKey = album.id.toString(),
                             )
-                            Box(Modifier.fillMaxSize().border(u * 1.5f, rimColor, coverShape))
                         }
                         Column {
                             Text(
@@ -774,48 +913,14 @@ private fun AlbumListItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(AuraShapes.SquircleMedium)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SquircleCard(
-            modifier = Modifier.size(50.dp),
-            shape = AuraShapes.AlbumCover,
-        ) {
-            AlbumArt(
-                uri = album.artworkUri,
-                contentDescription = album.title,
-                modifier = Modifier.fillMaxSize(),
-                shape = AuraShapes.AlbumCover,
-                targetSizeDp = 50.dp,
-                cacheKey = album.id.toString(),
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = album.title,
-                style = LibraryTypography.AlbumTitle,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            CoverText(
-                text = if (album.trackCount > 0) {
-                    "${album.artist} · ${album.trackCount} titre${if (album.trackCount > 1) "s" else ""}"
-                } else {
-                    album.artist
-                },
-                style = LibraryTypography.AlbumArtist,
-                alpha = 0.72f,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+    Box(modifier) {
+        LibraryListRow(
+            coverUri = album.artworkUri, coverKey = album.id.toString(), coverDescription = album.title,
+            title = album.title, subtitle = album.artist,
+            trailingText = if (album.trackCount > 0) "${album.trackCount} titre${if (album.trackCount > 1) "s" else ""}" else null,
+            playing = false, accent = Color.Unspecified, compact = false,
+            onClick = onClick, onLongClick = onLongClick,
+        )
     }
 }
 
@@ -836,12 +941,12 @@ private fun ArtistList(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = 0.dp, bottom = listBottomPadding() + 12.dp),
+        contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
     ) {
         itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, pair ->
             Row(
-                modifier = Modifier.tabStagger(rowIndex, TabMotion.ROW_STEP_MS, TabMotion.ROW_MS).fillMaxWidth().height(u * 148f),
-                horizontalArrangement = Arrangement.spacedBy(u * 32f),
+                modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth().height(u * 132f),
+                horizontalArrangement = Arrangement.spacedBy(u * 40f),
             ) {
                 pair.forEach { artist ->
                     val hero = com.ikko.aura.ui.components.LocalHero.current
@@ -851,7 +956,7 @@ private fun ArtistList(
                     val rowDensity = androidx.compose.ui.platform.LocalDensity.current
                     val nameStyle = androidx.compose.ui.text.TextStyle(
                         fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.ExtraBold,
-                        fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f),
+                        fontSize = com.ikko.aura.ui.components.designSp(36f), lineHeight = com.ikko.aura.ui.components.designSp(44f),
                     )
                     Row(
                         modifier = Modifier
@@ -864,17 +969,17 @@ private fun ArtistList(
                                     uri = null,
                                     cacheKey = null,
                                     cover = coverAnchor,
-                                    radiusPx = with(rowDensity) { (u * 62f).toPx() },
-                                    title = titleAnchor to com.ikko.aura.ui.components.HeroText(artist.name, androidx.compose.ui.geometry.Rect.Zero, nameStyle, Color.White),
+                                    radiusPx = with(rowDensity) { (u * 56f).toPx() },
+                                    title = titleAnchor to com.ikko.aura.ui.components.HeroText(artist.name, androidx.compose.ui.geometry.Rect.Zero, nameStyle, LibInk),
                                     sub = null,
                                     drawCover = false,
                                 )) navController.navigate(AuraDestination.ArtistPattern.route(artist.id.toString()))
                             },
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(u * 22f),
+                        horizontalArrangement = Arrangement.spacedBy(u * 24f),
                     ) {
                         Box(
-                            Modifier.size(u * 124f).heroAnchor(heroKey, coverAnchor).clip(CircleShape).background(Color(0xFF1F1F27)),
+                            Modifier.size(u * 112f).heroAnchor(heroKey, coverAnchor).clip(CircleShape).background(Color(0xFF1F1F27)),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
@@ -882,20 +987,26 @@ private fun ArtistList(
                                 color = Color(0xFFC4C4CD), fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
                                 fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(44f),
                             )
+                            com.ikko.aura.data.rememberArtistImage(artist.name)?.let { photo ->
+                                com.ikko.aura.ui.components.AlbumArt(
+                                    uri = photo, contentDescription = artist.name, shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                                    modifier = Modifier.fillMaxSize(), targetSizeDp = u * 112f, cacheKey = photo.toString(),
+                                )
+                            }
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
-                                artist.name, color = Color.White, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                                fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(40f),
-                                lineHeight = com.ikko.aura.ui.components.designSp(48f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                artist.name, color = LibInk, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+                                fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(36f),
+                                lineHeight = com.ikko.aura.ui.components.designSp(44f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.heroAnchor(heroKey, titleAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE),
                             )
                             Text(
                                 "${artist.trackCount} ${if (artist.trackCount > 1) "titres" else "titre"} · " +
                                     "${artist.albumCount} ${if (artist.albumCount > 1) "albums" else "album"}",
-                                color = Color(0xFF8B8B95), fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                                fontWeight = FontWeight.SemiBold, fontSize = com.ikko.aura.ui.components.designSp(34f),
-                                lineHeight = com.ikko.aura.ui.components.designSp(42f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = LibMuted, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+                                fontWeight = FontWeight.SemiBold, fontSize = com.ikko.aura.ui.components.designSp(30f),
+                                lineHeight = com.ikko.aura.ui.components.designSp(38f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.heroSideLine(heroKey),
                             )
                         }
@@ -909,64 +1020,48 @@ private fun ArtistList(
 }
 
 @Composable
-private fun PlaylistsList(
+internal fun PlaylistsList(
     playlists: List<PlaylistSummary>,
+    customArtworks: Map<Long, String> = emptyMap(),
+    tracksById: Map<String, com.ikko.aura.data.model.Track> = emptyMap(),
     listState: androidx.compose.foundation.lazy.LazyListState,
+    creating: Boolean,
     onCreate: (String) -> Unit,
+    onCancelCreate: () -> Unit,
     onOpen: (Long) -> Unit,
 ) {
     val u = com.ikko.aura.ui.components.designUnit()
-    var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     val rows = remember(playlists) { playlists.chunked(3) }
-    val accent = Color(0xFFA9DCEF)
+    val accent = com.ikko.aura.ui.components.rememberPlayerAccent()
 
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = 0.dp, bottom = listBottomPadding() + 12.dp),
+        contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
         verticalArrangement = Arrangement.spacedBy(u * 32f),
     ) {
-        item {
-            if (creating) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        placeholder = { Text("Nom de la playlist") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = AuraColors.TextPrimary,
-                            unfocusedTextColor = AuraColors.TextPrimary,
-                            focusedBorderColor = accent,
-                            unfocusedBorderColor = AuraColors.GlassBorder,
-                        ),
-                    )
-                    IconButton(onClick = {
-                        onCreate(newName)
-                        newName = ""
-                        creating = false
-                    }) { Icon(CupertinoIcons.Add, contentDescription = "Créer", tint = accent) }
-                }
-            } else {
-                Row(Modifier.fillMaxWidth().tabFade(200, 260), horizontalArrangement = Arrangement.End) {
-                    Row(
-                        modifier = Modifier
-                            .height(u * 64f)
-                            .clip(CircleShape)
-                            .clickable { creating = true }
-                            .padding(horizontal = u * 12f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(u * 12f),
-                    ) {
-                        Icon(CupertinoIcons.Add, null, tint = accent, modifier = Modifier.size(u * 34f))
-                        Text(
-                            "Nouvelle playlist", color = accent, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                            fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(34f),
-                            lineHeight = com.ikko.aura.ui.components.designSp(42f), maxLines = 1, softWrap = false,
-                        )
-                    }
+        if (creating) item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    placeholder = { Text("Nom de la playlist") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = AuraColors.TextPrimary,
+                        unfocusedTextColor = AuraColors.TextPrimary,
+                        focusedBorderColor = accent,
+                        unfocusedBorderColor = AuraColors.GlassBorder,
+                    ),
+                )
+                IconButton(onClick = {
+                    onCreate(newName)
+                    newName = ""
+                }) { Icon(CupertinoIcons.Add, contentDescription = "Créer", tint = accent) }
+                IconButton(onClick = { newName = ""; onCancelCreate() }) {
+                    Icon(CupertinoIcons.Close, contentDescription = "Annuler", tint = LibMuted)
                 }
             }
         }
@@ -983,7 +1078,7 @@ private fun PlaylistsList(
 
         itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, trio ->
             Row(
-                modifier = Modifier.tabStagger(rowIndex, TabMotion.ROW_STEP_MS, TabMotion.ROW_MS).fillMaxWidth(),
+                modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(u * 26f),
             ) {
                 trio.forEach { playlist ->
@@ -995,11 +1090,11 @@ private fun PlaylistsList(
                     val tileDensity = androidx.compose.ui.platform.LocalDensity.current
                     val titleStyle = androidx.compose.ui.text.TextStyle(
                         fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.ExtraBold,
-                        fontSize = com.ikko.aura.ui.components.designSp(38f), lineHeight = com.ikko.aura.ui.components.designSp(46f),
+                        fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
                     )
                     val subStyle = androidx.compose.ui.text.TextStyle(
                         fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.SemiBold,
-                        fontSize = com.ikko.aura.ui.components.designSp(34f), lineHeight = com.ikko.aura.ui.components.designSp(42f),
+                        fontSize = com.ikko.aura.ui.components.designSp(30f), lineHeight = com.ikko.aura.ui.components.designSp(38f),
                     )
                     val countText = "${playlist.trackCount} titre${if (playlist.trackCount > 1) "s" else ""}"
                     Column(
@@ -1012,9 +1107,9 @@ private fun PlaylistsList(
                                     uri = null,
                                     cacheKey = null,
                                     cover = coverAnchor,
-                                    radiusPx = with(tileDensity) { (u * 30f).toPx() },
-                                    title = titleAnchor to com.ikko.aura.ui.components.HeroText(playlist.name, androidx.compose.ui.geometry.Rect.Zero, titleStyle, Color.White),
-                                    sub = subAnchor to com.ikko.aura.ui.components.HeroText(countText, androidx.compose.ui.geometry.Rect.Zero, subStyle, Color(0xFF8B8B95)),
+                                    radiusPx = with(tileDensity) { 8.dp.toPx() },
+                                    title = titleAnchor to com.ikko.aura.ui.components.HeroText(playlist.name, androidx.compose.ui.geometry.Rect.Zero, titleStyle, LibInk),
+                                    sub = subAnchor to com.ikko.aura.ui.components.HeroText(countText, androidx.compose.ui.geometry.Rect.Zero, subStyle, LibMuted),
                                     drawCover = false,
                                 )) onOpen(playlist.id)
                             },
@@ -1024,30 +1119,30 @@ private fun PlaylistsList(
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
                                 .heroAnchor(heroKey, coverAnchor)
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(u * 30f))
-                                .background(if (playlist.isFavorites) Color(0xFF2A1520) else Color(0xFF17171D)),
+                                .clip(com.ikko.aura.ui.theme.AuraShapes.AlbumCover),
                             contentAlignment = Alignment.Center,
                         ) {
-                            if (playlist.isFavorites) {
-                                Icon(CupertinoIcons.HeartFilled, null, tint = Color(0xFFF39AB4), modifier = Modifier.size(u * 110f))
-                            } else {
-                                Icon(CupertinoIcons.PlaylistMusic, null, tint = Color(0xFF8B8B95), modifier = Modifier.size(u * 96f))
-                            }
+                            com.ikko.aura.ui.components.PlaylistSquareCover(
+                                playlist = playlist,
+                                tracksById = tracksById,
+                                customArtworkUri = customArtworks[playlist.id],
+                                playing = !listState.isScrollInProgress,
+                            )
                         }
                         Text(
-                            playlist.name, color = Color.White, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                            fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(38f),
-                            lineHeight = com.ikko.aura.ui.components.designSp(46f), maxLines = 1,
+                            playlist.name, color = LibInk, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+                            fontWeight = FontWeight.ExtraBold, fontSize = com.ikko.aura.ui.components.designSp(34f),
+                            lineHeight = com.ikko.aura.ui.components.designSp(42f), maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
-                                .padding(top = u * 14f)
+                                .padding(top = u * 12f)
                                 .heroAnchor(heroKey, titleAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE),
                         )
                         Text(
                             countText,
-                            color = Color(0xFF8B8B95), fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
-                            fontWeight = FontWeight.SemiBold, fontSize = com.ikko.aura.ui.components.designSp(34f),
-                            lineHeight = com.ikko.aura.ui.components.designSp(42f), maxLines = 1,
+                            color = LibMuted, fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+                            fontWeight = FontWeight.SemiBold, fontSize = com.ikko.aura.ui.components.designSp(30f),
+                            lineHeight = com.ikko.aura.ui.components.designSp(38f), maxLines = 1,
                             modifier = Modifier.heroAnchor(heroKey, subAnchor, com.ikko.aura.ui.components.HeroState.ROLE_SUB),
                         )
                     }
@@ -1155,3 +1250,13 @@ private const val MIN_ITEMS_FOR_INDEX = 25
 /** The room a list keeps at its end: the player's. */
 @Composable
 private fun listBottomPadding(): androidx.compose.ui.unit.Dp = LocalPlayerPillHeight.current
+
+/**
+ * Material's shared axis on x, as a cross-fade: the pages move this far; the page's alpha is how far in it is and the menu's
+ * the rest, so the two always make a whole and nothing dips in between (fading one out and then the other in left a dark moment
+ * at the middle, which blinked).
+ */
+private val AXIS_SHIFT = 30.dp
+private const val AXIS_MENU_REST = 0.3f
+private const val PUSH_MS = 300
+private val PushEasing = androidx.compose.animation.core.FastOutSlowInEasing

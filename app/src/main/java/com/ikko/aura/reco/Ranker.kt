@@ -53,8 +53,11 @@ object Eligibility {
             c.extraCredits.any { ArtistNames.key(it) in ctx.blocked }
         ) return Exclusion.BLOCKED_ARTIST
         if (c.id in ctx.hidden || c.identity in ctx.hidden) return Exclusion.HIDDEN
+        // An album the listener refused: none of its songs, however the source numbers them.
+        if (ctx.hidden.isNotEmpty() && AlbumKeys.of(c.albumRef, c.album, c.artist).any { it in ctx.hidden }) return Exclusion.HIDDEN
         if (c.durationMs in 1 until MIN_DURATION_MS || c.durationMs > MAX_DURATION_MS ||
-            JUNK_TITLE.containsMatchIn(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album)
+            JUNK_TITLE.containsMatchIn(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album) ||
+            com.ikko.aura.reco.authority.CompilationTitles.matches(c.title) || com.ikko.aura.reco.authority.CompilationTitles.matches(c.album)
         ) return Exclusion.JUNK
         if (c.identity in ctx.profile.knownTracks) return Exclusion.KNOWN
         if (ctx.local.contains(TrackIdentity.Entry(c.title, c.artist, c.durationMs, c.extraCredits))) return Exclusion.LOCAL_DUPLICATE

@@ -92,6 +92,8 @@ fun Modifier.liquidGlass(
     edge: Boolean = true,
     /** 1 for a surface of the usual size; less for a small one, where the full lens would bend the whole of it. */
     lensScale: Float = 1f,
+    /** False for glass that must not change the colours behind it (the mini player's: it shows them as they are). */
+    vibrant: Boolean = true,
 ): Modifier {
     if (LocalAuraBatterySaver.current) {
         return background(tint.copy(alpha = 0.55f), shape).let {
@@ -110,7 +112,7 @@ fun Modifier.liquidGlass(
         backdrop = backdrop,
         shape = { shape },
         effects = {
-            colorControls(saturation = 1f + 0.5f * VIBRANCY)
+            if (vibrant) colorControls(saturation = 1f + 0.5f * VIBRANCY)
             blur(blurPx)
             if (lensScale > 0f) {
                 lens(
@@ -158,6 +160,7 @@ fun LiquidGlassPanel(
     edge: Boolean = true,
     lensScale: Float = 1f,
     contentAlignment: Alignment = Alignment.TopStart,
+    vibrant: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier = modifier, contentAlignment = contentAlignment) {
@@ -173,7 +176,7 @@ fun LiquidGlassPanel(
                 // rendered glass is kept and reused until the backdrop behind it actually
                 // changes.
                 .graphicsLayer { }
-                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge, lensScale),
+                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge, lensScale, vibrant),
         )
         content()
     }

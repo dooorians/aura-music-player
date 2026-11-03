@@ -14,12 +14,19 @@ import kotlinx.coroutines.launch
  * device; a failed write is dropped, never a reason for the player to stutter.
  */
 @Singleton
-class ListeningRecorder @Inject constructor(private val dao: RecoDao) {
+class ListeningRecorder @Inject constructor(
+    private val dao: RecoDao,
+    private val lastFm: com.ikko.aura.lastfm.LastFm,
+    private val smart: SmartTracker,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val written = AtomicInteger()
 
     /** [context] is the [RecoKind.key] of the playlist the song was played from, if it was. */
-    fun songLeft(track: Track, playedMs: Long, durationMs: Long, transition: Transition, context: String?) {
+    fun songLeft(track: Track, playedMs: Long, durationMs: Long, transition: Transition, context: String?, manualStart: Boolean = false) {
+        smart.listenEnded(track, playedMs, durationMs, transition, manualStart)
+        // The same moment is a scrobble, when Last.fm is connected and the song was heard enough.
+        lastFm.songLeft(track, playedMs, durationMs, System.currentTimeMillis() - playedMs)
         // A glance of a second or two is not a listen nor much of a refusal.
         if (playedMs < 1_500L && transition != Transition.USER_SKIP) return
         val outcome = ListenClassifier.classify(playedMs, if (durationMs > 0) durationMs else track.durationMs, transition)
@@ -36,6 +43,9 @@ class ListeningRecorder @Inject constructor(private val dao: RecoDao) {
             }
         }
     }
+
+    /** A song has begun: Last.fm shows it as playing. */
+    fun songStarted(track: Track) = lastFm.nowPlaying(track)
 
     private companion object {
         const val PRUNE_EVERY = 200

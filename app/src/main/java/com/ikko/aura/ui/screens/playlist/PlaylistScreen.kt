@@ -22,7 +22,7 @@ import com.ikko.aura.ui.components.albumThemeFromBitmap
 import com.ikko.aura.ui.screens.album.AlbumGround
 import com.ikko.aura.ui.screens.album.StatusBarScrim
 import com.ikko.aura.ui.screens.home.cardAmbienceOf
-import com.ikko.aura.ui.screens.home.rememberCardArt
+import com.ikko.aura.ui.screens.home.rememberMixArt
 import com.ikko.aura.ui.theme.LocalPageTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -121,24 +121,63 @@ fun PlaylistScreen(
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    val customArtwork by playlistDetailViewModel.customArtwork.collectAsStateWithLifecycle()
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        playlistDetailViewModel.setCustomArtwork(uri.toString())
+    }
+    val customBitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, customArtwork) {
+        val uriStr = customArtwork
+        if (uriStr.isNullOrBlank()) {
+            value = null
+            return@produceState
+        }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val uri = android.net.Uri.parse(uriStr)
+                val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+                android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    val longest = maxOf(info.size.width, info.size.height)
+                    if (longest > 128) {
+                        val scale = 128f / longest
+                        decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
+                    }
+                }
+            }.getOrNull()
+        }
+    }
     val autoKey by playlistDetailViewModel.autoKey.collectAsStateWithLifecycle()
     val ambience = autoKey?.let { cardAmbienceOf(it) }
-    val cardArt = ambience?.let { rememberCardArt(it) }
+    // The five mixes that have an animated artwork take their page's colours from its still; the others, from their gradient.
+    val artwork = com.ikko.aura.ui.components.mixArtworkForPlaylist(
+        playlistId.toLongOrNull() ?: -1L,
+        detail?.name.orEmpty(),
+        autoKey,
+    )
+    val poster = artwork?.let { remember(it.poster) { android.graphics.BitmapFactory.decodeResource(context.resources, it.poster) } }
+    val cardArt = poster ?: ambience?.let { rememberMixArt(it, detail?.tracks.orEmpty()) }
+    val artSeed = (ambience?.ordinal ?: 0) * 31 + 7
     val firstTrack = detail?.tracks?.firstOrNull()
-    var theme by remember(ambience, firstTrack?.albumId, firstTrack?.artworkUri) {
+    val currentCustomBmp = customBitmap
+    var theme by remember(currentCustomBmp, ambience, firstTrack?.albumId, firstTrack?.artworkUri) {
         mutableStateOf<com.ikko.aura.ui.components.AlbumTheme?>(
             when {
-                cardArt != null && ambience != null -> albumThemeFromBitmap(cardArt, seed = ambience.ordinal * 31 + 7)
+                currentCustomBmp != null -> albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                cardArt != null && (ambience != null || artwork != null) -> albumThemeFromBitmap(cardArt, seed = artSeed)
                 firstTrack == null && detail != null -> com.ikko.aura.ui.components.AlbumTheme.Neutral
                 else -> null
             },
         )
     }
-    androidx.compose.runtime.LaunchedEffect(cardArt, ambience, firstTrack?.albumId, firstTrack?.artworkUri, detail != null) {
-        if (theme == null) {
+    androidx.compose.runtime.LaunchedEffect(currentCustomBmp, cardArt, ambience, firstTrack?.albumId, firstTrack?.artworkUri, detail != null) {
+        if (theme == null || currentCustomBmp != null) {
             theme = when {
-                cardArt != null && ambience != null -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    albumThemeFromBitmap(cardArt, seed = ambience.ordinal * 31 + 7)
+                currentCustomBmp != null -> albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                cardArt != null && (ambience != null || artwork != null) -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    albumThemeFromBitmap(cardArt, seed = artSeed)
                 }
                 firstTrack != null -> com.ikko.aura.ui.components.buildAlbumTheme(context, firstTrack)
                 detail != null -> com.ikko.aura.ui.components.AlbumTheme.Neutral
@@ -279,22 +318,26 @@ fun PlaylistScreen(
                             )
                         }
                         Spacer(Modifier.height(com.ikko.aura.ui.components.designUnit() * 52f))
-                        if (current.tracks.isNotEmpty()) Row(
-                            modifier = Modifier.heroRise(1),
+                        if (current.tracks.isNotEmpty() || !isFavorites) Row(
+                            modifier = Modifier.heroRise(1).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(com.ikko.aura.ui.components.designUnit() * 22f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            PlayAllButton(
-                                onClick = { playerViewModel.playQueue(current.tracks, 0, context = autoKey) },
-                                label = "Lire tout",
-                                modifier = Modifier.weight(1f),
-                            )
-                            com.ikko.aura.ui.screens.album.SecondaryPillButton(
-                                onClick = { playerViewModel.playShuffled(current.tracks, context = autoKey) },
-                                label = "Mélanger",
-                                icon = CupertinoIcons.Shuffle,
-                                modifier = Modifier.weight(1f),
-                            )
+                            if (current.tracks.isNotEmpty()) {
+                                PlayAllButton(
+                                    onClick = { playerViewModel.playQueue(current.tracks, 0, context = autoKey) },
+                                    label = "Lire tout",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                com.ikko.aura.ui.screens.album.SecondaryPillButton(
+                                    onClick = { playerViewModel.playShuffled(current.tracks, context = autoKey) },
+                                    label = "Mélanger",
+                                    icon = CupertinoIcons.Shuffle,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
                             // Favoris is kept: no renaming or deleting it, so no menu.
                             if (!isFavorites) Box(Modifier.glassMenuAnchor(menuState)) {
                                 val btnColors = com.ikko.aura.ui.screens.album.rememberAlbumButtonColors()
@@ -303,6 +346,28 @@ fun PlaylistScreen(
                                 }
                                 // The design's playlist menu (600 px wide, the page's colour at 24 %).
                                 DesignMenu(state = menuState, width = 240.dp, shade = 0.24f) {
+                                    val isPersonal = !isFavorites && autoKey == null
+                                    if (isPersonal) {
+                                        DesignMenuRow(
+                                            label = "Changer la photo",
+                                            onClick = {
+                                                menuState.close()
+                                                photoPicker.launch(arrayOf("image/*"))
+                                            },
+                                            icon = CupertinoIcons.Album,
+                                        )
+                                        if (customArtwork != null) {
+                                            DesignMenuRow(
+                                                label = "Supprimer la photo",
+                                                onClick = {
+                                                    menuState.close()
+                                                    playlistDetailViewModel.setCustomArtwork(null)
+                                                },
+                                                icon = CupertinoIcons.Delete,
+                                            )
+                                        }
+                                        DesignMenuDivider()
+                                    }
                                     DesignMenuRow("Renommer", { menuState.close(); renaming = true }, icon = CupertinoIcons.Pencil)
                                     DesignMenuDivider()
                                     DesignMenuRow(
@@ -334,7 +399,7 @@ fun PlaylistScreen(
                     }
                 }
                 itemsIndexed(current.tracks, key = { _, track -> track.id }) { index, track ->
-                    Box(Modifier.heroRise(2 + index)) {
+                    Box(Modifier.heroRise(index, rows = true)) {
                     AlbumTrackRow(
                         number = index + 1,
                         track = track,
@@ -348,7 +413,7 @@ fun PlaylistScreen(
                             AlbumArt(
                                 uri = track.artworkUri,
                                 contentDescription = null,
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(com.ikko.aura.ui.components.designUnit() * 32f),
+                                shape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover,
                                 modifier = Modifier.size(com.ikko.aura.ui.components.designUnit() * 130f),
                                 targetSizeDp = com.ikko.aura.ui.components.designUnit() * 130f,
                                 cacheKey = track.albumId.toString(),
@@ -379,7 +444,6 @@ fun PlaylistScreen(
                     }
                 }
             }
-            StatusBarScrim(solid = resolvedTheme.solid, listState = listState, arrival = groundArrival)
             }
         }
     }

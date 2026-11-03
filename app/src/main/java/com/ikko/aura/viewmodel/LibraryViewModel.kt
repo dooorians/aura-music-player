@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,6 +41,8 @@ data class LibraryUiState(
     val sort: LibrarySort = LibrarySort.NAME,
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
+    /** The albums whose newest song arrived last, newest first (the library menu's "Ajoutés récemment"). */
+    val recentlyAdded: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val isScanning: Boolean = true,
     val albumLayoutMode: AlbumLayoutMode = AlbumLayoutMode.GRID_3,
@@ -51,6 +54,8 @@ private data class RepositorySnapshot(
     val albums: List<Album>,
     val artists: List<Artist>,
     val isScanning: Boolean,
+    /** The downloaded albums' dates (seconds), by their id in the lists. */
+    val downloadedDates: Map<Long, Long> = emptyMap(),
 )
 
 @HiltViewModel
@@ -60,6 +65,7 @@ class LibraryViewModel @Inject constructor(
     private val selection: LibrarySelection,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
     private val settingsStore: SettingsStore,
+    private val recentlyPlayed: com.ikko.aura.data.RecentlyPlayedTracker,
 ) : ViewModel() {
 
     /**
@@ -71,6 +77,19 @@ class LibraryViewModel @Inject constructor(
     /** Re-reads MediaStore after a deletion the system has just confirmed. */
     fun rescan() {
         viewModelScope.launch { repository.refresh(forceRescan = true) }
+    }
+
+    /**
+     * The tracks of the albums played most this month (30 days), the most played album first: what "Les plus écoutés"
+     * plays. The app counts plays by album, so this is the albums' order, each in its own track order. Where nothing was
+     * played this month, the most played ever.
+     */
+    suspend fun mostPlayedTracks(): List<Track> {
+        val plays = recentlyPlayed.playCounts.first()
+        val monthAgo = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        val ranked = plays.filter { it.lastPlayedAtMs >= monthAgo }.ifEmpty { plays }.sortedByDescending { it.playCount }
+        val byAlbum = ytmLibrary.withFiles(uiState.value.tracks).groupBy { it.albumId }
+        return ranked.flatMap { byAlbum[it.albumId].orEmpty() }
     }
 
     suspend fun smartShuffle(): List<Track> {
@@ -99,8 +118,9 @@ class LibraryViewModel @Inject constructor(
         },
         repository.artists,
         repository.isScanning,
-    ) { tracks, albums, artists, isScanning ->
-        RepositorySnapshot(tracks, albums, artists, isScanning)
+        ytmLibrary.observeDownloadedAlbumDates(),
+    ) { tracks, albums, artists, isScanning, downloadedDates ->
+        RepositorySnapshot(tracks, albums, artists, isScanning, downloadedDates)
     }
 
     private val sortedSnapshot = combine(repositorySnapshot, sort) { snapshot, s ->
@@ -119,6 +139,7 @@ class LibraryViewModel @Inject constructor(
             sort = s,
             tracks = sortedTracks,
             albums = sortedAlbums,
+            recentlyAdded = recentlyAddedOf(snapshot.tracks, snapshot.albums, snapshot.downloadedDates),
             artists = snapshot.artists,
             isScanning = snapshot.isScanning,
             albumLayoutMode = albumLayout,
@@ -129,6 +150,10 @@ class LibraryViewModel @Inject constructor(
     init {
         viewModelScope.launch { repository.refresh() }
     }
+
+    /** A page asked for from elsewhere (Home's "Tout voir"), until the library has opened it. */
+    val openRequest: StateFlow<LibraryFilter?> = selection.openRequest
+    fun clearOpenRequest() = selection.requestOpen(null)
 
     fun setFilter(newFilter: LibraryFilter) {
         selection.select(newFilter)
@@ -161,5 +186,17 @@ class LibraryViewModel @Inject constructor(
         LibrarySort.NAME -> tracks.sortedBy { it.title.lowercase() }
         LibrarySort.ARTIST -> tracks.sortedBy { it.artist.lowercase() }
         LibrarySort.DATE_ADDED -> tracks
+    }
+
+    /** The albums by the arrival of their newest song, the newest first; the ones with no known date are left out. */
+    private fun recentlyAddedOf(tracks: List<Track>, albums: List<Album>, downloaded: Map<Long, Long>): List<Album> {
+        val newest = HashMap<Long, Long>(downloaded)
+        for (t in tracks) if (t.addedAtSec > 0) newest.merge(t.albumId, t.addedAtSec, ::maxOf)
+        return albums.filter { it.id in newest }.sortedByDescending { newest[it.id] }.take(RECENT_COUNT)
+    }
+
+    private companion object {
+        /** Four rows of the library menu's grid of three. */
+        const val RECENT_COUNT = 12
     }
 }

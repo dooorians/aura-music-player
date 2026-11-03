@@ -33,7 +33,11 @@ data class LibraryEntry(val title: String, val artist: String, val year: Int = 0
 
 data class AlbumPlayRecord(val artist: String, val plays: Int, val lastPlayedAtMs: Long)
 
-enum class FeedbackKind { LIKE, DISLIKE, HIDE, KNOWN, BLOCK_ARTIST }
+/**
+ * [DISLIKE_ALBUM] and [LIKE_ALBUM]: an album refused, or liked, as a whole; its [FeedbackRecord.subject] is an [AlbumKeys] key, its title
+ * the album's name. An album is written once per key it answers to (its reference, its name), so it counts once in the profile.
+ */
+enum class FeedbackKind { LIKE, DISLIKE, HIDE, KNOWN, BLOCK_ARTIST, DISLIKE_ALBUM, LIKE_ALBUM }
 
 /** An explicit answer of the listener. For [FeedbackKind.BLOCK_ARTIST] [subject] is the artist's name, else a track's id. */
 data class FeedbackRecord(
@@ -54,6 +58,8 @@ data class ProfileInputs(
     val albumPlays: List<AlbumPlayRecord> = emptyList(),
     val feedback: List<FeedbackRecord> = emptyList(),
     val seedArtists: List<String> = emptyList(),
+    /** The ones of [seedArtists] that were chosen in the taste picker. */
+    val pickedArtists: List<String> = emptyList(),
     val nowMs: Long,
 )
 
@@ -130,6 +136,8 @@ object TasteProfileBuilder {
     private const val W_PLAYLIST = 1.2
     private const val W_LIKE = 3.0
     private const val W_SEED = 1.8
+    /** An artist chosen on purpose in the picker counts more than a like of one of their songs. */
+    private const val W_PICKED = 4.5
     private const val W_ALBUM_PLAY = 0.5
 
     private class Acc {
@@ -247,6 +255,7 @@ object TasteProfileBuilder {
 
         // Explicit answers.
         val blocked = HashSet<String>()
+        val albumsAnswered = HashSet<String>()
         for (fb in inputs.feedback) {
             val age = ageDays(fb.atMs)
             when (fb.kind) {
@@ -257,6 +266,15 @@ object TasteProfileBuilder {
                     seedWeights.merge(fb.subject, SeedTrack(fb.title, fb.artist, W_LIKE, fb.subject)) { a, b -> SeedTrack(a.title, a.artist, a.weight + b.weight, a.trackId) }
                 }
                 FeedbackKind.DISLIKE -> credit(fb.artist, emptyList(), fb.title, 0.8, age, fb.context, negative = true)
+                // An album refused: said once for the album, whatever its number of songs, against its artist in the context it was refused in.
+                FeedbackKind.DISLIKE_ALBUM ->
+                    if (albumsAnswered.add("-" + AlbumKeys.ofName(fb.title, fb.artist))) credit(fb.artist, emptyList(), fb.title, 1.2, age, fb.context, negative = true)
+                // An album liked: said once for the album too, as strongly as a song is, for its artist.
+                FeedbackKind.LIKE_ALBUM ->
+                    if (albumsAnswered.add("+" + AlbumKeys.ofName(fb.title, fb.artist))) {
+                        credit(fb.artist, emptyList(), fb.title, W_LIKE, age)
+                        evidence += W_LIKE
+                    }
                 // Hiding a track says nothing of its artist.
                 FeedbackKind.HIDE -> Unit
                 // "Already known" is not a rejection: it only makes the song, and its artist, familiar.
@@ -269,13 +287,16 @@ object TasteProfileBuilder {
         }
 
         // Artists the listener typed in: a strong prior for someone with nothing else to go on.
-        for (s in inputs.seedArtists) {
+        // In the order given (what is played most first, for those from Last.fm): the first count in full, the last less.
+        val seedCount = inputs.seedArtists.size
+        val picked = inputs.pickedArtists.mapTo(HashSet()) { ArtistNames.key(it) }
+        for ((i, s) in inputs.seedArtists.withIndex()) {
             val k = ArtistNames.key(s)
             if (k.isEmpty()) continue
             val a = acc.getOrPut(k) { Acc() }
             if (a.display == null) a.display = s.trim()
             a.seeded = true
-            a.add(W_SEED, 0.0)
+            a.add(if (k in picked) W_PICKED else W_SEED * (1.0 - 0.6 * i / max(1, seedCount - 1)), 0.0)
             knownArtists += k
             evidence += W_SEED * 0.5
         }

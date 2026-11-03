@@ -15,6 +15,8 @@ interface RecoStore {
     suspend fun localIndex(): TrackIdentity.Index
     /** Keys of the blocked artists. */
     suspend fun blockedArtists(): Set<String>
+    /** The names of the blocked artists, as the listener blocked them: what the catalogues are asked about. */
+    suspend fun blockedNames(): List<String> = emptyList()
     /** Ids and identity keys of what the listener hid, disliked or called known. */
     suspend fun hidden(): Set<String>
     suspend fun history(): Map<String, Long>
@@ -48,6 +50,11 @@ class RecoPipeline(
     private val zone: ZoneId = ZoneId.systemDefault(),
     /** Diagnostics only: what was asked and found. Never carries anything the listener did not already have on the device. */
     private val log: (String) -> Unit = {},
+    /** What an outside catalogue says of artists: keeps out what has nothing to do with the listener's taste. */
+    private val insight: ArtistInsight? = null,
+    private val authority: com.ikko.aura.reco.authority.ArtistAuthority? = null,
+    private val verifier: com.ikko.aura.reco.authority.DiscographyVerifier? = null,
+    private val deezerClient: com.ikko.aura.data.deezer.DeezerClient? = null,
 ) {
     /**
      * Most specific first: a song fits the narrowest playlist it can, the broad ones take what is left. Discovery comes
@@ -80,7 +87,9 @@ class RecoPipeline(
         }
 
         val variation = kinds.maxOf { Renewal.variationOf(it, now, zone) }
-        val queries = QueryPlan.build(profile, kinds, variation, blocked)
+        // Similar artists from Last.fm and Deezer related graphs: verified and deduplicated
+        val similarQueries = runCatching { similarArtistQueries(insight, profile, blocked) }.getOrDefault(emptyList())
+        val queries = similarQueries + QueryPlan.build(profile, kinds, variation, blocked)
         val gathered = CandidateGatherer.gather(live, queries)
         if (gathered.candidates.isEmpty()) {
             kinds.forEach { store.keep(it, STATUS_UNAVAILABLE, now) }
@@ -105,6 +114,11 @@ class RecoPipeline(
         // What each source said about a song when asked, kept for the whole renewal: a song is looked up once.
         val checked = HashMap<String, Verification>()
         var pool = withCollabs(CandidateMerger.merge(gathered.candidates, sourceOrder), profile)
+        insight?.let { i ->
+            val before = pool.size
+            pool = runCatching { TasteGate(i, profile, store.blockedNames()).apply(pool) }.getOrDefault(pool)
+            log("taste gate: $before -> ${pool.size}")
+        }
         // Dates of recent releases are not in a search result: asked for the few that could be new.
         if (RecoKind.NEW in kinds) {
             lookUp(pool.filter { needsDate(it, ctxBase) }.sortedByDescending { tieOf(it, profile) }.take(MAX_DATE_LOOKUPS), sourcesById, checked)
@@ -136,7 +150,12 @@ class RecoPipeline(
                 val selected = Ranker.select(kind, current, ctx, HashSet(used))
                 lookUp(selected.map { it.candidate }, sourcesById, checked)
                 val verified = selected.map { p -> p.copy(candidate = applied(p.candidate, checked[p.candidate.id])) }
-                val bad = verified.filter { p -> !acceptable(p.candidate, checked[p.candidate.id], ctx) }
+                val bad = ArrayList<Pick>()
+                for (p in verified) {
+                    if (!acceptable(p.candidate, checked[p.candidate.id], ctx)) {
+                        bad += p
+                    }
+                }
                 picks = verified - bad.toSet()
                 if (bad.isEmpty()) break
                 rejected += bad.map { it.candidate.identity }
@@ -152,6 +171,72 @@ class RecoPipeline(
             }
         }
         return RunResult(RunStatus.UPDATED, updated, kept)
+    }
+
+    /**
+     * Artists close to the listener's top ones, by Last.fm and Deezer: those named by several of them first, and the closest of each; never
+     * one the listener already has, nor a blocked one.
+     */
+    private suspend fun similarArtistQueries(insight: ArtistInsight?, profile: TasteProfile, blocked: Set<String>): List<RecoQuery> = coroutineScope {
+        val tops = profile.topArtists(8, excluding = blocked)
+        val lastFmLists = if (insight != null) {
+            tops.map { k -> async { k to withTimeoutOrNull(8_000L) { insight.similar(profile.nameOf(k)) }.orEmpty() } }.awaitAll()
+        } else emptyList()
+
+        val deezerLists = if (deezerClient != null && authority != null) {
+            tops.map { k ->
+                async {
+                    val name = profile.nameOf(k)
+                    val resolved = authority.resolve(name, profile.genres.keys)
+                    val dId = resolved?.deezerId
+                    if (dId != null && dId > 0) {
+                        val related = runCatching { deezerClient.getRelatedArtists(dId, limit = 20) }.getOrDefault(emptyList())
+                        k to related.map { it.name }
+                    } else {
+                        k to emptyList()
+                    }
+                }
+            }.awaitAll()
+        } else emptyList()
+
+        val score = HashMap<String, Double>()
+        val names = HashMap<String, String>()
+        val seedOf = HashMap<String, String>()
+        for ((seed, similar) in lastFmLists) {
+            similar.take(15).forEachIndexed { i, name ->
+                val key = ArtistNames.key(name)
+                if (key.isEmpty() || key in profile.knownArtists || key in blocked || profile.affinity(key) > 0.0) return@forEachIndexed
+                score.merge(key, profile.affinity(seed) * (1.0 - i / 20.0), Double::plus)
+                names.putIfAbsent(key, name)
+                seedOf.putIfAbsent(key, profile.nameOf(seed))
+            }
+        }
+        for ((seed, related) in deezerLists) {
+            related.take(15).forEachIndexed { i, name ->
+                val key = ArtistNames.key(name)
+                if (key.isEmpty() || key in profile.knownArtists || key in blocked || profile.affinity(key) > 0.0) return@forEachIndexed
+                score.merge(key, profile.affinity(seed) * (1.0 - i / 20.0), Double::plus)
+                names.putIfAbsent(key, name)
+                seedOf.putIfAbsent(key, profile.nameOf(seed))
+            }
+        }
+        val topSimilar = score.entries.sortedByDescending { it.value }.take(MAX_SIMILAR_ARTISTS)
+        val verifiedSimilar = ArrayList<RecoQuery>()
+        for ((key, s) in topSimilar) {
+            val candidateName = names.getValue(key)
+            val seedName = seedOf.getValue(key)
+            if (authority != null) {
+                val resolved = authority.resolve(candidateName, profile.genres.keys)
+                if (resolved != null && resolved.primaryTags.isNotEmpty() && profile.genres.isNotEmpty()) {
+                    val hasMatch = resolved.primaryTags.any { t -> profile.genres.containsKey(t) }
+                    if (!hasMatch && (resolved.primaryTags.contains("spoken word") || resolved.primaryTags.contains("comedy") || resolved.primaryTags.contains("religious"))) {
+                        continue
+                    }
+                }
+            }
+            verifiedSimilar += RecoQuery.SimilarArtist(candidateName, seedName, (0.45 + s * 0.2).coerceAtMost(0.8))
+        }
+        verifiedSimilar
     }
 
     /** The candidate as what its source said when asked adds to it: the album its page names, a stated date, a song. */
@@ -179,13 +264,30 @@ class RecoPipeline(
     /**
      * Whether a song can be offered once its source has been asked: not refused, a song and not a video, and not a
      * song of an album (or a recording) the listener has — which the page may only reveal now.
+     * Enforces strict verified discography integrity and disambiguation.
      */
-    private fun acceptable(c: Candidate, v: Verification?, ctx: RankContext): Boolean {
+    private suspend fun acceptable(c: Candidate, v: Verification?, ctx: RankContext): Boolean {
         if (v?.playable == false) return false
         // Of the sources, only YouTube Music mixes videos in with songs: its songs must be vouched for, by an official
         // release's own description, or — when the page could not be read — by the search of songs they came from.
         if (c.sourceId == "ytm" && !c.confirmedSong) return false
-        return Eligibility.excluded(c, ctx) == null
+        if (Eligibility.excluded(c, ctx) != null) return false
+
+        // Strict discography & homonym verification
+        if (authority != null && verifier != null) {
+            val primaryArtist = ArtistNames.primary(c.artist, beforeAmpersand = true)
+            if (primaryArtist.isNotEmpty()) {
+                val resolved = authority.resolve(primaryArtist, ctx.profile.genres.keys)
+                if (resolved != null && (resolved.deezerId != null || !resolved.mbid.isNullOrBlank())) {
+                    val isOfficial = verifier.isOfficialTrackAndRelease(resolved, c.title, c.album)
+                    if (!isOfficial) {
+                        log("Excluded non-official candidate: ${c.artist} - ${c.title} on [${c.album}]")
+                        return false
+                    }
+                }
+            }
+        }
+        return true
     }
 
     private fun tieOf(c: Candidate, profile: TasteProfile): Double =
@@ -229,5 +331,6 @@ class RecoPipeline(
         const val RETRY_AFTER_MS = 6L * 60 * 60 * 1000
         const val MAX_DATE_LOOKUPS = 24
         const val MAX_SONG_CHECKS = 60
+        const val MAX_SIMILAR_ARTISTS = 14
     }
 }

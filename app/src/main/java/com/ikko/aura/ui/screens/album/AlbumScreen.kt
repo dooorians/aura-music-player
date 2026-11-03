@@ -3,6 +3,7 @@ package com.ikko.aura.ui.screens.album
 import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.components.heroTarget
+import com.ikko.aura.ui.components.suppressEdgeBackRipple
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -39,7 +40,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
-import com.ikko.aura.ui.components.scrollTopBlur
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.withFrameMillis
@@ -94,6 +94,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.AudioFormat
 import com.ikko.aura.data.model.Track
+import com.ikko.aura.navigation.streamedArtistRoute
 import com.ikko.aura.navigation.AuraDestination
 import com.ikko.aura.ui.components.AddToPlaylistDialog
 import com.ikko.aura.ui.components.AlbumArt
@@ -165,7 +166,47 @@ class StreamedAlbumControls(
     val onDownloadTrack: (Track) -> Unit,
     /** Run before the songs are handed to something that only knows their ids (the add-to-playlist dialog). */
     val prepare: suspend () -> Unit,
+    /** To the page of the whole album, when this one lists only what is on the device. */
+    val onShowFullAlbum: (() -> Unit)? = null,
+    /** To the page of what is on the device, when this one lists the whole album. */
+    val onShowLocal: (() -> Unit)? = null,
+    /** Whether anything of the album is on the device: the "Local" side of the source switch has nothing to show otherwise. */
+    val localAvailable: Boolean = true,
 )
+
+/**
+ * An album's page before the source has answered: the page itself (header, the very buttons, the rows) with what the card it came from
+ * knows (the cover, the title, the artist) and grey where the rest will be, so that it is there at touch and the trip of the cover and of
+ * the words has its places from the first frame. Opened from somewhere that said nothing, everything is grey.
+ */
+@Composable
+fun AlbumLoadingPage(navController: NavHostController, playerViewModel: PlayerViewModel) {
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // What the card knows, read once as the page opens: the trip's own record of it.
+    val cover = remember { hero.uri }
+    val title = remember { hero.srcTitle?.text.orEmpty() }
+    val artist = remember { hero.srcSub?.text.orEmpty() }
+    // Its colours come from the cover as the real page's do, so that nothing changes colour when the songs arrive.
+    val theme by androidx.compose.runtime.produceState<com.ikko.aura.ui.components.AlbumTheme?>(
+        if (cover == null) com.ikko.aura.ui.components.AlbumTheme.Neutral else null, cover,
+    ) {
+        if (cover != null) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            com.ikko.aura.ui.components.AlbumArtCache.load(context, cover, 192, cover.toString())
+                ?.let { com.ikko.aura.ui.components.albumThemeFromBitmap(it, cover.toString().hashCode()) }
+                ?: com.ikko.aura.ui.components.AlbumTheme.Neutral
+        }
+    }
+    val page = theme?.let { AlbumPage(it, FileTags()) }
+    AlbumPageContent(
+        uiState = AlbumUiState(title = title, artist = artist, coverUri = cover, loading = true),
+        page = page,
+        navController = navController,
+        playerViewModel = playerViewModel,
+        isTransitioning = false,
+        onFavorite = {},
+    )
+}
 
 /**
  * The album page itself, for any album: a local one from [AlbumScreen], a YouTube Music one from its own screen. One
@@ -185,6 +226,33 @@ fun AlbumPageContent(
     val moreMenuState = com.ikko.aura.ui.components.rememberGlassMenuState()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // The page of the whole album, from a page that lists only what is on the device: the library's own, or a source's.
+    val links: com.ikko.aura.viewmodel.AlbumLinksViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // An album of the library switches source in place: the page stays, its songs become the whole album's (fetched here), and back.
+    var showOnline by remember { mutableStateOf(false) }
+    var onlineTracks by remember { mutableStateOf<List<Track>?>(null) }
+    val localInput = uiState
+    val uiState = if (streamed == null && showOnline) onlineTracks?.let { localInput.copy(tracks = it) } ?: localInput else localInput
+    val knownRef = localInput.tracks.firstNotNullOfOrNull { it.remoteAlbumId }
+    val fullAlbum: (() -> Unit)? = when {
+        streamed != null -> streamed.onShowFullAlbum
+        localInput.title.isNotBlank() -> { {
+            showOnline = true
+            if (onlineTracks == null) scope.launch {
+                // The page of the album on the source: known from its songs, or found by its title and its artist.
+                val ref = knownRef ?: links.onlineRefOf(localInput.title, localInput.artist)
+                val found = ref?.let { runCatching { playerViewModel.streamedAlbumTracks(it) }.getOrDefault(emptyList()) }.orEmpty()
+                if (found.isNotEmpty()) onlineTracks = found
+                else {
+                    showOnline = false
+                    android.widget.Toast.makeText(context, "Album introuvable en ligne", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        } }
+        else -> null
+    }
 
     // Narrowed to the two things a row cares about. Collecting the whole player state here would
     // recompose the page twice a second for the progress bar's sake. Seeded from the current state:
@@ -219,25 +287,52 @@ fun AlbumPageContent(
 
     val density = LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+
+    // Not while the player is open over this page: its own back closes the player, and this one would leave the page too
+    // (and play the page's return) from under it.
+    val sheetCard = com.ikko.aura.LocalSheetCard.current
+    androidx.activity.compose.BackHandler(enabled = sheetCard.owner == null || sheetCard.leavingSideways) {
+        // The whole album, opened from the page of what is downloaded of it, has no trip of its own to close: the one
+        // that is open belongs to the page under it (closing it here would hide that page for good).
+        val under = navController.previousBackStackEntry?.destination?.route.orEmpty()
+        val overAlbum = under.startsWith("album/") || under.startsWith("ytm_album/") || under.startsWith("remote_album/")
+        if (hero.canClose && !overAlbum) hero.startClosing()
+        navController.popBackStack()
+    }
 
     androidx.compose.runtime.CompositionLocalProvider(LocalPageTheme provides localPageThemeState) {
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         GradientScreenScaffold(
             applyStatusBarInset = false,
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .suppressEdgeBackRipple(),
+            ) {
                 val groundArrival = com.ikko.aura.ui.components.rememberHeroGround()
                 AlbumGround(ground = theme.solid, listState = listState, arrival = groundArrival)
                 run {
 
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().heroPageOut(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .heroPageOut(),
                     contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                     verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     item(key = "header") {
                         AlbumHeader(
+                            onArtist = {
+                                uiState.tracks.firstOrNull()?.let { t ->
+                                    navController.navigate(
+                                        if (com.ikko.aura.source.ytm.YtmLibrary.isStreamed(t)) t.streamedArtistRoute()
+                                        else AuraDestination.ArtistPattern.route(t.artistId.toString()),
+                                    )
+                                }
+                            },
                             uiState = uiState,
                             fileTags = fileTags,
                             accentSoft = accentSoft,
@@ -252,13 +347,23 @@ fun AlbumPageContent(
                                 }
                             },
                             onFavorite = onFavorite,
+                            // The source switch: this page lists what is on the device (local) or the whole album (online).
+                            online = if (uiState.loading) true else if (streamed != null) streamed.onShowFullAlbum == null else showOnline,
+                            onlineAvailable = fullAlbum != null || (streamed != null && streamed.onShowFullAlbum == null),
+                            localAvailable = streamed?.localAvailable ?: true,
+                            onSource = { toOnline ->
+                                if (uiState.loading) Unit
+                                else if (toOnline) fullAlbum?.invoke()
+                                else if (streamed == null) showOnline = false
+                                else streamed.onShowLocal?.invoke()
+                            },
                             hasDownload = streamed != null,
                             downloadSlot = {
                                 if (streamed != null) {
                                     AlbumDownloadChip(uiState.tracks, streamed)
                                 }
                             },
-                            onMore = { moreMenuState.open() },
+                            onMore = { if (!uiState.loading) moreMenuState.open() },
                             moreAnchor = Modifier.glassMenuAnchor(moreMenuState),
                             moreMenu = {
                                 AlbumMoreMenu(
@@ -274,12 +379,28 @@ fun AlbumPageContent(
                                     downloadedAll = streamed != null && uiState.tracks.isNotEmpty() &&
                                         uiState.tracks.all { streamed.downloads[it.id]?.state == DownloadState.DONE },
                                     onDeleteFromLibrary = { menu.delete(uiState.tracks) },
+                                    // The library page lists what is downloaded; the source's page lists the whole album.
+                                    onShowFullAlbum = fullAlbum,
                                 )
                             },
                         )
                     }
+                    if (uiState.loading) items(SKELETON_ROWS) { index ->
+                        // The rows' own measures (a row is 140 design units tall, the number and the time at its two ends).
+                        val u = com.ikko.aura.ui.components.designUnit()
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = u * 140f).padding(horizontal = u * 40f).heroRise(index, rows = true),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            com.ikko.aura.ui.components.SkeletonBar(Modifier.width(u * 24f).height(u * 28f))
+                            Spacer(Modifier.width(u * 56f))
+                            com.ikko.aura.ui.components.SkeletonBar(Modifier.weight(1f).fillMaxWidth(0.6f).height(u * 34f))
+                            Spacer(Modifier.width(u * 120f))
+                            com.ikko.aura.ui.components.SkeletonBar(Modifier.width(u * 90f).height(u * 26f))
+                        }
+                    }
                     itemsIndexed(uiState.tracks, key = { _, track -> track.id }) { index, track ->
-                        Box(Modifier.heroRise(3 + index)) {
+                        Box(Modifier.heroRise(index, rows = true)) {
                         AlbumTrackRow(
                             number = index + 1,
                             track = track,
@@ -300,7 +421,6 @@ fun AlbumPageContent(
                 }
 
                 }
-                StatusBarScrim(solid = theme.solid, listState = listState, arrival = groundArrival)
             }
         }
 
@@ -328,6 +448,7 @@ private fun AlbumMoreMenu(
     streamed: StreamedAlbumControls?,
     downloadedAll: Boolean,
     onDeleteFromLibrary: () -> Unit,
+    onShowFullAlbum: (() -> Unit)? = null,
 ) {
     var confirmRemoveDownloads by remember { mutableStateOf(false) }
     // The design's album menu (760 px wide, the page's colour at 30 %).
@@ -340,6 +461,9 @@ private fun AlbumMoreMenu(
         )
         com.ikko.aura.ui.components.DesignMenuRow("Ajouter à la playlist", go(onAddToPlaylist), icon = CupertinoIcons.PlaylistAdd)
         com.ikko.aura.ui.components.DesignMenuRow("Lire ensuite", go(onPlayNext), icon = CupertinoIcons.Queue)
+        if (onShowFullAlbum != null) {
+            com.ikko.aura.ui.components.DesignMenuRow("Voir l'album complet", go(onShowFullAlbum), icon = CupertinoIcons.Album)
+        }
         com.ikko.aura.ui.components.DesignMenuDivider()
         if (streamed != null) {
             if (downloadedAll) {
@@ -384,29 +508,27 @@ internal fun AlbumGround(ground: Color, listState: LazyListState, arrival: andro
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                val fadeEnd = GROUND_SOLID_DP.dp.toPx()
-                translationY = -listState.headerScrollPx(fadeEnd)
                 // Arrives in 460 ms after a trip, leaves in 380 on the way back; always there otherwise.
                 alpha = arrival?.value ?: 1f
             }
             .drawWithCache {
-                val fadeStart = GROUND_CLEAR_DP.dp.toPx()
-                val fadeEnd = GROUND_SOLID_DP.dp.toPx()
-                val gradientBrush = Brush.verticalGradient(
+                // One gradient over the whole page, from the clear aurora under the header to the record's shade at the
+                // foot: no flat band. It stays put while the rows scroll over it.
+                val fadeStart = GROUND_CLEAR_DP.dp.toPx().coerceAtMost(size.height * 0.5f)
+                val brush = Brush.verticalGradient(
                     0f to ground.copy(alpha = 0f),
-                    0.42f to ground.copy(alpha = 0.38f),
-                    0.78f to ground.copy(alpha = 0.86f),
-                    1f to ground,
+                    0.35f to ground.copy(alpha = 0.32f),
+                    0.7f to ground.copy(alpha = 0.7f),
+                    1f to ground.copy(alpha = 0.92f),
                     startY = fadeStart,
-                    endY = fadeEnd,
+                    endY = size.height,
                 )
                 onDrawBehind {
                     drawRect(
-                        brush = gradientBrush,
+                        brush = brush,
                         topLeft = Offset(0f, fadeStart),
-                        size = Size(size.width, fadeEnd - fadeStart),
+                        size = Size(size.width, size.height - fadeStart),
                     )
-                    drawRect(ground, topLeft = Offset(0f, fadeEnd), size = Size(size.width, size.height * 3f))
                 }
             },
     )
@@ -427,29 +549,45 @@ private fun LazyListState.headerScrollPx(fallback: Float): Float =
  * Keeps the clock and battery readable once rows scroll up under the status bar: nothing at rest,
  * the resting colour fading in as the header leaves.
  */
+private val BITCHORD_FADE_HEIGHT = 180.dp
+private const val BITCHORD_STOPS = 16
+
+/**
+ * Exactly as BitChord's progressive top fade scrim (BottomFadeScrim rotated 180°):
+ * 16 stops with EaseInCubic easing from top to bottom over 180.dp.
+ */
+@Composable
+fun ProgressiveTopScrim(
+    strength: Float,
+    modifier: Modifier = Modifier,
+    pageColor: Color = Color.Black,
+    height: androidx.compose.ui.unit.Dp = BITCHORD_FADE_HEIGHT,
+) {
+    if (strength <= 0.001f) return
+    val brush = remember(pageColor) {
+        Brush.verticalGradient(
+            colorStops = Array(BITCHORD_STOPS) { i ->
+                val t = i / (BITCHORD_STOPS - 1f)
+                t to pageColor.copy(alpha = androidx.compose.animation.core.EaseInCubic.transform(1f - t))
+            },
+        )
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .graphicsLayer { alpha = strength.coerceIn(0f, 1f) }
+            .background(brush),
+    )
+}
+
 @Composable
 internal fun StatusBarScrim(
     solid: Color,
     listState: LazyListState,
     arrival: androidx.compose.runtime.State<Float>? = null,
 ) {
-    val height = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height)
-            .graphicsLayer {
-                alpha = (listState.headerScrollPx(Float.MAX_VALUE) / SCRIM_RAMP_PX).coerceIn(0f, 1f) *
-                    (arrival?.value ?: 1f)
-            }
-            .drawWithCache {
-                val brush = Brush.verticalGradient(
-                    0f to solid.copy(alpha = 0.94f),
-                    1f to solid.copy(alpha = 0f),
-                )
-                onDrawBehind { drawRect(brush) }
-            },
-    )
+    // No-op: the top fade scrim is now rendered once at the app root in MainLayout.
 }
 
 private const val SCRIM_RAMP_PX = 260f
@@ -464,6 +602,8 @@ private const val ROWS_THAT_RISE = 8
  */
 internal val HEADER_TOP_BELOW_STATUS = 54.dp
 
+private const val SKELETON_ROWS = 7
+
 @Composable
 private fun AlbumHeader(
     uiState: AlbumUiState,
@@ -472,11 +612,16 @@ private fun AlbumHeader(
     onPlayAll: () -> Unit,
     onShuffle: () -> Unit,
     onFavorite: () -> Unit,
+    online: Boolean,
+    onlineAvailable: Boolean,
+    localAvailable: Boolean,
+    onSource: (toOnline: Boolean) -> Unit,
     onMore: () -> Unit,
     moreMenu: @Composable () -> Unit = {},
     moreAnchor: Modifier = Modifier,
     downloadSlot: @Composable () -> Unit = {},
     hasDownload: Boolean = false,
+    onArtist: () -> Unit = {},
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
@@ -495,7 +640,12 @@ private fun AlbumHeader(
         val u = com.ikko.aura.ui.components.designUnit()
         val accentInk = rememberPlayerAccent()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val heroKey = "album:${uiState.tracks.firstOrNull()?.albumId}"
+            val activeHero = com.ikko.aura.ui.components.LocalHero.current
+            val tripKey = activeHero.key?.takeIf { it.startsWith("album:") && activeHero.matchesTarget(it) }
+            val firstAlbumId = uiState.tracks.firstOrNull()?.albumId
+            val heroKey = tripKey
+                ?: if (firstAlbumId != null) "album:$firstAlbumId"
+                else activeHero.key?.takeIf { it.startsWith("album:") } ?: "album:unknown"
             val heroDensity = androidx.compose.ui.platform.LocalDensity.current
             val heroTitleStyle = androidx.compose.ui.text.TextStyle(
                 fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.ExtraBold,
@@ -507,17 +657,23 @@ private fun AlbumHeader(
                 fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f),
             )
             AlbumArt(
-                uri = uiState.tracks.firstOrNull()?.artworkUri,
+                uri = uiState.tracks.firstOrNull()?.artworkUri ?: uiState.coverUri,
                 contentDescription = uiState.title,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(u * 50f),
+                shape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover,
                 modifier = Modifier
-                    .heroTarget(heroKey, radiusPx = with(heroDensity) { (u * 50f).toPx() })
+                    .heroTarget(heroKey, radiusPx = with(heroDensity) { 8.dp.toPx() })
                     .size(u * 240f),
                 targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
             )
             Spacer(Modifier.width(u * 40f))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(u * 6f)) {
+              if (uiState.loading && uiState.title.isBlank()) {
+                // A page that is still being fetched, from a place that did not say what it is: the lines' own heights, in grey.
+                Box(Modifier.height(u * 76f), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.7f).height(u * 44f)) }
+                Box(Modifier.height(u * 48f), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.45f).height(u * 30f)) }
+                Box(Modifier.height(u * 40f), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.3f).height(u * 24f)) }
+              } else {
                 Text(
                     text = uiState.title.trim(),
                     fontWeight = FontWeight.ExtraBold,
@@ -538,52 +694,45 @@ private fun AlbumHeader(
                     color = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.heroTarget(heroKey, isSub = true, text = com.ikko.aura.ui.components.HeroText(uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f))),
+                    modifier = Modifier
+                        .heroTarget(heroKey, isSub = true, text = com.ikko.aura.ui.components.HeroText(uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f)))
+                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onArtist),
                 )
-                Text(
+                if (uiState.loading) {
+                    Box(Modifier.height(u * 40f).heroRise(0), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.3f).height(u * 24f)) }
+                } else Text(
                     text = meta.ifEmpty { "${uiState.tracks.size} titre${if (uiState.tracks.size > 1) "s" else ""}" },
                     fontWeight = FontWeight.SemiBold,
                     fontSize = com.ikko.aura.ui.components.designSp(32f),
                     lineHeight = com.ikko.aura.ui.components.designSp(40f),
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
-                    modifier = Modifier.heroRise(1),
+                    modifier = Modifier.heroRise(0),
                 )
+              }
             }
         }
 
         Spacer(Modifier.height(u * 40f))
 
-        val btnColors = rememberAlbumButtonColors()
-        Row(
-            modifier = Modifier.heroRise(2),
-            horizontalArrangement = Arrangement.spacedBy(u * 20f),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PlayAllButton(onClick = onPlayAll, label = "Lire tout", modifier = Modifier.weight(1f))
-            SecondaryPillButton(
-                onClick = onShuffle,
-                label = "Mélanger",
-                icon = CupertinoIcons.Shuffle,
-                modifier = Modifier.weight(1f),
-            )
-            CircleAction(onClick = onFavorite) {
-                FillableIcon(
-                    outline = CupertinoIcons.Star,
-                    filled = CupertinoIcons.StarFilled,
-                    active = uiState.isFavorite,
-                    contentDescription = "Favori",
-                    tint = btnColors.secondaryContent,
-                    modifier = Modifier.size(u * 38f),
-                )
-            }
-            Box(moreAnchor) {
-                CircleAction(onClick = onMore) {
-                    Icon(CupertinoIcons.MoreVertical, contentDescription = "Plus d'options", tint = btnColors.secondaryContent, modifier = Modifier.size(u * 38f))
+        com.ikko.aura.ui.components.ActionBar(
+            online = online,
+            onSource = onSource,
+            onlineAvailable = onlineAvailable,
+            localAvailable = localAvailable,
+            onShuffle = onShuffle,
+            onPlay = onPlayAll,
+            modifier = Modifier.heroRise(0, rows = true),
+            favorite = uiState.isFavorite,
+            onFavorite = onFavorite,
+            // The "+" opens the page's menu: add to a playlist, play next, download, the whole album...
+            add = {
+                Box(moreAnchor) {
+                    com.ikko.aura.ui.components.AddButton(onClick = onMore)
+                    moreMenu()
                 }
-                moreMenu()
-            }
-        }
+            },
+        )
     }
 }
 

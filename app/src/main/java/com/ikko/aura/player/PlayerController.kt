@@ -112,9 +112,22 @@ class PlayerController @Inject constructor(
         if (tracks.isEmpty()) return
         val player = player ?: return
         player.shuffleModeEnabled = false
-        player.setMediaItems(tracks.map(::toMediaItem), startIndex, startPositionMs)
-        player.prepare()
-        player.play()
+        val safeStart = startIndex.coerceIn(0, tracks.lastIndex)
+        if (tracks.size > 64) {
+            player.setMediaItem(toMediaItem(tracks[safeStart]), startPositionMs)
+            player.prepare()
+            player.play()
+            if (safeStart > 0) {
+                player.addMediaItems(0, tracks.subList(0, safeStart).map(::toMediaItem))
+            }
+            if (safeStart + 1 < tracks.size) {
+                player.addMediaItems(tracks.subList(safeStart + 1, tracks.size).map(::toMediaItem))
+            }
+        } else {
+            player.setMediaItems(tracks.map(::toMediaItem), safeStart, startPositionMs)
+            player.prepare()
+            player.play()
+        }
     }
 
     /**
@@ -171,6 +184,12 @@ class PlayerController @Inject constructor(
      *
      * The items before [startIndex] (including the currently playing item) are never moved or interrupted.
      */
+    fun replaceUpcoming(startIndex: Int, upcoming: List<Track>) {
+        val player = player ?: return
+        if (startIndex !in 0..player.mediaItemCount) return
+        player.replaceMediaItems(startIndex, player.mediaItemCount, upcoming.map(::toMediaItem))
+    }
+
     fun reorderUpcoming(startIndex: Int, targetIds: List<String>) {
         val player = player ?: return
         if (startIndex !in 0 until player.mediaItemCount) return

@@ -46,7 +46,9 @@ fun TrackListItem(
     trailingContent: @Composable (() -> Unit)? = null,
     // Under the title. The artist, except where the page is already about the artist (see ArtistScreen).
     subtitle: String = track.artist,
+    isPlayingTrack: Boolean = false,
 ) {
+    val accent = rememberPlayerAccent()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -80,7 +82,7 @@ fun TrackListItem(
             Text(
                 text = track.title,
                 style = ROW_TITLE.copy(fontSize = designSp(40f), lineHeight = designSp(48f)),
-                color = Color.White,
+                color = if (isPlayingTrack) accent else Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

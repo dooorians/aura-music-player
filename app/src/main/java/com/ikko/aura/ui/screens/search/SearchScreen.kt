@@ -459,6 +459,9 @@ fun SearchPanel(
                                                 leave()
                                                 navController.navigate(streamedAlbumRoute(album.id, online = true))
                                             },
+                                            onLongClick = {
+                                                menu.show(LibraryContextTarget.RemoteAlbumTarget(album.id, album.title, album.artist, album.thumbnailUrl))
+                                            },
                                         )
                                     }
                                 }
@@ -620,6 +623,12 @@ private fun InitialCover(name: String) {
             color = Color(0xFFC4C4CD), fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold,
             fontSize = designSp(44f),
         )
+        com.ikko.aura.data.rememberArtistImage(name)?.let { photo ->
+            com.ikko.aura.ui.components.AlbumArt(
+                uri = photo, contentDescription = name, shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                modifier = Modifier.fillMaxSize(), targetSizeDp = 64.dp, cacheKey = photo.toString(),
+            )
+        }
     }
 }
 
@@ -758,34 +767,11 @@ private fun SearchField(
             Modifier
                 .align(Alignment.CenterStart)
                 .padding(start = u * 24f)
-                .size(u * 80f)
-                .clip(CircleShape)
-                .clickable(onClick = onClose),
+                .size(u * 80f),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                CupertinoIcons.Search, null, tint = Color(0xFF7F7F89),
-                modifier = Modifier.size(u * 58f).graphicsLayer {
-                    val t = if (closing) timeline.t(120f, 260f, EaseOut) else 1f - timeline.t(60f, 240f, EaseIn)
-                    alpha = t
-                    val turn = if (closing) 1f - t else 1f - t
-                    rotationZ = -80f * turn
-                    val s = 1f - 0.5f * turn
-                    scaleX = s
-                    scaleY = s
-                },
-            )
-            Icon(
-                CupertinoIcons.ChevronLeft, "Fermer la recherche", tint = Color.White,
-                modifier = Modifier.size(u * 58f).graphicsLayer {
-                    val t = if (closing) 1f - timeline.t(0f, 200f, EaseIn) else timeline.t(140f, 300f, EaseOut)
-                    alpha = t
-                    rotationZ = 80f * (1f - t)
-                    val s = 0.5f + 0.5f * t
-                    scaleX = s
-                    scaleY = s
-                },
-            )
+            // The loupe stays as it is (no arrow takes its place): the system's back closes the search.
+            Icon(CupertinoIcons.Search, null, tint = Color(0xFF7F7F89), modifier = Modifier.size(u * 58f))
         }
         Box(Modifier.align(Alignment.CenterStart).padding(start = u * 124f, end = u * 100f)) {
             val style = TextStyle(

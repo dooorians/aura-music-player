@@ -357,4 +357,57 @@ class RecoPipelineTest {
         assertEquals(RunStatus.UPDATED, result.status)
         assertTrue(result.updated.isNotEmpty())
     }
+
+    @Test fun `candidate track not in verified official discography is strictly rejected`() = runBlocking {
+        val gagaListens = (1..8).map { listen("Song $it", "Lady Gaga", ageDays = it) }
+        val s = store(*gagaListens.toTypedArray())
+        val mbClient = com.ikko.aura.data.musicbrainz.MusicBrainzClient(httpGet = { url ->
+            if (url.contains("Gaga", ignoreCase = true)) {
+                """{ "count": 1, "artists": [ { "id": "gaga-mbid", "name": "Lady Gaga", "score": 100 } ] }"""
+            } else {
+                """{ "count": 0, "artists": [] }"""
+            }
+        })
+        val deezerClient = com.ikko.aura.data.deezer.DeezerClient(httpGet = { url ->
+            when {
+                url.contains("search/artist") && url.contains("Gaga", ignoreCase = true) ->
+                    """{ "data": [ { "id": 157, "name": "Lady Gaga", "nb_fan": 1000000 } ] }"""
+                url.contains("artist/157/top") -> """
+                {
+                  "data": [
+                    { "id": 1, "title": "Bad Romance", "title_short": "Bad Romance", "artist": { "id": 157, "name": "Lady Gaga" } },
+                    { "id": 2, "title": "Poker Face", "title_short": "Poker Face", "artist": { "id": 157, "name": "Lady Gaga" } }
+                  ]
+                }
+                """.trimIndent()
+                else -> """{ "data": [] }"""
+            }
+        })
+        val authority = com.ikko.aura.reco.authority.ArtistAuthority(mbClient, deezerClient)
+        val verifier = com.ikko.aura.reco.authority.DiscographyVerifier(deezerClient, mbClient)
+
+        val candidates = listOf(
+            candidate("Bad Romance", "Lady Gaga", id = "ytm:gaga-official-1", release = Release.ofYear(2020)),
+            candidate("Poker Face", "Lady Gaga", id = "ytm:gaga-official-2", release = Release.ofYear(2020)),
+            candidate("OG Bichotas", "Lady Gaga", id = "ytm:gaga-fake-bichotas", release = Release.ofYear(2020)),
+            candidate("Girlboss energy", "Lady Gaga", id = "ytm:gaga-fake-girlboss", release = Release.ofYear(2020)),
+        ) + (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it", release = Release.ofYear(2020)) }
+
+        val source = FakeSource("ytm", catalogue = { candidates }, verdict = { Verification(true, isSong = true) })
+        val pipe = RecoPipeline(
+            store = s,
+            sources = { listOf(source) },
+            clock = { NOW },
+            zone = ZONE,
+            authority = authority,
+            verifier = verifier,
+            deezerClient = deezerClient,
+        )
+
+        pipe.refresh(force = true)
+        val allPicks = s.playlists.values.flatten().map { it.candidate.id }
+        assertTrue("Bad Romance must be accepted", "ytm:gaga-official-1" in allPicks)
+        assertFalse("OG Bichotas must be rejected", "ytm:gaga-fake-bichotas" in allPicks)
+        assertFalse("Girlboss energy must be rejected", "ytm:gaga-fake-girlboss" in allPicks)
+    }
 }

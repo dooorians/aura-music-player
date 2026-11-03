@@ -30,6 +30,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -137,7 +138,6 @@ import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalNowPlayingMesh
 import com.ikko.aura.ui.theme.LocalPageTheme
 import com.ikko.aura.ui.theme.LocalSearchOpener
-import com.ikko.aura.ui.components.AuroraBackground
 import com.ikko.aura.ui.components.LocalPageMotion
 import com.ikko.aura.ui.components.PageSwitchPill
 import com.ikko.aura.ui.components.LocalTabCapsule
@@ -183,6 +183,12 @@ class SheetCard {
     /** The card's top edge, as a fraction of the screen's height. 0 is up, 1 is no card. Read in draw. */
     var edge by mutableFloatStateOf(1f)
         internal set
+
+    /**
+     * Where the card's top edge rests when the player is closed, and where it starts from: the docked bar's top. With the
+     * floating glass pastille the card comes from, and goes back to, the foot of the screen, passing over the pastille.
+     */
+    var restEdge by mutableFloatStateOf(AuraMotion.SHEET_PILL_TOP_FRACTION)
 
     /**
      * The finger is on the mini player and pulling the player up with it. The card then sits where the finger puts it
@@ -311,7 +317,7 @@ class SheetCard {
      * closing one mid-flight: two players driving one card, the stutter on spamming the pill.
      */
     val acceptsOpen: Boolean
-        get() = owner == null || (sinking && edge >= AuraMotion.SHEET_PILL_TOP_FRACTION - 0.001f)
+        get() = owner == null || (sinking && edge >= restEdge - 0.001f)
 
     /** True while the card is claimed but still hidden, waiting for the player to draw. */
     val waitingToShow: Boolean get() = owner != null && !ready
@@ -326,7 +332,7 @@ class SheetCard {
     val openProgress: Float
         // Not while the player is dissolving back over one of its own pages: that page is not under a card, it is
         // being faded into, and shrinking it and darkening it with the card's rise was the dark step of the blink.
-        get() = if (owner == null || !ready || passing) 0f else (1f - (edge / AuraMotion.SHEET_PILL_TOP_FRACTION)).coerceIn(0f, 1f)
+        get() = if (owner == null || !ready || passing) 0f else (1f - (edge / restEdge)).coerceIn(0f, 1f)
 
     /** How dark the page under the card is: none of it when the card is at the mini player, all of it when the card is up. */
     val dim: Float
@@ -389,6 +395,40 @@ private fun searchClear(pull: Float, closing: Boolean): Float {
 /** How dim the page under the player's card is, 0..1. Read in draw only. */
 val LocalSheetDim = androidx.compose.runtime.staticCompositionLocalOf<() -> Float> { { 0f } }
 
+/** Whether this page is on its way out because it was called back (not by the player): see [HandsOverTouchWhenLeaving]. */
+@Composable
+private fun androidx.compose.animation.AnimatedVisibilityScope.rememberLeaving(hero: com.ikko.aura.ui.components.HeroState): Boolean =
+    transition.targetState == androidx.compose.animation.EnterExitState.PostExit &&
+        hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && !hero.fromPlayer && !hero.lyricsMode
+
+/**
+ * A page that is on its way out hands the touch to what is under it. An album's, a playlist's or an artist's page stays on
+ * top of the list it came from for the whole of its fade (a third of a second), and kept every swipe and tap for itself: the
+ * list could not be scrolled until it was gone. While [leaving] the page stays composed (its state is kept, should the
+ * departure be called off) but is not placed - so it takes no touch - and what is seen is the last picture it drew.
+ */
+@Composable
+private fun HandsOverTouchWhenLeaving(leaving: Boolean, content: @Composable () -> Unit) {
+    val picture = rememberGraphicsLayer()
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    androidx.compose.ui.layout.Layout(
+        content = content,
+        modifier = Modifier.fillMaxSize().drawWithContent {
+            if (!leaving) picture.record { this@drawWithContent.drawContent() }
+            // What is seen while the page leaves is this picture, not the page: the fades of its parts (see heroRise) are never
+            // applied to it, so the page stayed whole over the list for the length of the return. It leaves as a whole instead,
+            // on the trip's own clock.
+            picture.alpha = if (leaving) 1f - androidx.compose.animation.core.EaseIn.transform(hero.contentOut.value) else 1f
+            drawLayer(picture)
+        },
+    ) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints) }
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            if (!leaving) placeables.forEach { it.place(0, 0) }
+        }
+    }
+}
+
 /**
  * A destination that can sit under the player's card: recedes with a GPU-clipped top radius and dims as the card rises.
  *
@@ -412,16 +452,16 @@ private fun UnderSheet(content: @Composable () -> Unit) {
     val maxCornerRadius = with(density) { 26.dp.toPx() }
     val pageSnapshot = rememberGraphicsLayer()
     val pageSnapshotState = remember { PageSnapshotState() }
+    val isUnderPlayerEntry = if (card.underEntryId != null) {
+        myEntryId == card.underEntryId
+    } else {
+        myRoute != null && myRoute != card.topRoute
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .drawWithContent {
-                val isUnderPlayerEntry = if (card.underEntryId != null) {
-                    myEntryId == card.underEntryId
-                } else {
-                    myRoute != null && myRoute != card.topRoute
-                }
                 // A page under the player, while the player leaves for or returns from another one: not drawn at all.
                 if (card.owner != null && isUnderPlayerEntry && (card.leavingSideways || card.passing)) {
                     return@drawWithContent
@@ -445,7 +485,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val t = card.openProgress
+                    val t = if (isUnderPlayerEntry) card.openProgress else 0f
                     if (t > 0.001f) {
                         val s = 1f - 0.055f * t
                         scaleX = s
@@ -459,7 +499,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                 }
                 .drawWithContent {
                     val snapshotSize = IntSize(size.width.toInt(), size.height.toInt())
-                    val holdSnapshot = card.owner != null && !card.leavingSideways && !card.passing && card.ready
+                    val holdSnapshot = isUnderPlayerEntry && card.owner != null && !card.leavingSideways && !card.passing && card.ready
                     if (!holdSnapshot) {
                         pageSnapshotState.invalidate()
                         drawContent()
@@ -488,7 +528,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
             Modifier
                 .matchParentSize()
                 .drawBehind {
-                    val d = dim()
+                    val d = if (isUnderPlayerEntry) dim() else 0f
                     if (d > 0.001f) drawRect(Color.Black, alpha = d)
                 },
         )
@@ -542,14 +582,21 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
 /** A page a trip of the hero ends on: an album, a playlist, an artist (of any source), the lyrics. */
 private fun isHeroPageRoute(route: String?): Boolean {
     if (route == null) return false
-    return route == AuraDestination.Lyrics.route || HERO_PAGE_PREFIXES.any { route.startsWith(it) }
+    return route == AuraDestination.Lyrics.route || route == AuraDestination.Queue.route || HERO_PAGE_PREFIXES.any { route.startsWith(it) }
 }
 
 private val HERO_PAGE_PREFIXES = listOf(
     "album/", "ytm_album/", "remote_album/", "playlist/", "artist/", "ytm_artist/", "remote_artist/",
 )
 
+/** An artist's page, of the device or of a source: a list a trip can leave from and come back to. */
+private fun isArtistRoute(route: String?): Boolean =
+    route != null && (route.startsWith("artist/") || route.startsWith("ytm_artist/") || route.startsWith("remote_artist/"))
+
 private fun isAlbumRoute(entry: NavBackStackEntry): Boolean = isHeroPageRoute(entry.destination.route)
+
+private fun isAlbumKind(route: String?): Boolean =
+    route != null && (route.startsWith("album/") || route.startsWith("ytm_album/") || route.startsWith("remote_album/"))
 
 private fun isSheet(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.NowPlaying.route
 
@@ -616,6 +663,7 @@ private const val HERO_KEEP_ALIVE_MS = 820
 /** The player stepping aside for a page a trip of the hero goes to, and back over it. */
 private const val PLAYER_STEP_ASIDE_MS = 180
 private const val PLAYER_STEP_BACK_MS = 160
+private const val PLAYER_RETURN_FADE_MS = 380
 private const val PLAYER_LEAVE_MS = 200
 private const val PLAYER_WAIT_FOR_PAGE_MS = 700L
 
@@ -643,7 +691,7 @@ fun MainLayout() {
     // The dissolve back to the player lasts as long as the outgoing page's own exit (its start delay and its slide).
     LaunchedEffect(sheetCard.passing) {
         if (sheetCard.passing) {
-            kotlinx.coroutines.delay((AuraMotion.PUSH_START_DELAY_MS + AuraMotion.PUSH_MS + 60).toLong())
+            kotlinx.coroutines.delay((PLAYER_RETURN_FADE_MS + 80).toLong())
             sheetCard.passing = false
         }
     }
@@ -656,6 +704,7 @@ fun MainLayout() {
     val pillBackdrop = rememberLayerBackdrop()
     val immersiveBackdrop = rememberLayerBackdrop()
     val pageMotion = rememberPageMotion(AuraDestination.topLevelRoutes.size)
+    val headerScrimAlpha = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
     val capsule = remember { TabCapsuleState() }
     val capsuleViewModel: TabCapsuleViewModel = hiltViewModel()
@@ -663,12 +712,15 @@ fun MainLayout() {
     // Records only the artwork backdrop, not the page on top of it — see LocalAuraBackdrop.
     val glassBackdrop = rememberLayerBackdrop()
     val playerViewModel: PlayerViewModel = hiltViewModel()
+    val lyricsViewModel: com.ikko.aura.viewmodel.LyricsViewModel = hiltViewModel()
     // Makes the player's ground ahead of time, so its opening has nothing to build.
     com.ikko.aura.ui.screens.nowplaying.PlayerGroundWarmer(playerViewModel)
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val amoledBackgroundEnabled by settingsViewModel.amoledBackgroundEnabled.collectAsStateWithLifecycle()
     // The navigation the listener chose: a button beside the mini player, or the pages swiped between.
     val pageSwitchButton by settingsViewModel.pageSwitchButton.collectAsStateWithLifecycle()
+    // The mini player as a floating pastille of liquid glass (the setting) instead of the docked black bar.
+    val miniPlayerGlass by settingsViewModel.miniPlayerGlass.collectAsStateWithLifecycle()
     androidx.compose.runtime.SideEffect { pageMotion.swipeEnabled = !pageSwitchButton }
     // Narrowed on purpose. Collecting the whole PlayerUiState here subscribed MainLayout — and so
     // the entire NavHost under it — to `positionMs`, which ticks every 500ms during playback, so
@@ -732,6 +784,9 @@ fun MainLayout() {
 
     val rootView = androidx.compose.ui.platform.LocalView.current
     val hero = remember { com.ikko.aura.ui.components.HeroState() }
+    if (playerOpen && !playerLeavingSideways && hero.fromPlayer && hero.canClose) {
+        hero.startClosing()
+    }
     val playerSidewaysOffset = remember { Animatable(0f) }
     val playerSidewaysAlpha = remember { Animatable(1f) }
     // The player steps aside for a page it opens (the queue, the lyrics, an album, an artist) and comes back over it.
@@ -761,9 +816,14 @@ fun MainLayout() {
                 },
             )
         } else if (playerSidewaysAlpha.value < 1f) {
-            // Back at once, over the page still leaving: waiting for the page to have gone first left the window's
-            // black between the two.
-            playerSidewaysAlpha.animateTo(1f, tween(PLAYER_STEP_BACK_MS, easing = FastOutSlowInEasing))
+            // Back at once, over the page still leaving: a smooth, progressive fade-in.
+            playerSidewaysAlpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = PLAYER_RETURN_FADE_MS,
+                    easing = androidx.compose.animation.core.CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f),
+                ),
+            )
         }
     }
     // The player is all there again (not on its way back over a page): what decides that the page under it is cut for the
@@ -827,13 +887,25 @@ fun MainLayout() {
     // page is cut above it. Its height is not the page's to use, so nothing is reserved on top of the 16 dp of air.
     // No dock while the player is open but not all there (on its way back over a page): the page would be cut at its foot
     // and the dock's black strip show through the player still fading in.
-    val hasMiniPlayerDock = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack && !(playerOpen && !playerFullyBack)
+    // The card's rest: the docked bar's top, or (floating glass pastille) the screen's foot: it goes right down, off the screen.
+    androidx.compose.runtime.SideEffect {
+        // 1 itself means "no card" to the player (it would draw the card in full for a frame as it arrives): a quarter of a pixel short.
+        sheetCard.restEdge = if (miniPlayerGlass) 0.9998f else AuraMotion.SHEET_PILL_TOP_FRACTION
+    }
+    val showsMiniPlayer = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack && !(playerOpen && !playerFullyBack)
+    val hasMiniPlayerDock = showsMiniPlayer && !miniPlayerGlass
     val dockTotalHeight = if (hasMiniPlayerDock) com.ikko.aura.ui.components.DOCK_HEIGHT + navigationBarHeight else 0.dp
-    val reservedPillHeight = if (hasMiniPlayerDock) 16.dp else navigationBarHeight
+    // The glass pastille floats over the page: the page runs to the screen's foot, and its lists end above the pastille.
+    val reservedPillHeight = when {
+        hasMiniPlayerDock -> 16.dp
+        showsMiniPlayer -> navigationBarHeight + com.ikko.aura.ui.components.DOCK_HEIGHT + 6.dp
+        else -> navigationBarHeight
+    }
 
     Surface(color = AuraColors.NonAmoledBlack, modifier = Modifier.fillMaxSize()) {
         PermissionGate {
         CompositionLocalProvider(
+            LocalHeaderScrimAlpha provides headerScrimAlpha,
             LocalNowPlayingMesh provides backdrop.meshColors,
             com.ikko.aura.ui.theme.LocalAmoledBackgroundEnabled provides amoledBackgroundEnabled,
             LocalPlayerPillHeight provides reservedPillHeight,
@@ -875,21 +947,31 @@ fun MainLayout() {
             label = "album-aurora-scrim",
         )
         val albumAuroraVisible = !amoledBackgroundEnabled || (albumAuroraTheme != null && (isAlbumRoute || albumAuroraScrim < 1f))
-        if (albumAuroraVisible) {
-            val currentTheme = if (amoledBackgroundEnabled) {
+        val currentTheme = if (amoledBackgroundEnabled) {
+            pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
+        } else {
+            if (isAlbumRoute || albumAuroraScrim == 0f) {
                 pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
             } else {
-                if (isAlbumRoute || albumAuroraScrim == 0f) {
-                    pageTheme.value ?: albumAuroraTheme ?: backdrop.theme
-                } else {
-                    pageTheme.value ?: backdrop.theme
-                }
+                pageTheme.value ?: backdrop.theme
             }
-            com.ikko.aura.ui.components.AuroraBackground(
-                theme = currentTheme,
-                active = !playerOpen && currentRoute !in AuraDestination.fullScreenRoutes && (!amoledBackgroundEnabled || isAlbumRoute || albumAuroraScrim < 1f),
-                modifier = Modifier.fillMaxSize(),
-            )
+        }
+        val ectoPalette = remember(currentTheme) {
+            val neutral = currentTheme === AlbumTheme.Neutral || currentTheme.hue == null
+            val (h, sat) = com.ikko.aura.ui.components.hueAndSaturation(currentTheme.accent)
+            val (ground, mesh) = com.ikko.aura.ui.components.meshColoursOf(currentTheme.accent, currentTheme.glows, colourful = !neutral)
+            com.ikko.aura.ui.components.ectoPaletteFromCover(if (neutral) null else h, sat).copy(ground = ground, mesh = mesh)
+        }
+        // While the player covers the pages the mesh under it keeps its colours: a change of cover would redraw it for
+        // nothing, frame after frame, while the player is changing its own. It takes the new ones when the player goes.
+        val meshHeld = remember { arrayOf(ectoPalette) }
+        if (!playerOpen) meshHeld[0] = ectoPalette
+        val meshPalette = meshHeld[0]
+        // With the glass pastille the mesh is drawn inside the page's recorded layer instead (below): it is what the glass refracts.
+        if (albumAuroraVisible && !miniPlayerGlass) {
+            // One background for every page (the mesh of Home and Library): the colours of the cover it comes from,
+            // and a change of page or cover fades them (see EctoMesh).
+            com.ikko.aura.ui.components.EctoMesh(meshPalette, drifting = !playerOpen && currentRoute !in AuraDestination.fullScreenRoutes)
         }
         if (amoledBackgroundEnabled && albumAuroraScrim > 0f) {
             Box(
@@ -902,7 +984,7 @@ fun MainLayout() {
         val onPlayerScreen = currentRoute in AuraDestination.fullScreenRoutes
         val routeTrail = remember { object { var last: String? = null; var before: String? = null } }
         if (currentRoute != routeTrail.last) { routeTrail.before = routeTrail.last; routeTrail.last = currentRoute }
-        val fadingRoute = currentRoute?.startsWith("album/") == true || currentRoute?.startsWith("artist/") == true || currentRoute?.startsWith("playlist/") == true
+        val fadingRoute = currentRoute != null && HERO_PAGE_PREFIXES.any { currentRoute.startsWith(it) }
         val washFade by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (fadingRoute) 0f else 1f,
             animationSpec = tween(LYRICS_WASH_FADE_MS, easing = LinearEasing),
@@ -989,14 +1071,24 @@ fun MainLayout() {
                     val coveredByPlayer = sheetCard.owner != null &&
                         !sheetCard.leavingSideways &&
                         !sheetCard.passing &&
+                        playerFullyBack &&
                         sheetCard.ready &&
                         sheetCard.edge <= 0.0005f &&
                         sheetCard.cardAlpha >= 0.999f
                     if (!coveredByPlayer) {
                         drawContent()
                     }
-                },
+                }
+                // What the glass pastille looks through: the page, recorded only while it is on show and nothing moves it.
+                .graphicsLayer { }
+                .layerBackdrop(
+                    pillBackdrop,
+                    enabledProvider = { miniPlayerGlass && showPill && !playerOpen && sheetCard.owner == null && !sheetCard.frozen },
+                ),
         ) {
+        if (albumAuroraVisible && miniPlayerGlass) {
+            com.ikko.aura.ui.components.EctoMesh(meshPalette, drifting = !playerOpen && currentRoute !in AuraDestination.fullScreenRoutes)
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1060,12 +1152,16 @@ fun MainLayout() {
                     }
                     // The list stays composed until it has cleared (the ripple of the hero, 310 ms) and is not dimmed as a
                     // whole: a transparent fade that does nothing but keep the page alive for as long.
-                    val fromHeroList = initialState.destination.route == AuraDestination.Tabs.route ||
-                        initialState.destination.route == AuraDestination.ArtistPattern.route
-                    if (hero.armed && isAlbumRoute(targetState) && fromHeroList &&
+                    val fromTabs = initialState.destination.route == AuraDestination.Tabs.route
+                    val fromArtist = isArtistRoute(initialState.destination.route)
+                    if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist) &&
                         hero.matchesEntry(targetState.destination.route, targetState.arguments)
                     ) {
-                        fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
+                        if (fromArtist) {
+                            fadeOut(tween(110, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+                        } else {
+                            fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
+                        }
                     } else base
                 },
                 popEnterTransition = {
@@ -1087,7 +1183,7 @@ fun MainLayout() {
                     }
                     // Back to the list: it is there, and each item comes back by itself from the one that was touched.
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
-                        targetState.destination.route == AuraDestination.ArtistPattern.route
+                        isArtistRoute(targetState.destination.route)
                     if (isAlbumRoute(initialState) && toHeroList &&
                         hero.matchesEntry(initialState.destination.route, initialState.arguments) &&
                         (hero.canClose || hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing)
@@ -1097,34 +1193,49 @@ fun MainLayout() {
                 },
                 popExitTransition = {
                     if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
-                    val matchesClosing = isAlbumRoute(initialState) &&
+                    // An album page opened from another album's (the whole album, from the menu of what is downloaded of it) has no
+                    // cover to land on: the trip belongs to the page under it, not to this one.
+                    val albumOverAlbum = isAlbumKind(initialState.destination.route) && isAlbumKind(targetState.destination.route)
+                    val matchesClosing = !albumOverAlbum && isHeroPageRoute(initialState.destination.route) &&
                         hero.matchesEntry(initialState.destination.route, initialState.arguments)
                     if (matchesClosing && hero.canClose) hero.startClosing()
+                    val returningToPlayer = isSheet(targetState) || isUnderPlayer(targetState)
                     val base: ExitTransition = when {
                         isSheet(initialState) -> AuraMotion.sheetExit
-                        (isSheet(targetState) || isUnderPlayer(targetState)) && isLyricsOrAlbum(initialState) ->
-                            throughExit(toLeft = false, startMs = AuraMotion.PUSH_START_DELAY_MS)
+                        returningToPlayer && isLyricsOrAlbum(initialState) ->
+                            fadeOut(tween(PLAYER_RETURN_FADE_MS + 40, easing = LinearEasing), targetAlpha = 0.999f)
                         else -> popExit()
                     }
-                    // The album page stays until what it brought has gone (140 ms), its background has faded (140 + 380)
-                    // and the cover is home (520): it is not slid or faded as a whole.
-                    // Back to the player: the page stays under it while the player comes back over it (no slide, no gap).
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
-                        targetState.destination.route == AuraDestination.ArtistPattern.route
-                    if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing &&
-                        (toHeroList || hero.fromPlayer)
+                        isArtistRoute(targetState.destination.route)
+                    if (returningToPlayer && (matchesClosing || isLyricsOrAlbum(initialState))) {
+                        fadeOut(tween(PLAYER_RETURN_FADE_MS + 40, easing = LinearEasing), targetAlpha = 0.999f)
+                    } else if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && hero.scrolledFallbackClose) {
+                        // Target cover is scrolled off-screen: use a smooth 340ms fadeOut + slideOutVertically + scaleOut
+                        // fallback transition instead of freezing the page or showing a floating cover over the full-screen player.
+                        fadeOut(tween(340, easing = FastOutSlowInEasing)) +
+                            androidx.compose.animation.slideOutVertically(tween(340, easing = FastOutSlowInEasing)) { it / 12 } +
+                            androidx.compose.animation.scaleOut(tween(340, easing = FastOutSlowInEasing), targetScale = 0.94f)
+                    } else if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing &&
+                        toHeroList
                     ) {
                         fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
+                    } else if (isLyrics(initialState)) {
+                        fadeOut(tween(340, easing = FastOutSlowInEasing)) +
+                            androidx.compose.animation.scaleOut(tween(340, easing = FastOutSlowInEasing), targetScale = 0.96f)
                     } else base
                 },
             ) {
                 composable(AuraDestination.Settings.route) {
-                    UnderSheet { SettingsScreen(navController) }
+                    // The settings take the cover's colours (their switches, their tiles), as Home and Library do.
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { SettingsScreen(navController) }
+                    }
                 }
                 composable(AuraDestination.Tabs.route) {
                     UnderSheet {
                         Box(Modifier.fillMaxSize()) {
-                            TabPager(navController = navController, playerViewModel = playerViewModel, motion = pageMotion)
+                            TabPager(navController = navController, playerViewModel = playerViewModel, motion = pageMotion, palette = ectoPalette)
                         }
                     }
                 }
@@ -1134,9 +1245,19 @@ fun MainLayout() {
                 composable(AuraDestination.Lyrics.route) {
                     val sliding = transition.currentState != androidx.compose.animation.EnterExitState.Visible ||
                         transition.targetState != androidx.compose.animation.EnterExitState.Visible
-                    UnderSheet { LyricsScreen(navController = navController, playerViewModel = playerViewModel, isTransitioning = sliding) }
+                    UnderSheet {
+                        LyricsScreen(
+                            navController = navController,
+                            playerViewModel = playerViewModel,
+                            lyricsViewModel = lyricsViewModel,
+                            isTransitioning = sliding,
+                        )
+                    }
                 }
                 composable(AuraDestination.Equalizer.route) { UnderSheet { EqualizerScreen(navController) } }
+                composable(AuraDestination.LikedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.LikedArtistsScreen(navController) } }
+                composable(AuraDestination.BlockedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.BlockedArtistsScreen(navController) } }
+                composable(AuraDestination.TastePicker.route) { UnderSheet { com.ikko.aura.ui.screens.taste.TastePickerScreen(navController) } }
                 composable(AuraDestination.NowPlaying.route) {
                     LaunchedEffect(Unit) {
                         navController.popBackStack()
@@ -1146,6 +1267,10 @@ fun MainLayout() {
                 composable(AuraDestination.AlbumPattern.route) { backStack ->
                     val sliding = transition.currentState != androidx.compose.animation.EnterExitState.Visible ||
                         transition.targetState != androidx.compose.animation.EnterExitState.Visible
+                    // Called back (not by the player): the page gives its touch to the list under it from the start of its fade.
+                    val leaving = transition.targetState == androidx.compose.animation.EnterExitState.PostExit &&
+                        hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && !hero.fromPlayer && !hero.lyricsMode
+                    HandsOverTouchWhenLeaving(leaving) {
                     UnderSheet {
                         AlbumScreen(
                             albumId = backStack.arguments?.getString("albumId").orEmpty(),
@@ -1154,8 +1279,13 @@ fun MainLayout() {
                             isTransitioning = sliding,
                         )
                     }
+                    }
                 }
                 composable(AuraDestination.ArtistPattern.route) { backStack ->
+                    // Called back (not by the player): the page gives its touch to the list under it from the start of its fade.
+                    val leaving = transition.targetState == androidx.compose.animation.EnterExitState.PostExit &&
+                        hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && !hero.fromPlayer && !hero.lyricsMode
+                    HandsOverTouchWhenLeaving(leaving) {
                     UnderSheet {
                         ArtistScreen(
                             artistId = backStack.arguments?.getString("artistId").orEmpty(),
@@ -1163,8 +1293,13 @@ fun MainLayout() {
                             playerViewModel = playerViewModel,
                         )
                     }
+                    }
                 }
                 composable(AuraDestination.PlaylistPattern.route) { backStack ->
+                    // Called back (not by the player): the page gives its touch to the list under it from the start of its fade.
+                    val leaving = transition.targetState == androidx.compose.animation.EnterExitState.PostExit &&
+                        hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && !hero.fromPlayer && !hero.lyricsMode
+                    HandsOverTouchWhenLeaving(leaving) {
                     UnderSheet {
                         PlaylistScreen(
                             playlistId = backStack.arguments?.getString("playlistId").orEmpty(),
@@ -1172,31 +1307,44 @@ fun MainLayout() {
                             playerViewModel = playerViewModel,
                         )
                     }
+                    }
                 }
                 composable(
                     AuraDestination.YtmAlbumPattern.route,
                     arguments = listOf(androidx.navigation.navArgument("online") { type = androidx.navigation.NavType.BoolType; defaultValue = false }),
                 ) {
-                    UnderSheet {
-                        YtmAlbumScreen(navController = navController, playerViewModel = playerViewModel)
+                    val sliding = transition.currentState != androidx.compose.animation.EnterExitState.Visible ||
+                        transition.targetState != androidx.compose.animation.EnterExitState.Visible
+                    HandsOverTouchWhenLeaving(rememberLeaving(hero)) {
+                        UnderSheet {
+                            YtmAlbumScreen(navController = navController, playerViewModel = playerViewModel, isTransitioning = sliding)
+                        }
                     }
                 }
                 composable(AuraDestination.YtmArtistPattern.route) {
-                    UnderSheet {
-                        YtmArtistScreen(navController = navController, playerViewModel = playerViewModel)
+                    HandsOverTouchWhenLeaving(rememberLeaving(hero)) {
+                        UnderSheet {
+                            YtmArtistScreen(navController = navController, playerViewModel = playerViewModel)
+                        }
                     }
                 }
                 composable(
                     AuraDestination.RemoteAlbumPattern.route,
                     arguments = listOf(androidx.navigation.navArgument("online") { type = androidx.navigation.NavType.BoolType; defaultValue = false }),
                 ) {
-                    UnderSheet {
-                        RemoteAlbumScreen(navController = navController, playerViewModel = playerViewModel)
+                    val sliding = transition.currentState != androidx.compose.animation.EnterExitState.Visible ||
+                        transition.targetState != androidx.compose.animation.EnterExitState.Visible
+                    HandsOverTouchWhenLeaving(rememberLeaving(hero)) {
+                        UnderSheet {
+                            RemoteAlbumScreen(navController = navController, playerViewModel = playerViewModel, isTransitioning = sliding)
+                        }
                     }
                 }
                 composable(AuraDestination.RemoteArtistPattern.route) {
-                    UnderSheet {
-                        RemoteArtistScreen(navController = navController, playerViewModel = playerViewModel)
+                    HandsOverTouchWhenLeaving(rememberLeaving(hero)) {
+                        UnderSheet {
+                            RemoteArtistScreen(navController = navController, playerViewModel = playerViewModel)
+                        }
                     }
                 }
                 composable(AuraDestination.SourceOrder.route) {
@@ -1213,9 +1361,27 @@ fun MainLayout() {
                         )
                     }
                 }
+                composable(AuraDestination.Playlists.route) {
+                    UnderSheet {
+                        com.ikko.aura.ui.screens.playlist.PlaylistsOverviewScreen(
+                            navController = navController,
+                            playerViewModel = playerViewModel,
+                        )
+                    }
+                }
             }
         }
         }
+
+            // BitChord progressive top fade scrim at app root: exactly as BitChord's MainActivity (L3715-3721)
+            // One single app-level scrim across the entire app so it never superposes, blinks, or pops during page transitions.
+            val isTabs = currentRoute == AuraDestination.Tabs.route
+            val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
+            val rootTopAlpha = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            com.ikko.aura.ui.screens.album.ProgressiveTopScrim(
+                strength = rootTopAlpha,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
 
             // Persistently hosted NowPlayingScreen: sits above the page's LayerBackdrop so its card motion never
             // invalidates pillBackdrop, and remains warm in composition when closed so opening and closing never
@@ -1236,7 +1402,14 @@ fun MainLayout() {
                                 layout(0, 0) {}
                             }
                         }
-                        .graphicsLayer { alpha = playerSidewaysAlpha.value }
+                        .graphicsLayer {
+                            alpha = playerSidewaysAlpha.value
+                            compositingStrategy = if (playerSidewaysAlpha.value < 0.999f) {
+                                androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                            } else {
+                                androidx.compose.ui.graphics.CompositingStrategy.Auto
+                            }
+                        }
                         .drawWithContent {
                             if (playerSidewaysAlpha.value > 0f) {
                                 drawContent()
@@ -1246,9 +1419,14 @@ fun MainLayout() {
                     NowPlayingScreen(
                         navController = navController,
                         viewModel = playerViewModel,
+                        lyricsViewModel = lyricsViewModel,
                         sheetOpening = playerFromPill,
                         sheetClosing = playerClosingToPill,
-                        leavingSideways = playerLeavingSideways,
+                        // A page that is slow to say where the cover goes (an artist from a source, over the network) leaves
+                        // the player whole until the copy takes off: it was left half stripped, and still, meanwhile.
+                        leavingSideways = playerLeavingSideways && !(
+                            hero.fromPlayer && hero.phase == com.ikko.aura.ui.components.HeroPhase.Opening && !hero.running
+                            ),
                         sheetCard = sheetCard,
                         active = playerOpen,
                         onRequestClose = {
@@ -1267,6 +1445,8 @@ fun MainLayout() {
                             val hostId = playerHostEntryId ?: navController.currentBackStackEntry?.id
                             playerHostEntryId = hostId
                             sheetCard.underEntryId = hostId
+                            playerFromPill = false
+                            sheetFlags.opening = false
                             sheetFlags.closing = false
                             sheetFlags.away = true
                             navController.navigate(route)
@@ -1309,10 +1489,17 @@ fun MainLayout() {
             val isTabsRoute = currentRoute == AuraDestination.Tabs.route
             // A trip of the hero belongs to the page it ended on. Back to where it left from (the list, or the player over
             // it), even while still on its way out: everything returns. Anywhere else: it is simply over.
-            LaunchedEffect(currentRoute) {
+            LaunchedEffect(currentRoute, playerOpen, playerLeavingSideways) {
                 val onHeroPage = isHeroPageRoute(currentRoute)
-                if (hero.canClose && !onHeroPage) {
-                    if (currentRoute == AuraDestination.Tabs.route) hero.startClosing() else hero.reset()
+                // Only a trip that left from the player comes back to it: a page opened from the list, with the player opened over
+                // it, is not being left (the list's return used to play, and the page's content went with it).
+                val backToPlayer = playerOpen && !playerLeavingSideways && hero.fromPlayer
+                if (hero.canClose && (!onHeroPage || backToPlayer)) {
+                    if (currentRoute == AuraDestination.Tabs.route || backToPlayer) {
+                        hero.startClosing()
+                    } else {
+                        hero.reset()
+                    }
                 }
             }
             val hasPill = (showPill || (playerOpen && !playerBelow)) && backdrop.hasTrack
@@ -1371,6 +1558,9 @@ fun MainLayout() {
 
                 fun pillBaseAlpha(): Float {
                     if (!showPill) return 0f
+                    if (playerOpen && !playerClosingToPill && !sheetCard.sinking && !sheetCard.holding && !sheetFlags.fromPill && !sheetCard.waitingToShow) {
+                        return 0f
+                    }
                     val waiting = sheetCard.waitingToShow ||
                         (playerOpen && !playerLeavingSideways && sheetCard.owner == null && sheetFlags.fromPill)
                     return when {
@@ -1378,7 +1568,7 @@ fun MainLayout() {
                         sheetCard.owner != null -> {
                             // The mini player rides with the card's top edge and is faded out near the top (see its layer): it
                             // does not cut out as the card covers it.
-                            if (sheetCard.edge >= 1f && playerOpen && !sheetCard.holding) 0f else 1f
+                            if (!miniPlayerGlass && sheetCard.edge >= 1f && playerOpen && !sheetCard.holding) 0f else 1f
                         }
                         playerOpen -> 0f
                         else -> pillAlpha.value
@@ -1390,6 +1580,8 @@ fun MainLayout() {
                     val pillInteractive = (showPill && (!playerOpen || playerClosingToPill) && !searchOpen) || sheetCard.holding
                     PlayerPillHost(
                         playerViewModel = playerViewModel,
+                        glass = miniPlayerGlass,
+                        glassBackdrop = pillBackdrop,
                         enabled = pillInteractive,
                         showPageSwitch = pageSwitchButton,
                         onPageSwitch = {
@@ -1410,7 +1602,7 @@ fun MainLayout() {
                         },
                         onOpenDrag = { upFraction ->
                             if (sheetCard.holding) {
-                                sheetCard.dragTo((AuraMotion.SHEET_PILL_TOP_FRACTION - upFraction).coerceIn(0f, AuraMotion.SHEET_PILL_TOP_FRACTION))
+                                sheetCard.dragTo((sheetCard.restEdge - upFraction).coerceIn(0f, sheetCard.restEdge))
                             }
                         },
                         onOpenDragEnd = { commit, velocityPxS ->
@@ -1433,21 +1625,31 @@ fun MainLayout() {
                                 }
                                 val a = arrival.value
                                 // Where the card's top edge is: under the finger while it pulls, else the card's own.
-                                val top = AuraMotion.SHEET_PILL_TOP_FRACTION
+                                val top = sheetCard.restEdge
                                 val edgeNow = when {
                                     sheetCard.holding -> sheetCard.dragEdge
                                     sheetCard.owner != null && sheetCard.ready -> sheetCard.edge.coerceAtMost(top)
                                     else -> top
                                 }
-                                val rise = (top - edgeNow).coerceIn(0f, top)
+                                // The docked bar rides with the card's top edge; the glass pastille stays where it is (the card
+                                // passes over it, see below).
+                                val rise = if (miniPlayerGlass) 0f else (top - edgeNow).coerceIn(0f, top)
                                 translationY = (1f - a) * PageMotionSpec.CAPSULE_RISE_DP.dp.toPx() - rise * rootView.height
                                 // Gone by the time the card is up, so it never sits on the player's own controls.
-                                val leaving = ((edgeNow - 0.08f) / 0.30f).coerceIn(0f, 1f)
+                                val leaving = if (miniPlayerGlass) 1f else ((edgeNow - 0.08f) / 0.30f).coerceIn(0f, 1f)
                                 alpha = pAlpha * leaving * (1.6f * a).coerceIn(0f, 1f) * searchClear(searchPull.value, !searchOpen)
                             }
                             .drawWithContent {
                                 if (pillBaseAlpha() > 0f && arrival.value > 0f) {
-                                    drawContent()
+                                    if (miniPlayerGlass && sheetCard.owner != null && sheetCard.ready) {
+                                        // The player's card goes over the glass pastille: only what is above the card's top edge
+                                        // shows (the pastille is in the screen's foot, the host is bottom aligned).
+                                        val edgeY = (if (sheetCard.holding) sheetCard.dragEdge else sheetCard.edge) * rootView.height
+                                        val visible = (edgeY - (rootView.height - size.height)).coerceIn(0f, size.height)
+                                        clipRect(top = 0f, bottom = visible) { this@drawWithContent.drawContent() }
+                                    } else {
+                                        drawContent()
+                                    }
                                 }
                             },
                     )
@@ -1455,8 +1657,8 @@ fun MainLayout() {
             }
         }
         }
-        }
     }
+}
 }
 
 /**
@@ -1501,6 +1703,8 @@ private fun rememberBackdropState(playerViewModel: PlayerViewModel): State<Backd
 @Composable
 private fun PlayerPillHost(
     playerViewModel: PlayerViewModel,
+    glass: Boolean,
+    glassBackdrop: LayerBackdrop,
     onOpenNowPlaying: () -> Unit,
     onPrewarm: () -> Unit,
     onPrewarmCancel: () -> Unit,
@@ -1518,6 +1722,42 @@ private fun PlayerPillHost(
     val durationState = playerViewModel.durationMs.collectAsStateWithLifecycle()
 
     val dockAccent = com.ikko.aura.ui.components.rememberPlayerAccent(followPage = false)
+
+    if (glass) {
+        // The same slot as the docked bar (so the card's top edge and the pastille rise together as before), with the
+        // pastille floating in it: clear of the screen's foot, and no bar behind it.
+        CompositionLocalProvider(LocalAuraBackdrop provides glassBackdrop) {
+            androidx.compose.foundation.layout.Row(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                com.ikko.aura.ui.components.GlassPlayerPill(
+                    track = track,
+                    queueIndex = uiState.queueIndex,
+                    isPlaying = uiState.isPlaying,
+                    onTogglePlay = playerViewModel::togglePlayPause,
+                    onNext = playerViewModel::skipNext,
+                    onPrevious = playerViewModel::skipPrevious,
+                    onOpen = onOpenNowPlaying,
+                    onPrewarm = onPrewarm,
+                    onPrewarmCancel = onPrewarmCancel,
+                    onOpenDragStart = onOpenDragStart,
+                    onOpenDrag = onOpenDrag,
+                    onOpenDragEnd = onOpenDragEnd,
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled,
+                )
+                if (showPageSwitch) {
+                    PageSwitchPill(enabled = enabled, beforeSwitch = onPageSwitch)
+                }
+            }
+        }
+        return
+    }
 
     Box(
         modifier = modifier
@@ -1579,13 +1819,22 @@ private fun PlayerPillHost(
  */
 val LocalLibraryHeaderOffsetPx = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
 
+/** How far a page of the library (Titres, Albums...) has opened over its menu: the common header gives way to the page's own. */
+val LocalLibraryPageProgress = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
+
+val LocalHomeScrollPx = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
+val LocalLibraryScrollPx = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
+val LocalHeaderScrimAlpha = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.MutableFloatState?> { null }
+
 @Composable
 private fun TabPager(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
     motion: PageMotionState,
+    palette: com.ikko.aura.ui.components.EctoPalette,
 ) {
     val libraryCollapseOffsetPx = rememberSaveable { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val libraryPageProgress = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     val openSearch = LocalSearchOpener.current
     val density = LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
@@ -1607,35 +1856,100 @@ private fun TabPager(
             }
         }
     }
-    CompositionLocalProvider(LocalLibraryHeaderOffsetPx provides libraryCollapseOffsetPx) {
-        Box(Modifier.fillMaxSize()) {
-            PagedContainer(
-                state = motion,
-                pages = pages,
-            )
+    // The header goes up out of sight when a page is scrolled down, and comes back as soon as it is scrolled up (as on the
+    // playlists' page). 1 is shown, 0 hidden; read while drawing only.
+    val headerShown = remember { Animatable(1f) }
+    val headerScope = androidx.compose.runtime.rememberCoroutineScope()
+    val hideConnection = remember(density) {
+        val threshold = density.density * 10f
+        var run = 0f
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                val dy = available.y
+                if (kotlin.math.abs(dy) < 1f || kotlin.math.abs(available.x) > kotlin.math.abs(dy)) return androidx.compose.ui.geometry.Offset.Zero
+                // A run in one direction: a change of direction starts it again.
+                if ((dy < 0f) != (run < 0f)) run = 0f
+                run += dy
+                if (run < -threshold && headerShown.targetValue > 0f) {
+                    headerScope.launch { headerShown.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 420f)) }
+                } else if (run > threshold * 0.4f && headerShown.targetValue < 1f) {
+                    headerScope.launch { headerShown.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 420f)) }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
+    // Another page, or a page of the library opening or closing: the header is shown again.
+    androidx.compose.runtime.LaunchedEffect(motion) {
+        androidx.compose.runtime.snapshotFlow { (motion.p + 0.5f).toInt() to (libraryPageProgress.floatValue > 0.001f) }
+            .collect { headerShown.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 420f)) }
+    }
+    // With a page of the library up, the pages hold still: Home is not a swipe away from it.
+    androidx.compose.runtime.LaunchedEffect(motion) {
+        androidx.compose.runtime.snapshotFlow { libraryPageProgress.floatValue > 0.001f }.collect { motion.locked = it }
+    }
+    androidx.compose.runtime.DisposableEffect(motion) { onDispose { motion.locked = false } }
+    val homeScrollPx = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val libraryScrollPx = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    CompositionLocalProvider(
+        LocalLibraryHeaderOffsetPx provides libraryCollapseOffsetPx,
+        LocalLibraryPageProgress provides libraryPageProgress,
+        LocalHomeScrollPx provides homeScrollPx,
+        LocalLibraryScrollPx provides libraryScrollPx,
+    ) {
+        Box(Modifier.fillMaxSize().nestedScroll(hideConnection)) {
+            // The background of both pages (§2), still while they slide over it; in this layer, so the titles over it
+            // can be added to it (their vibrancy).
+            CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides palette) {
+                PagedContainer(
+                    state = motion,
+                    pages = pages,
+                )
+            }
+            // Exactly as BitChord: top fade scrim under the common header spanning across both Home and Library:
+            val unitPx = with(density) { com.ikko.aura.ui.components.designUnit().toPx() }
+            val rampPx = unitPx * 120f
+            val p = motion.p.coerceIn(0f, 1f)
+            val homeStrength = (homeScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
+            val libStrength = (libraryScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
+            val currentStrength = (homeStrength * (1f - p) + libStrength * p).coerceIn(0f, 1f)
+            val isTabsRoute = navController.currentBackStackEntry?.destination?.route == AuraDestination.Tabs.route
+            if (isTabsRoute) {
+                LocalHeaderScrimAlpha.current?.let { it.floatValue = currentStrength }
+            }
             // One header for Home and Library, outside the pager: it stays put while the pages slide under it.
             val settingsVm: SettingsViewModel = hiltViewModel()
             val profileUri by settingsVm.profileImageUri.collectAsStateWithLifecycle()
             // It still folds away with the library's scroll, as before: slid up and faded by the same offset the
             // library's header takes, weighted by how much of the Library page is showing (none on Home).
-            val unitPx = with(density) { com.ikko.aura.ui.components.designUnit().toPx() }
             val fadeSpanPx = (com.ikko.aura.ui.components.PageHeader.SEARCH_TOP +
                 com.ikko.aura.ui.components.PageHeader.SEARCH_HEIGHT) * unitPx
+            // A page of the library that is up has its own header: this one goes (and stops taking touches) as it opens.
+            val headerGone by remember {
+                androidx.compose.runtime.derivedStateOf { libraryPageProgress.floatValue * motion.p.coerceIn(0f, 1f) >= 0.5f }
+            }
             com.ikko.aura.ui.components.CommonHeader(
+                enabled = !headerGone,
                 profileUri = profileUri,
                 onSearch = openSearch,
                 onProfile = { navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true } },
-                modifier = Modifier
-                    .heroRipple(fast = true)
-                    .offset {
-                        val libWeight = motion.p.coerceIn(0f, 1f)
-                        IntOffset(0, (libraryCollapseOffsetPx.floatValue * libWeight).roundToInt())
-                    }
-                    .graphicsLayer {
-                        val libWeight = motion.p.coerceIn(0f, 1f)
-                        val dy = libraryCollapseOffsetPx.floatValue * libWeight
-                        alpha = (1f + dy / fadeSpanPx).coerceIn(0f, 1f)
-                    },
+                progress = { motion.p },
+                ink = palette.ink,
+                modifier = Modifier.offset {
+                    val libWeight = motion.p.coerceIn(0f, 1f)
+                    IntOffset(0, (libraryCollapseOffsetPx.floatValue * libWeight - unitPx * 60f * (1f - headerShown.value)).roundToInt())
+                },
+                // Folded into the header's own layers (the title's is blended into the mesh: a layer above would blank it).
+                groupAlpha = {
+                    val libWeight = motion.p.coerceIn(0f, 1f)
+                    val dy = libraryCollapseOffsetPx.floatValue * libWeight
+                    (1f + dy / fadeSpanPx).coerceIn(0f, 1f) * (1f - libraryPageProgress.floatValue * libWeight) * headerShown.value.coerceIn(0f, 1f)
+                },
+                // With a page pushed on the library it goes with the menu: 30 dp to the left, and out.
+                shiftX = { -30f * density.density * libraryPageProgress.floatValue * motion.p.coerceIn(0f, 1f) },
             )
         }
     }

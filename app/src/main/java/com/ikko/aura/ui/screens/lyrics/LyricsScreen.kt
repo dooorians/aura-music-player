@@ -1,8 +1,11 @@
 package com.ikko.aura.ui.screens.lyrics
 
+import com.ikko.aura.ui.components.heroPageOut
+import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.rememberPlayerAccent
 import com.ikko.aura.ui.components.scrollTopBlur
+import com.ikko.aura.ui.components.suppressEdgeBackRipple
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -45,6 +49,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -112,19 +117,42 @@ fun LyricsScreen(
     val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState by lyricsViewModel.uiState.collectAsStateWithLifecycle()
     val currentTrack = playerState.currentTrack
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+
+    // Not while the player is open over this page: its own back closes the player, and this one would leave the page too
+    // (and play the page's return) from under it.
+    val sheetCard = com.ikko.aura.LocalSheetCard.current
+    androidx.activity.compose.BackHandler(enabled = sheetCard.owner == null || sheetCard.leavingSideways) {
+        if (hero.canClose) hero.startClosing()
+        navController.popBackStack()
+    }
 
     LaunchedEffect(currentTrack?.id) { lyricsViewModel.loadFor(currentTrack) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .suppressEdgeBackRipple(),
+    ) {
         // Composed from the first frame, with the page: held back until the slide was over it left only the buttons on
         // the bare cover for a quarter of a second between the player fading out and the lines arriving.
-        Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .heroPageOut(),
+        ) {
             when (val state = lyricsState) {
-                is LyricsUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                is LyricsUiState.Loading -> Box(
+                    Modifier.fillMaxSize().heroRise(0),
+                    contentAlignment = Alignment.Center,
+                ) {
                     CircularProgressIndicator(color = Color.White)
                 }
 
-                is LyricsUiState.Unavailable -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                is LyricsUiState.Unavailable -> Box(
+                    Modifier.fillMaxSize().heroRise(0),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text(
                         text = "Paroles indisponibles pour ce titre",
                         style = MaterialTheme.typography.bodyLarge,
@@ -153,62 +181,6 @@ private fun LyricsPanel(
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
 ) {
-    val listState = rememberLazyListState()
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val readPos = rememberUpdatedState(livePosition)
-
-    // The line being sung: scheduled to wake at the next line's stamp (capped at 150 ms to catch seeks), so
-    // non-word-synced songs sit at 0 FPS between line transitions instead of polling MediaController at 96 Hz.
-    val activeIndex = remember(lines) {
-        val initialPos = livePosition() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
-        mutableIntStateOf(lines.indexAt(initialPos))
-    }
-    LaunchedEffect(lines, isPlaying) {
-        while (true) {
-            val pos = readPos.value() + if (isPlaying) com.ikko.aura.ui.components.LYRIC_LEAD_MS else 0L
-            val idx = lines.indexAt(pos)
-            if (activeIndex.intValue != idx) activeIndex.intValue = idx
-            val nextStamp = lines.getOrNull(idx + 1)?.timeMs
-            val waitMs = if (isPlaying && nextStamp != null) {
-                (nextStamp - pos).coerceIn(16L, 150L)
-            } else {
-                150L
-            }
-            delay(waitMs)
-        }
-    }
-    val activeLine = lines.getOrNull(activeIndex.intValue)
-    val needsFrameClock = isPlaying && (activeLine?.isWordSynced == true || activeLine?.isGap == true)
-    val clock = rememberLiveLyricClock(livePosition, isPlaying, active = needsFrameClock)
-
-    // The list's fractional position, which every line's look is a function of. A new line re-aims it from wherever
-    // it has got to.
-    val focus = remember(lines) { Animatable(activeIndex.intValue.coerceAtLeast(0).toFloat()) }
-    LaunchedEffect(lines) {
-        snapshotFlow { activeIndex.intValue }.collectLatest { index ->
-            focus.animateTo(index.coerceAtLeast(0).toFloat(), spring(dampingRatio = 1f, stiffness = FOCUS_STIFFNESS))
-        }
-    }
-
-    // Following: the page goes to the sung line unless a finger has it, and goes back to it a while after.
-    val dragged by listState.interactionSource.collectIsDraggedAsState()
-    val resumes = remember { mutableIntStateOf(0) }
-    LaunchedEffect(dragged) {
-        if (!dragged) {
-            delay(RESUME_AFTER_MS)
-            resumes.intValue++
-        }
-    }
-    LaunchedEffect(lines) {
-        var first = true
-        snapshotFlow { activeIndex.intValue to resumes.intValue }.collectLatest { (index, _) ->
-            // Not while a finger is on the page. Its own movement must not be what stops it: only a finger does.
-            snapshotFlow { dragged }.first { !it }
-            listState.centerOn(index.coerceAtLeast(0), ANCHOR, animate = !first)
-            first = false
-        }
-    }
-
     val activeStyle = MaterialTheme.typography.headlineMedium.copy(
         fontSize = 24.sp,
         lineHeight = 31.sp,
@@ -216,105 +188,216 @@ private fun LyricsPanel(
         textAlign = TextAlign.Start,
     )
     val inactiveStyle = activeStyle.copy(fontWeight = FontWeight.SemiBold)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
 
-    val statusBarTop = with(androidx.compose.ui.platform.LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize().scrollTopBlur(topInset = statusBarTop) { 1_000_000f },
-        // Room above and below the first and last lines to reach the resting place, so the sung line is where the eye
-        // expects it from the first line to the last.
-        contentPadding = PaddingValues(
-            top = (screenHeightDp * ANCHOR).dp,
-            bottom = (screenHeightDp * (1f - ANCHOR)).dp,
-            start = 22.dp,
-            end = 22.dp,
-        ),
-    ) {
-        itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
-            val isActive by remember(index) { derivedStateOf { activeIndex.intValue == index } }
-
-            if (line.isGap) {
-                GapDots(
-                    line = line,
-                    until = lines.getOrNull(index + 1)?.timeMs ?: line.endMs,
-                    clock = { clock.longValue },
-                    index = index,
-                    focus = focus,
-                    onClick = { onSeek(line.timeMs) },
-                )
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewportHeightDp = maxHeight
+        val contentWidthPx = with(density) { (maxWidth - 44.dp).roundToPx().coerceAtLeast(1) }
+        val firstIndex = remember(lines) {
+            lines.indexAt(livePosition() + com.ikko.aura.ui.components.LYRIC_LEAD_MS).coerceAtLeast(0)
+        }
+        val initialHalfHeightPx = remember(lines, firstIndex, contentWidthPx) {
+            val firstLine = lines.getOrNull(firstIndex)
+            if (firstLine == null) {
+                with(density) { 22.dp.roundToPx() }
+            } else if (firstLine.isGap) {
+                with(density) { 17.dp.roundToPx() }
             } else {
+                val measured = measurer.measure(
+                    text = firstLine.text,
+                    style = activeStyle,
+                    constraints = androidx.compose.ui.unit.Constraints(maxWidth = contentWidthPx),
+                )
+                val backingExtraPx = if (firstLine.background != null) with(density) { 25.dp.roundToPx() } else 0
+                val verticalPadPx = with(density) { 14.dp.roundToPx() }
+                (measured.size.height + backingExtraPx + verticalPadPx) / 2
+            }
+        }
+        val listState = rememberLazyListState(
+            initialFirstVisibleItemIndex = firstIndex,
+            initialFirstVisibleItemScrollOffset = initialHalfHeightPx,
+        )
+        val readPos = rememberUpdatedState(livePosition)
+
+        // The line being sung: scheduled to wake at the next line's stamp (capped at 150 ms to catch seeks), so
+        // non-word-synced songs sit at 0 FPS between line transitions instead of polling MediaController at 96 Hz.
+        val activeIndex = remember(lines) {
+            val initialPos = livePosition() + com.ikko.aura.ui.components.LYRIC_LEAD_MS
+            mutableIntStateOf(lines.indexAt(initialPos))
+        }
+        LaunchedEffect(lines, isPlaying) {
+            while (true) {
+                val pos = readPos.value() + com.ikko.aura.ui.components.LYRIC_LEAD_MS
+                val idx = lines.indexAt(pos)
+                if (activeIndex.intValue != idx) activeIndex.intValue = idx
+                val nextStamp = lines.getOrNull(idx + 1)?.timeMs
+                val waitMs = if (isPlaying && nextStamp != null) {
+                    (nextStamp - pos).coerceIn(16L, 150L)
+                } else {
+                    150L
+                }
+                delay(waitMs)
+            }
+        }
+        val activeLine = lines.getOrNull(activeIndex.intValue)
+        val needsFrameClock = activeLine?.isWordSynced == true || activeLine?.isGap == true
+        val clock = rememberLiveLyricClock(livePosition, isPlaying, active = needsFrameClock)
+
+        // The list's fractional position, which every line's look is a function of. A new line re-aims it from wherever
+        // it has got to.
+        val focus = remember(lines) { Animatable(activeIndex.intValue.coerceAtLeast(0).toFloat()) }
+        LaunchedEffect(lines) {
+            snapshotFlow { activeIndex.intValue }.collectLatest { index ->
+                focus.animateTo(index.coerceAtLeast(0).toFloat(), spring(dampingRatio = 1f, stiffness = FOCUS_STIFFNESS))
+            }
+        }
+
+        // Following: the page goes to the sung line unless a finger has it, and goes back to it a while after.
+        val dragged by listState.interactionSource.collectIsDraggedAsState()
+        val resumes = remember { mutableIntStateOf(0) }
+        LaunchedEffect(dragged) {
+            if (!dragged) {
+                delay(RESUME_AFTER_MS)
+                resumes.intValue++
+            }
+        }
+        LaunchedEffect(lines) {
+            var first = true
+            snapshotFlow { activeIndex.intValue to resumes.intValue }.collectLatest { (index, _) ->
+                // Not while a finger is on the page. Its own movement must not be what stops it: only a finger does.
+                snapshotFlow { dragged }.first { !it }
+                if (!first) {
+                    listState.centerOn(index.coerceAtLeast(0), ANCHOR, animate = true)
+                }
+                first = false
+            }
+        }
+
+        val statusBarTop = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+        val navBarBottom = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollTopBlur(topInset = statusBarTop) { 1_000_000f }
+                // The lines melt away under the status bar and above the foot instead of running into the clock and icons.
+                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    val top = statusBarTop.toPx()
+                    val bottom = navBarBottom.toPx()
+                    val h = size.height.coerceAtLeast(1f)
+                    drawRect(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            ((top + 12.dp.toPx()) / h).coerceIn(0f, 0.35f) to Color.Transparent,
+                            ((top + 76.dp.toPx()) / h).coerceIn(0f, 0.45f) to Color.Black,
+                            (1f - (bottom + 68.dp.toPx()) / h).coerceIn(0.55f, 1f) to Color.Black,
+                            (1f - (bottom + 8.dp.toPx()) / h).coerceIn(0.65f, 1f) to Color.Transparent,
+                            1f to Color.Transparent,
+                        ),
+                        blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                    )
+                },
+            // Room above and below the first and last lines to reach the resting place, so the sung line is where the eye
+            // expects it from the first line to the last.
+            contentPadding = PaddingValues(
+                top = viewportHeightDp * ANCHOR,
+                bottom = viewportHeightDp * (1f - ANCHOR),
+                start = 22.dp,
+                end = 22.dp,
+            ),
+        ) {
+            itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
+                val isActive by remember(index) { derivedStateOf { activeIndex.intValue == index } }
+
                 val lineHero = com.ikko.aura.ui.components.LocalHero.current
-                val unitPx = with(androidx.compose.ui.platform.LocalDensity.current) { com.ikko.aura.ui.components.designUnit().toPx() }
-                // Coming from the player, the line being sung is the one that travels (it is hidden until it lands); the
-                // others come in around it: the nearer first, 70 ms per line after 380, rising 28 design px.
+                val unitPx = with(density) { com.ikko.aura.ui.components.designUnit().toPx() }
                 val arrival = remember(lines) {
-                    val fromTrip = lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Opening && !isActive
+                    val fromTrip = lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Opening
                     androidx.compose.animation.core.Animatable(if (fromTrip) 0f else 1f)
                 }
                 LaunchedEffect(lines, index) {
                     if (arrival.value < 1f) {
-                        val d = abs(index - focus.value).toInt().coerceIn(1, 8)
-                        kotlinx.coroutines.delay(380L + (d - 1) * 70L)
-                        arrival.animateTo(1f, androidx.compose.animation.core.tween(420, easing = androidx.compose.animation.core.CubicBezierEasing(0.16f, 1f, 0.3f, 1f)))
+                        val elapsed = (System.nanoTime() - lineHero.tripStartNanos) / 1_000_000L
+                        val d = abs(index - focus.value).toInt().coerceIn(0, 7)
+                        val wait = 300L + d * 26L
+                        kotlinx.coroutines.delay((wait - elapsed).coerceAtLeast(0L))
+                        arrival.animateTo(1f, androidx.compose.animation.core.tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing))
                     }
                 }
-                val heroTarget = if (isActive) {
-                    Modifier.heroTarget(
-                        "lyrics",
-                        text = com.ikko.aura.ui.components.HeroText(
-                            line.text, androidx.compose.ui.geometry.Rect.Zero, activeStyle, rememberPlayerAccent(), maxLines = Int.MAX_VALUE,
-                        ),
-                    )
-                } else Modifier
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 7.dp)
-                        .graphicsLayer {
-                            // On the way back they leave together in 140 ms, a little lower.
-                            val out = if (lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) lineHero.contentOut.value else 0f
-                            translationY = (1f - arrival.value) * 28f * unitPx + out * 16f * unitPx
-                        }
-                        .graphicsLayer {
-                            val distance = abs(index - focus.value)
-                            val out = if (lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) lineHero.contentOut.value else 0f
-                            alpha = alphaAt(distance) * arrival.value * (1f - out)
-                            val s = scaleAt(distance)
-                            scaleX = s
-                            scaleY = s
-                            transformOrigin = TransformOrigin(0f, 0.5f)
-                        }
-                        .clickable { onSeek(line.timeMs) },
-                ) {
-                    if (isActive && line.isWordSynced) {
-                        SweepLyricLine(
-                            line = line,
-                            positionProvider = { clock.longValue },
-                            style = activeStyle,
-                            litColor = rememberPlayerAccent(),
-                            dimColor = rememberPlayerAccent().copy(alpha = 0.40f),
-                            textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth().then(heroTarget),
-                        )
-                    } else {
-                        Text(
-                            text = line.background?.let { "${line.text} ${it.text}" } ?: line.text,
-                            style = if (isActive) activeStyle else inactiveStyle,
-                            color = rememberPlayerAccent(),
-                            textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth().then(heroTarget),
-                        )
-                    }
 
-                    line.background?.let { backing ->
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = backing.text,
-                            style = (if (isActive) activeStyle else inactiveStyle).copy(fontSize = 17.sp, lineHeight = 22.sp),
-                            color = rememberPlayerAccent().copy(alpha = 0.75f),
-                            textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth(),
+                if (line.isGap) {
+                    GapDots(
+                        line = line,
+                        until = lines.getOrNull(index + 1)?.timeMs ?: line.endMs,
+                        clock = { clock.longValue },
+                        index = index,
+                        focus = focus,
+                        arrival = { arrival.value },
+                        unitPx = unitPx,
+                        onClick = { onSeek(line.timeMs) },
+                    )
+                } else {
+                    val heroTarget = if (isActive) {
+                        Modifier.heroTarget(
+                            "lyrics",
+                            text = com.ikko.aura.ui.components.HeroText(
+                                line.text, androidx.compose.ui.geometry.Rect.Zero, activeStyle, rememberPlayerAccent(), maxLines = Int.MAX_VALUE,
+                            ),
                         )
+                    } else Modifier
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 7.dp)
+                            .graphicsLayer {
+                                val out = if (!lineHero.scrolledFallbackClose && lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) {
+                                    androidx.compose.animation.core.EaseIn.transform(lineHero.contentOut.value)
+                                } else 0f
+                                translationY = (1f - arrival.value) * 14f * unitPx + out * 16f * unitPx
+                            }
+                            .graphicsLayer {
+                                val distance = abs(index - focus.value)
+                                alpha = alphaAt(distance) * arrival.value
+                                val s = scaleAt(distance)
+                                scaleX = s
+                                scaleY = s
+                                transformOrigin = TransformOrigin(0f, 0.5f)
+                            }
+                            .clickable { onSeek(line.timeMs) },
+                    ) {
+                        if (isActive && line.isWordSynced) {
+                            SweepLyricLine(
+                                line = line,
+                                positionProvider = { clock.longValue },
+                                style = activeStyle,
+                                litColor = rememberPlayerAccent(),
+                                dimColor = rememberPlayerAccent().copy(alpha = 0.40f),
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.fillMaxWidth().then(heroTarget),
+                            )
+                        } else {
+                            Text(
+                                text = line.background?.let { "${line.text} ${it.text}" } ?: line.text,
+                                style = if (isActive) activeStyle else inactiveStyle,
+                                color = rememberPlayerAccent(),
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.fillMaxWidth().then(heroTarget),
+                            )
+                        }
+
+                        line.background?.let { backing ->
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = backing.text,
+                                style = (if (isActive) activeStyle else inactiveStyle).copy(fontSize = 17.sp, lineHeight = 22.sp),
+                                color = rememberPlayerAccent().copy(alpha = 0.75f),
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
@@ -330,14 +413,23 @@ private fun GapDots(
     clock: () -> Long,
     index: Int,
     focus: Animatable<Float, *>,
+    arrival: () -> Float,
+    unitPx: Float,
     onClick: () -> Unit,
 ) {
     val dotColor = rememberPlayerAccent()
+    val lineHero = com.ikko.aura.ui.components.LocalHero.current
     Box(
         contentAlignment = Alignment.CenterStart,
         modifier = Modifier
             .fillMaxWidth()
             .height(34.dp)
+            .graphicsLayer {
+                val out = if (!lineHero.scrolledFallbackClose && lineHero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) {
+                    androidx.compose.animation.core.EaseIn.transform(lineHero.contentOut.value)
+                } else 0f
+                translationY = (1f - arrival()) * 14f * unitPx + out * 16f * unitPx
+            }
             .clickable(onClick = onClick),
     ) {
         Box(
@@ -347,7 +439,7 @@ private fun GapDots(
                     val distance = abs(index - focus.value)
                     // Seen only on or beside the sung line, and growing into place as it becomes it.
                     val presence = (1f - distance).coerceIn(0f, 1f)
-                    alpha = alphaAt(distance) * presence
+                    alpha = alphaAt(distance) * presence * arrival()
                     val grow = 0.85f + 0.15f * presence
                     scaleX = grow
                     scaleY = grow

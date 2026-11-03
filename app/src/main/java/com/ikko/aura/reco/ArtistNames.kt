@@ -14,6 +14,10 @@ object ArtistNames {
     private val SPACES = Regex("\\s+")
     private val TOPIC = Regex("\\s*-\\s*topic$", RegexOption.IGNORE_CASE)
     private val VEVO = Regex("vevo$", RegexOption.IGNORE_CASE)
+    private val PUNCT = Regex("[\"'`’.·•]+")
+    private val VEVO_END = Regex("(?i)\\s*vevo$")
+
+    private val KEY_CACHE = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** What separates two artists in a credit line; "/" only when spaced, so "AC/DC" stays one artist. */
     private val SEPARATORS = Regex(
@@ -29,11 +33,47 @@ object ArtistNames {
 
     /** A name with case, accents, " - Topic", a "VEVO" suffix and punctuation set aside: "Beyoncé - Topic" is "beyonce". */
     fun key(name: String): String {
-        var s = Normalizer.normalize(name.trim(), Normalizer.Form.NFKD).replace(DIACRITICS, "")
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return ""
+        KEY_CACHE[trimmed]?.let { return it }
+        var s = Normalizer.normalize(trimmed, Normalizer.Form.NFKD).replace(DIACRITICS, "")
+        s = s.replace('$', 's')
         s = s.lowercase().replace(TOPIC, "")
-        s = s.replace(Regex("[\"'`’.·•]+"), "").replace(SPACES, " ").trim()
+        s = s.replace(PUNCT, "").replace(SPACES, " ").trim()
         if (s.length > 4 && VEVO.containsMatchIn(s)) s = s.replace(VEVO, "").trim()
+        KEY_CACHE[trimmed] = s
         return s
+    }
+
+    /** What follows the first artist of a credit line: " feat. B", " ft B", " Featuring B" (not "Featherstone"). */
+    private val FEATURING = Regex("\\s+(?:feat|ft|featuring)\\b.*$", RegexOption.IGNORE_CASE)
+
+    /**
+     * The first artist of a credit line, as written: "A, B" and "A feat. B" are A. [beforeAmpersand] also cuts at " &", for
+     * names that come from a source's credit line ("A & B"); a library's own artist field keeps it ("Simon & Garfunkel").
+     * The one place this is decided, so every table that is keyed by artist agrees on who the artist is.
+     */
+    fun primary(raw: String, beforeAmpersand: Boolean = false): String {
+        var s = raw.substringBefore(',').replace(FEATURING, "")
+        if (beforeAmpersand) s = s.substringBefore(" &")
+        return s.trim()
+    }
+
+    fun primaryKey(raw: String, beforeAmpersand: Boolean = false): String = key(primary(raw, beforeAmpersand))
+
+    private val LATIN_ALIAS = Regex("^(.+?)\\s*[(（]([^()（）]+)[)）]$")
+
+    /**
+     * The name a catalogue (Last.fm, Deezer) knows an artist by: one tagged in its own script with a Latin alias, "れをる (Reol)", is
+     * asked about as "Reol". Any other name is returned as it is.
+     */
+    fun askName(raw: String): String {
+        val m = LATIN_ALIAS.find(raw.trim()) ?: return raw
+        val main = m.groupValues[1]
+        val alias = m.groupValues[2].trim()
+        val mainOwnScript = main.any { it.isLetter() && it.code >= 0x250 }
+        val aliasLatin = alias.any { it.isLetter() } && alias.all { it.code < 0x250 }
+        return if (mainOwnScript && aliasLatin) alias else raw
     }
 
     /** The artists a raw artist field names, as keys, without duplicates and without blanks. */
@@ -63,7 +103,16 @@ object ArtistNames {
         if (credits.any { it in blocked }) return true
         val line = " ${key(rawArtist)} "
         return blocked.any { b ->
-            (b.contains(' ') || b.contains(',') || b.contains('&')) && Regex("(?<![\\p{L}\\p{N}])${Regex.escape(b)}(?![\\p{L}\\p{N}])").containsMatchIn(line)
+            if (b.contains(' ') || b.contains(',') || b.contains('&')) {
+                val idx = line.indexOf(b)
+                if (idx >= 0) {
+                    val before = line.getOrNull(idx - 1)
+                    val after = line.getOrNull(idx + b.length)
+                    val beforeOk = before == null || !before.isLetterOrDigit()
+                    val afterOk = after == null || !after.isLetterOrDigit()
+                    beforeOk && afterOk
+                } else false
+            } else false
         }
     }
 
@@ -85,5 +134,5 @@ object ArtistNames {
 
     /** A name for the artist field of a source whose uploader is a channel ("Rina Sawayama - Topic", "RinaSawayamaVEVO"). */
     fun cleanChannel(name: String): String =
-        name.trim().replace(TOPIC, "").replace(Regex("(?i)\\s*vevo$"), "").trim()
+        name.trim().replace(TOPIC, "").replace(VEVO_END, "").replace('$', 's').trim()
 }

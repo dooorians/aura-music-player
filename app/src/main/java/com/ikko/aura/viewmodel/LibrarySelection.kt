@@ -14,6 +14,11 @@ class LibrarySelection @Inject constructor() {
     private val _filter = MutableStateFlow(LibraryFilter.TRACKS)
     val filter: StateFlow<LibraryFilter> = _filter.asStateFlow()
     fun select(filter: LibraryFilter) { _filter.value = filter }
+
+    /** A page of the library asked for from elsewhere (Home's "Tout voir"): the library opens it, then clears this. */
+    private val _openRequest = MutableStateFlow<LibraryFilter?>(null)
+    val openRequest: StateFlow<LibraryFilter?> = _openRequest.asStateFlow()
+    fun requestOpen(filter: LibraryFilter?) { _openRequest.value = filter }
 }
 
 @HiltViewModel

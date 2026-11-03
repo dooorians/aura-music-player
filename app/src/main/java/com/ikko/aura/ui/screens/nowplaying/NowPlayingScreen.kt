@@ -153,6 +153,7 @@ import com.ikko.aura.ui.components.DesignMenuDivider
 import com.ikko.aura.ui.components.DesignMenuRow
 import com.ikko.aura.ui.components.GlassMenuState
 import com.ikko.aura.ui.components.glassMenuAnchor
+import com.ikko.aura.ui.components.glassSurface
 import com.ikko.aura.ui.components.rememberGlassMenuState
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.components.rememberPlayerAccent
@@ -275,7 +276,11 @@ fun NowPlayingScreen(
     // being sung, the progress, the toolbar's states) are built again: kept as they were, they came back blank for a third
     // of a second, until their next tick redrew them.
     var backEpoch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    LaunchedEffect(leavingSideways) { if (!leavingSideways) backEpoch++ }
+    val wasLeavingSidewaysRef = remember { booleanArrayOf(false) }
+    if (wasLeavingSidewaysRef[0] && !leavingSideways) {
+        backEpoch++
+    }
+    wasLeavingSidewaysRef[0] = leavingSideways
     val heroLyricStyle = MaterialTheme.typography.titleMedium
     val heroAccent = rememberPlayerAccent()
     // The ground's cover is a picture of the whole screen; the copy starts as that very picture.
@@ -373,7 +378,7 @@ fun NowPlayingScreen(
         landedRef[0] = !sheetOpening
         sheetCard.claim(
             token,
-            if (sheetOpening) AuraMotion.SHEET_PILL_TOP_FRACTION else 0f,
+            if (sheetOpening) sheetCard.restEdge else 0f,
             ready = !sheetOpening || alreadyWarm,
         )
         if (sheetOpening && alreadyWarm) {
@@ -390,7 +395,7 @@ fun NowPlayingScreen(
     // Set the moment this screen itself closes the player (the swipe down, the back button), so the card starts
     // going down at once rather than whenever the navigation has worked out what its own pop was.
     var closeRequested by remember { mutableStateOf(false) }
-    if (!active || (!sheetClosing && closeRequested && !sheetCard.sinking && sheetCard.owner === token && sheetCard.edge >= AuraMotion.SHEET_PILL_TOP_FRACTION)) {
+    if (!active || (!sheetClosing && closeRequested && !sheetCard.sinking && sheetCard.owner === token && sheetCard.edge >= sheetCard.restEdge)) {
         closeRequested = false
     }
     LaunchedEffect(active, sheetClosing) {
@@ -410,6 +415,9 @@ fun NowPlayingScreen(
         leavingSideways -> SheetPhase.Away
         else -> SheetPhase.Settled
     }
+    if (active && phase == SheetPhase.Settled && !sheetOpening && !sheetCard.holding && sheetCard.edge >= 1f) {
+        sheetCard.edge = 0f
+    }
     settle.isClosing = phase == SheetPhase.Closing || phase == SheetPhase.Away
     // The system back button, the same way: without this it went to NavHost's own pop and waited like the swipe.
     BackHandler(enabled = active && phase == SheetPhase.Settled && sheetCard.owner === token) { close() }
@@ -425,7 +433,7 @@ fun NowPlayingScreen(
         }
         sheetCard.sinking = phase == SheetPhase.Closing
         when (phase) {
-            SheetPhase.Away -> sheetCard.edge = 1f
+            SheetPhase.Away -> if (!active) sheetCard.edge = 1f
             SheetPhase.Closing -> {
                 // Down only once there is a page under the card to be uncovered. When the underlying page is kept
                 // alive (pagesComposed > 0), start the descent immediately with zero frame wait.
@@ -441,8 +449,8 @@ fun NowPlayingScreen(
                 sheetCard.releaseVelocity = 0f
                 try {
                     animate(
-                        initialValue = sheetCard.edge.coerceAtMost(AuraMotion.SHEET_PILL_TOP_FRACTION),
-                        targetValue = AuraMotion.SHEET_PILL_TOP_FRACTION,
+                        initialValue = sheetCard.edge.coerceAtMost(sheetCard.restEdge),
+                        targetValue = sheetCard.restEdge,
                         initialVelocity = handedVelocity,
                         // From the finger's release: the same spring as the opening, carrying its speed. By a tap or the
                         // back button: the eased fall.
@@ -457,12 +465,16 @@ fun NowPlayingScreen(
                 }
             }
             SheetPhase.Settled -> {
-                if (sheetCard.edge >= 1f) {
+                // The card has been given back (the player has just closed to the screen's foot): nothing to bring up. Only a
+                // card still ours at the edge is one coming back from a sideways page.
+                if (sheetCard.edge >= 1f && sheetCard.owner !== token) {
+                    landedRef[0] = true
+                } else if (sheetCard.edge >= 1f) {
                     // Returning from a sideways destination (Lyrics, Queue, Album, Artist): card is already full screen.
                     sheetCard.edge = 0f
                     sheetCard.markReady()
                     landedRef[0] = true
-                } else if (sheetCard.edge > 0f && sheetCard.edge < 1f) {
+                } else if (sheetCard.edge > 0f) {
                     if (!drawnOnce.value) {
                         withTimeoutOrNull(READY_TIMEOUT_MS) {
                             drawnOnce.first { it }
@@ -489,7 +501,7 @@ fun NowPlayingScreen(
                             animationSpec = spring(1f, AuraMotion.SHEET_STIFFNESS, 0.0002f),
                         ) { value, _ ->
                             sheetCard.edge = value
-                            if (!sheetCard.ready && value < AuraMotion.SHEET_PILL_TOP_FRACTION) {
+                            if (!sheetCard.ready && value < sheetCard.restEdge) {
                                 sheetCard.markReady()
                             }
                         }
@@ -625,7 +637,7 @@ fun NowPlayingScreen(
                                     sheetCard.holding = true
                                 }
                                 if (followClose) {
-                                    sheetCard.dragTo((dy / composeView.height.coerceAtLeast(1)).coerceIn(0f, AuraMotion.SHEET_PILL_TOP_FRACTION))
+                                    sheetCard.dragTo((dy / composeView.height.coerceAtLeast(1)).coerceIn(0f, sheetCard.restEdge))
                                 }
                             }
                         }
@@ -698,7 +710,22 @@ fun NowPlayingScreen(
                 PlayerRoundButton(
                     icon = CupertinoIcons.Queue,
                     contentDescription = "Ouvrir la file d'attente",
-                    onClick = { onNavigateFromPlayerState.value(AuraDestination.Queue.route) },
+                    onClick = QueueClick@{
+                        if (sheetCard.cardTop <= 10f) {
+                            val playing = uiState.currentTrack
+                            if (playing != null && !heroState.beginFromPlayer(
+                                    key = "queue",
+                                    uri = playing.artworkUri,
+                                    cacheKey = playing.albumId.toString(),
+                                    cover = groundCoverRect(),
+                                    picture = groundPicture.value?.baked,
+                                    title = null,
+                                    sub = null,
+                                )
+                            ) return@QueueClick
+                            onNavigateFromPlayerState.value(AuraDestination.Queue.route)
+                        }
+                    },
                     left = false,
                 )
             }
@@ -712,6 +739,7 @@ fun NowPlayingScreen(
                     onFavoriteToggle = viewModel::toggleFavorite,
                     isLiked = isLiked,
                     onLikeToggle = viewModel::toggleLike,
+                    onDislike = viewModel::dislikeCurrent,
                     automixEnabled = uiState.automixEnabled,
                     onAutomixToggle = viewModel::toggleAutomix,
                     onOpenAlbum = HeroPanelOpenAlbum@{ albumId ->
@@ -762,7 +790,11 @@ fun NowPlayingScreen(
                 Modifier
                     .zIndex(1f)
                     .offset(y = TRANSPORT_EXTRA)
-                    .graphicsLayer { alpha = heroState.playerUiAlpha(); translationY = heroState.playerUiRise() * 12.dp.toPx() },
+                    .graphicsLayer {
+                        compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                        alpha = heroState.playerUiAlpha()
+                        translationY = heroState.playerUiRise() * 12.dp.toPx()
+                    },
             ) {
                 // Nudged down into the bar's own touch margin, so the line reads as sitting on it.
                 Box(Modifier.padding(horizontal = SCREEN_PADDING).offset(y = 6.dp)) {
@@ -772,12 +804,9 @@ fun NowPlayingScreen(
                         isPlaying = uiState.isPlaying,
                         playerActive = active && !leavingSideways,
                         pauseAnimation = { !activeState.value || sheetCard.frozen || leavingSidewaysState.value },
-                        // The line being sung is the way into the lyrics.
-                        heroAnchor = heroLyricAnchor,
+                        heroAnchor = null,
                         onClick = LyricStripClick@{
                             if (sheetCard.cardTop <= 10f) {
-                                // The cover goes out of focus and clears; the line being sung travels to its place among the
-                                // lyrics, which come in around it.
                                 val playing = uiState.currentTrack
                                 if (playing != null && !heroState.beginFromPlayer(
                                         key = "lyrics",
@@ -785,12 +814,7 @@ fun NowPlayingScreen(
                                         cacheKey = playing.albumId.toString(),
                                         cover = groundCoverRect(),
                                         picture = groundPicture.value?.baked,
-                                        title = heroLyricAnchor.label?.let { line ->
-                                            heroLyricAnchor to com.ikko.aura.ui.components.HeroText(
-                                                line, androidx.compose.ui.geometry.Rect.Zero, heroLyricStyle, heroAccent,
-                                                align = TextAlign.Center,
-                                            )
-                                        },
+                                        title = null,
                                         sub = null,
                                         lyrics = true,
                                     )
@@ -899,7 +923,7 @@ private fun LyricStrip(
     val clock = rememberLiveLyricClock(
         livePosition,
         isPlaying,
-        active = playerActive && isPlaying && currentLine?.isWordSynced == true,
+        active = playerActive && currentLine?.isWordSynced == true,
     )
     val frozenClockRef = remember { longArrayOf(clock.longValue) }
 
@@ -922,10 +946,16 @@ private fun LyricStrip(
             transitionSpec = {
                 // Keyed on the line's stamp below: the enclosing state ticks twice a second, and without it every tick
                 // would restart the slide on the same words.
-                val slide = tween<IntOffset>(LYRIC_SLIDE_MS, easing = FastOutSlowInEasing)
-                val fade = tween<Float>(LYRIC_SLIDE_MS, easing = FastOutSlowInEasing)
-                (fadeIn(fade) + slideInVertically(slide) { (it * 0.35f).toInt() })
-                    .togetherWith(fadeOut(fade) + slideOutVertically(slide) { -(it * 0.35f).toInt() })
+                // The old line leaves first (short, upward), the new one rises into the freed place after it: the two
+                // were crossing at the same spot, unreadable for a moment.
+                val inDelay = LYRIC_OUT_MS * 7 / 10
+                val slideInSpec = tween<IntOffset>(LYRIC_SLIDE_MS - inDelay, inDelay, FastOutSlowInEasing)
+                val fadeInSpec = tween<Float>(LYRIC_SLIDE_MS - inDelay, inDelay, FastOutSlowInEasing)
+                (fadeIn(fadeInSpec) + slideInVertically(slideInSpec) { (it * 0.5f).toInt() })
+                    .togetherWith(
+                        fadeOut(tween(LYRIC_OUT_MS, easing = androidx.compose.animation.core.LinearEasing)) +
+                            slideOutVertically(tween(LYRIC_OUT_MS, easing = FastOutSlowInEasing)) { -(it * 0.4f).toInt() },
+                    )
                     .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
             },
             contentKey = { it?.timeMs },
@@ -975,6 +1005,9 @@ private val UP_NEXT_EDGE_RAMP = 24.dp
 /** The line sliding up into place; short enough that a quick couplet does not lag behind. */
 private const val LYRIC_SLIDE_MS = 340
 
+/** How long the old line takes to leave. */
+private const val LYRIC_OUT_MS = 130
+
 /** One line of lyric — the row the column always reserves for it. */
 private val LYRIC_SLOT_HEIGHT = 32.dp
 
@@ -1005,19 +1038,35 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color) {
     var current by remember { mutableStateOf(groundCache.get(key)) }
     var outgoing by remember { mutableStateOf<GroundPicture?>(null) }
     val fade = remember { androidx.compose.animation.core.Animatable(0f) }
+    val lastGroundChange = remember { longArrayOf(0L) }
+    // A fade that has begun always runs to its end, whatever comes after it: it is not in the effect below (which a new
+    // track cancels) but in a scope of its own, and the next picture waits for it before beginning its own.
+    val fadeScope = androidx.compose.runtime.rememberCoroutineScope()
+    val fadeJob = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
 
     LaunchedEffect(key) {
         if (track == null) return@LaunchedEffect
+        // Not made yet (a skip past what was ready ahead): after a breath, so that a run of skips makes only the last one
+        // instead of a full-screen picture for each, and the player keeps its frames for the change itself.
+        // Only in a run: a skip on its own goes straight to its picture.
+        val sinceLast = android.os.SystemClock.uptimeMillis() - lastGroundChange[0]
+        lastGroundChange[0] = android.os.SystemClock.uptimeMillis()
+        if (groundCache.get(key) == null && sinceLast < GROUND_RUN_MS) kotlinx.coroutines.delay(GROUND_SKIP_SETTLE_MS)
         val picture = groundCache.get(key) ?: loadGround(context, track, groundW, groundH) ?: return@LaunchedEffect
+        // Two pictures at most at any time: the one going and the one coming. A third waits its turn.
+        fadeJob[0]?.join()
         if (picture === current) return@LaunchedEffect
         val before = current
+        // No suspension from here to the launch: once the swap is made, its fade is sure to be run, and to end.
         outgoing = before
         current = picture
-        if (before != null) {
-            fade.snapTo(1f)
-            fade.animateTo(0f, tween(GROUND_FADE_MS, easing = FastOutSlowInEasing))
+        fadeJob[0] = fadeScope.launch {
+            if (before != null) {
+                fade.snapTo(1f)
+                fade.animateTo(0f, tween(GROUND_FADE_MS, easing = androidx.compose.animation.core.LinearEasing))
+            }
+            outgoing = null
         }
-        outgoing = null
     }
     // While this one plays: after the change has settled, so the work is not done in the middle of it.
     LaunchedEffect(nextKey) {
@@ -1038,8 +1087,8 @@ private fun PlayerCoverGround(track: Track?, nextTrack: Track?, solid: Color) {
     Box(
         Modifier
             .fillMaxSize()
-            .then(if (current == null) Modifier.background(solid) else Modifier)
-            .drawBehind { if (hero.playerGroundAlpha() < 1f) drawRect(solid) },
+            .then(if (current == null && !hero.lyricsMode) Modifier.background(solid) else Modifier)
+            .drawBehind { if (hero.playerGroundAlpha() < 1f && !hero.lyricsMode) drawRect(solid) },
     ) {
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = hero.playerGroundAlpha() }) {
             current?.let { GroundLayer(it) }
@@ -1205,10 +1254,16 @@ private val groundCache = object {
 }
 
 /** The dissolve from one picture to the next. */
-private const val GROUND_FADE_MS = 500
+private const val GROUND_FADE_MS = 260
 
 /** Long enough that the work is not done in the middle of a track change. */
 private const val GROUND_PREFETCH_DELAY_MS = 600L
+
+/** How long a ground that was not made ahead waits for the next skip before it is made. */
+private const val GROUND_SKIP_SETTLE_MS = 140L
+
+/** Two changes closer than this are a run of skips. */
+private const val GROUND_RUN_MS = 700L
 
 /** The size the cover is read at for the ground: matches PlayerViewModel.NOTIFICATION_COVER_PX so the cache hits 100%. */
 private const val GROUND_COVER_PX = 1024
@@ -1236,6 +1291,7 @@ private fun HeroPanel(
     onFavoriteToggle: () -> Unit,
     isLiked: Boolean,
     onLikeToggle: () -> Unit,
+    onDislike: () -> Unit,
     automixEnabled: Boolean,
     onAutomixToggle: () -> Unit,
 ) {
@@ -1255,20 +1311,29 @@ private fun HeroPanel(
         // The title and artist sit at the foot of the cover, on the part of it that has melted into the flat colour,
         // the artist right under the title; a title that needs a second line takes it.
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Bottom) {
+            // Only the names change with the track, so only they fade: the toolbar beside them stays as it is.
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(designUnit() * 25f)) {
             AnimatedContent(
                 targetState = queueIndex to currentTrack,
                 transitionSpec = {
                     (fadeIn(tween(150)) togetherWith fadeOut(tween(150)))
                         .using(SizeTransform(clip = false) { _, _ -> androidx.compose.animation.core.snap() })
                 },
+                modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.BottomStart,
                 label = "hero-label",
             ) { (_, shown) ->
                 // The names at the left, the toolbar (Automix, favourite) at the right, its top at the title's.
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(designUnit() * 25f)) {
-                    // On the way to the lyrics the names step aside with the controls (the line being sung is what travels).
+                    // On the way to the lyrics or queue (or when returning to the player) the names step aside and settle with the controls.
                     val namesHero = com.ikko.aura.ui.components.LocalHero.current
-                    Column(Modifier.weight(1f).graphicsLayer { if (namesHero.lyricsMode) alpha = heroUiAlpha() }) {
+                    Column(
+                        Modifier.fillMaxWidth().graphicsLayer {
+                            if (namesHero.srcTitle == null && namesHero.srcSub == null) {
+                                alpha = heroUiAlpha()
+                                translationY = namesHero.playerUiRise() * 12.dp.toPx()
+                            }
+                        },
+                    ) {
                         // Three destinations from one block: the title opens the album it is on, the artist opens the artist.
                         // Each is the thing the words already name, so nothing needs a chevron to say so.
                         Text(
@@ -1332,18 +1397,23 @@ private fun HeroPanel(
                                 ),
                         )
                     }
+            }
+                    val toolbarHero = com.ikko.aura.ui.components.LocalHero.current
                     PlayerToolbar(
                         automixEnabled = automixEnabled,
                         onAutomixToggle = onAutomixToggle,
                         isLiked = isLiked,
                         onLikeToggle = onLikeToggle,
+                        onDislike = onDislike,
                         isFavorite = isFavorite,
                         onFavoriteToggle = onFavoriteToggle,
                         modifier = Modifier
                             .offset(y = designUnit() * -8f)
-                            .graphicsLayer { alpha = heroUiAlpha() },
+                            .graphicsLayer {
+                                alpha = heroUiAlpha()
+                                translationY = toolbarHero.playerUiRise() * 12.dp.toPx()
+                            },
                     )
-                }
             }
         }
 
@@ -1630,7 +1700,7 @@ private fun PlayerRoundButton(
     left: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    // No glass: the glyph alone, with a soft drop-shadow, in a 112 design px touch area.
+    // The same dark glass as the pages' round buttons (search, sort, shuffle), in a 112 design px touch area.
     @Suppress("UNUSED_PARAMETER") val unusedSide = left
     val u = designUnit()
     Box(
@@ -1640,61 +1710,40 @@ private fun PlayerRoundButton(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        com.ikko.aura.ui.components.ShadowedGlyph(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            size = u * 52f,
-            tint = rememberPlayerAccent(),
-        )
+        Box(Modifier.size(u * 96f).glassSurface(CircleShape).clip(CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription, tint = rememberPlayerAccent(), modifier = Modifier.size(u * 44f))
+        }
     }
 }
 
-/** The title's two actions, Automix then the favourite: the glyphs alone, on the ground. */
+/** The title's two actions: a menu (the like, Automix) and the favourite, each on the dark glass of the pages' round buttons. */
 @Composable
 private fun PlayerToolbar(
     automixEnabled: Boolean,
     onAutomixToggle: () -> Unit,
     isLiked: Boolean,
     onLikeToggle: () -> Unit,
+    onDislike: () -> Unit,
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val u = designUnit()
     val accent = rememberPlayerAccent()
+    val moreMenu = rememberGlassMenuState()
     Row(
         modifier = modifier.height(u * 112f),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(u * 16f),
     ) {
         Box(
-            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onAutomixToggle),
+            Modifier.glassMenuAnchor(moreMenu).size(u * 96f).glassSurface(CircleShape).clip(CircleShape).clickable { moreMenu.open() },
             contentAlignment = Alignment.Center,
         ) {
-            FillableIcon(
-                outline = CupertinoIcons.AutoAwesome,
-                filled = CupertinoIcons.AutoAwesome,
-                active = automixEnabled,
-                contentDescription = "Automix",
-                tint = if (automixEnabled) accent else accent.copy(alpha = 0.75f),
-                modifier = Modifier.size(u * 44f),
-            )
-        }
-        // The like: tells the recommendations "more of this" (kept on the device); it is not the favourite, which is a playlist.
-        Box(
-            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onLikeToggle),
-            contentAlignment = Alignment.Center,
-        ) {
-            FillableIcon(
-                outline = CupertinoIcons.Heart,
-                filled = CupertinoIcons.HeartFilled,
-                active = isLiked,
-                contentDescription = if (isLiked) "Je n'aime plus" else "J'aime",
-                tint = if (isLiked) accent else accent.copy(alpha = 0.9f),
-                modifier = Modifier.size(u * 44f),
-            )
+            Icon(CupertinoIcons.MoreVertical, "Plus d'options", tint = accent, modifier = Modifier.size(u * 44f))
         }
         Box(
-            Modifier.size(u * 104f, u * 100f).clip(CircleShape).clickable(onClick = onFavoriteToggle),
+            Modifier.size(u * 96f).glassSurface(CircleShape).clip(CircleShape).clickable(onClick = onFavoriteToggle),
             contentAlignment = Alignment.Center,
         ) {
             FillableIcon(
@@ -1702,10 +1751,26 @@ private fun PlayerToolbar(
                 filled = CupertinoIcons.StarFilled,
                 active = isFavorite,
                 contentDescription = "Favori",
-                tint = if (isFavorite) accent else accent.copy(alpha = 0.9f),
+                tint = accent,
                 modifier = Modifier.size(u * 44f),
             )
         }
+    }
+    DesignMenu(state = moreMenu, width = 250.dp, shade = 0.24f) {
+        val go: (() -> Unit) -> () -> Unit = { action -> { moreMenu.close(); action() } }
+        // The like tells the recommendations "more of this" (kept on the device); it is not the favourite, which is a playlist.
+        DesignMenuRow(
+            label = if (isLiked) "Je n'aime plus" else "J'aime bien",
+            icon = if (isLiked) CupertinoIcons.HeartFilled else CupertinoIcons.Heart,
+            selected = isLiked, accent = accent, onClick = go(onLikeToggle),
+        )
+        DesignMenuRow(
+            label = "Automix", subtitle = if (automixEnabled) "Activé" else "Désactivé",
+            icon = CupertinoIcons.AutoAwesome, selected = automixEnabled, accent = accent, onClick = go(onAutomixToggle),
+        )
+        DesignMenuDivider()
+        // The song goes on, and is never proposed again: it counts against it in what the recommendations learn.
+        DesignMenuRow(label = "Je n'aime pas", subtitle = "Passe au suivant", icon = CupertinoIcons.Close, onClick = go(onDislike))
     }
 }
 

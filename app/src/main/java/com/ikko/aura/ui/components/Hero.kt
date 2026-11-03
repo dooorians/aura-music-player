@@ -7,6 +7,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,8 +33,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
@@ -233,6 +237,11 @@ class HeroState {
     val returnClock = Animatable(0f)
     /** 0 while what the page brought is in place, 1 once it has gone (140 ms on the way back). */
     val contentOut = Animatable(0f)
+    /**
+     * The copy of the words, faded out while the page the trip goes to has not yet said where they go (a page that comes from a source takes a
+     * moment): left whole on the card, they stayed there, the title and the artist, until the page came. 0 shown, 1 gone.
+     */
+    val waitFade = Animatable(0f)
     /** The player's own controls, during a trip from the player. */
     internal val uiAlpha = Animatable(1f)
 
@@ -294,6 +303,23 @@ class HeroState {
     /** The trip leaves from (and returns to) the player, whose controls step aside meanwhile. */
     var fromPlayer = false
         private set
+    /** True when closing from a scrolled Album/Artist page whose target header cover is no longer visible in the viewport. */
+    var scrolledFallbackClose by mutableStateOf(false)
+        private set
+
+    /** True when the target cover is currently attached and visible in the viewport (or when in lyricsMode). */
+    val isTargetCoverVisible: Boolean
+        get() {
+            if (lyricsMode) return true
+            // Where the covers do not fly (see COVERS_FLY), [drawCover] is always off: the page's cover is still what says whether the way
+            // back has somewhere to land, or the words (which do travel) were sent off with a fade every time.
+            if (!drawCover && COVERS_FLY) return false
+            val c = tgtCover ?: return false
+            val coords = tgtCoverCoords
+            if (coords != null && !coords.isAttached) return false
+            val visible = coords?.boundsInRoot() ?: c
+            return !visible.isEmpty && visible.bottom > 110f && visible.height >= c.height * 0.35f
+        }
     /**
      * The page the trip goes to is known only by its kind (an album, an artist), not by its id: a song streamed from a
      * source has its own album ids, so the next page of that kind is the destination, whatever its id.
@@ -301,12 +327,24 @@ class HeroState {
     var anyPageOfKind = false
         private set
 
-    /** Whether [k] names this trip's element (exactly, or by kind for a trip from the player). */
-    fun matches(k: String): Boolean {
+    /** Whether [k] names this trip's destination element (exactly, or by kind when [anyPageOfKind] is true). */
+    fun matchesTarget(k: String): Boolean {
         val mine = key ?: return false
         if (mine == k) return true
+        if (mine.startsWith("album:") && (k == "album:null" || k == "album:" || k == "album:unknown")) return true
         return anyPageOfKind && mine.substringBefore(':') == k.substringBefore(':')
     }
+
+    /** Whether [k] names this trip's source element (strictly the same element, never by kind across different items). */
+    fun matchesSource(k: String): Boolean {
+        val mine = key ?: return false
+        if (mine == k) return true
+        if (fromPlayer && mine.substringBefore(':') == k.substringBefore(':')) return true
+        return false
+    }
+
+    /** Whether [k] names this trip's element. Defaults to [matchesSource] to avoid cross-element match bleed. */
+    fun matches(k: String): Boolean = matchesSource(k)
 
     /** Whether the current trip targets the given navigation route and arguments. */
     fun matchesEntry(route: String?, args: android.os.Bundle?): Boolean {
@@ -317,7 +355,11 @@ class HeroState {
             route.startsWith("album/") -> argStr("albumId")?.let { "album:$it" } ?: "album:"
             route.startsWith("playlist/") -> argStr("playlistId")?.let { "playlist:$it" } ?: "playlist:"
             route.startsWith("artist/") -> argStr("artistId")?.let { "artist:$it" } ?: "artist:"
+            // A source's pages have ids of their own: they are matched by their kind alone.
+            route.startsWith("ytm_album/") || route.startsWith("remote_album/") -> "album:"
+            route.startsWith("ytm_artist/") || route.startsWith("remote_artist/") -> "artist:"
             route == "lyrics" -> "lyrics"
+            route == "queue" -> "queue"
             else -> return false
         }
         val mine = key ?: return false
@@ -368,8 +410,8 @@ class HeroState {
     fun sideLineAlpha(key: String): Float {
         if (!matches(key)) return 1f
         return when (phase) {
-            HeroPhase.Opening, HeroPhase.Settled -> 1f - (clearMs() / 100f).coerceIn(0f, 1f)
-            HeroPhase.Closing -> if (running) ((0.2f - cp()) / 0.2f).coerceIn(0f, 1f) else 0f
+            HeroPhase.Opening, HeroPhase.Settled -> 1f - (clearMs() / 170f).coerceIn(0f, 1f)
+            HeroPhase.Closing -> if (running) ((0.5f - cp()) / 0.5f).coerceIn(0f, 1f) else 0f
             HeroPhase.Idle -> 1f
         }
     }
@@ -384,12 +426,12 @@ class HeroState {
 
     /** Whether the texts of this trip ride on the cover's frame (they sit under it at both ends) instead of crossing it. */
     internal val textsFollowCover: Boolean
-        get() = !fromPlayer && !lyricsMode && !coverFades && drawCover && srcCover != null && tgtCover != null
+        get() = false
     internal var returnRunning by mutableStateOf(false)
     private fun clearMs(): Float = if (clearRunning) clearClock.value else 0f
     private fun returnMs(): Float = if (returnRunning) returnClock.value else 0f
     internal fun tp(): Float = if (running) textP.value else 0f
-    internal fun bp(): Float = if (running) buttonAlpha.value else 1f
+    internal fun bp(): Float = if (clearRunning || running) buttonAlpha.value else 1f
 
     /** The copy has reached the page (Opening), or come home (Closing). Read in draw: it is what hands over. */
     private val arrived: Boolean get() = cp() >= 1f && tp() >= 1f
@@ -397,7 +439,7 @@ class HeroState {
     internal val copyVisible: Boolean
         get() = when (phase) {
             HeroPhase.Opening -> !arrived
-            HeroPhase.Closing -> !landedBack
+            HeroPhase.Closing -> !landedBack && !scrolledFallbackClose
             else -> false
         }
 
@@ -416,13 +458,28 @@ class HeroState {
         playButton: Boolean = false,
         drawCover: Boolean = true,
         sizeDp: Dp? = null,
+        /**
+         * The bottom, in root pixels, of the band at the top of the page that its content fades out under (the header's): a
+         * card scrolled up into it is there only faded, and its copy is faded the same way while it is at the card's place -
+         * so that it takes the card's place and gives it back with no jump - and less and less as it travels.
+         */
+        visibleFromY: Float? = null,
+        /**
+         * The page's own key is not known beforehand (an album of a source: its id is made when the page loads): it answers to the
+         * trip by its kind, `album:` whatever follows, as a page does when the trip comes from the player.
+         */
+        anyOfKind: Boolean = false,
     ): Boolean {
         if (phase == HeroPhase.Opening) return false
         val rect = cover.rect()
         val clip = cover.clip()
         start(key, uri, cacheKey, rect, clip, radiusPx, cover, title, sub)
+        anyPageOfKind = anyOfKind
+        srcVisibleFromY = visibleFromY
         srcPlayButton = playButton
-        this.drawCover = drawCover && rect != null
+        // The cover does not fly (a test of the playlists' way for every list: the names travel, the page fades in round them and
+        // the cover comes with it; the way back is the soft fade-out). [COVERS_FLY] puts the flight back.
+        this.drawCover = drawCover && COVERS_FLY && rect != null
         coverSizeDp = sizeDp
         return true
     }
@@ -439,16 +496,19 @@ class HeroState {
         coverAlbumId: Long? = null,
         coverAlbumTitle: String? = null,
         lyrics: Boolean = false,
+        radiusPx: Float = if (lyrics) 0f else 72f,
     ): Boolean {
         if (phase == HeroPhase.Opening) return false
         savedTrips.clear()
-        start(key, uri, cacheKey, cover, OPEN_CLIP, 0f, null, title, sub, pushCurrentIfSettled = false)
+        start(key, uri, cacheKey, cover, OPEN_CLIP, radiusPx, null, title, sub, pushCurrentIfSettled = false)
+        srcVisibleFromY = null
         srcPicture = picture
         fromPlayer = true
         anyPageOfKind = true
         this.coverAlbumId = coverAlbumId
         this.coverAlbumTitle = coverAlbumTitle?.trim()?.takeIf { it.isNotEmpty() }
         lyricsMode = lyrics
+        this.drawCover = COVERS_FLY && !lyrics
         if (lyrics) {
             // The cover does not go anywhere: it goes out of focus where it is.
             tgtCover = cover
@@ -519,6 +579,7 @@ class HeroState {
         coverSizeDp = null
         lyricsMode = false
         fromPlayer = false
+        scrolledFallbackClose = false
         anyPageOfKind = false
         coverAlbumId = null
         coverAlbumTitle = null
@@ -553,7 +614,7 @@ class HeroState {
         coords: LayoutCoordinates? = null,
     ) {
         // Frozen once the return has begun: the page may slide or fade, the copy leaves from where it was.
-        if (!matches(key) || phase == HeroPhase.Idle || phase == HeroPhase.Closing) return
+        if (!matchesTarget(key) || phase == HeroPhase.Idle || phase == HeroPhase.Closing) return
         var dy = 0f
         if (cover != null && cover.width > 1f && cover.height > 1f) {
             val prev = tgtCover
@@ -575,9 +636,6 @@ class HeroState {
             tgtSub = sub
             if (coords != null) tgtSubCoords = coords
         }
-        // If the page header is split across separate lazy items (e.g. ArtistScreen cover, name, sub) and an earlier
-        // item scrolled off the top and detached while a lower sibling item is still scrolling, shift the detached
-        // sibling(s) by the same vertical delta so their relative rigid-body layout stays intact.
         if (dy != 0f) {
             val shift = Offset(0f, dy)
             if (cover == null && tgtCover != null && tgtCoverCoords?.isAttached == false) {
@@ -596,6 +654,10 @@ class HeroState {
      * The source element re-appeared (the list came back after the page was left): where it is now is where the
      * trip back must land, which is not always where it was.
      */
+    /** The bottom of the band the card's page fades its content out under (see [begin]'s visibleFromY); null outside one. */
+    var srcVisibleFromY: Float? = null
+        private set
+
     fun updateSource(
         key: String,
         role: Int,
@@ -616,12 +678,8 @@ class HeroState {
         }
         if (bound != null && anchor != null && bound !== anchor) {
             if (bound.coords?.isAttached == true) {
-                // Another card with the same key (e.g. on an inactive tab or a second carousel) is reporting:
-                // ignore it while the original tapped anchor is still attached.
                 return
             }
-            // The original anchor was disposed while the destination page was open and the source screen is now
-            // re-composing. Only re-bind to an anchor that is on the active viewport horizontally.
             if (rect.right <= 0f || rect.left >= 10000f) return
             when (role) {
                 ROLE_TITLE -> srcTitleAnchor = anchor
@@ -630,12 +688,10 @@ class HeroState {
             }
         }
 
-        // The player may have moved on to another song meanwhile: the way back lands on what it shows now. A place
-        // reported while the element is being laid out again (a first pass at a fraction of its width) is not one.
         val known = when (role) { ROLE_TITLE -> srcTitle?.rect; ROLE_SUB -> srcSub?.rect; else -> srcCover }
-        if (known != null && rect.width < known.width * 0.6f) return
-        // The player's names do not move: they are rebuilt when it comes back, and their first passes reported places
-        // that are not theirs (the artist's line once landed in the middle of the screen). Only new words count.
+        val knownText = when (role) { ROLE_TITLE -> srcTitle?.text; ROLE_SUB -> srcSub?.text; else -> null }
+        val newWords = text != null && knownText != null && text != knownText
+        if (known != null && rect.width < known.width * 0.6f && !newWords) return
         if (fromPlayer && role != ROLE_COVER) {
             val now = if (role == ROLE_TITLE) srcTitle else srcSub
             if (now == null || text == null || text == now.text) return
@@ -676,25 +732,17 @@ class HeroState {
     /** Back: from wherever the trip is (still on its way out included), everything returns. */
     fun startClosing() {
         if (!canClose) return
-        // If the user scrolled far down the page so the target header detached above the top of the list (e.g. after a
-        // fast fling), ensure the detached target group sits cleanly above y = 0 while preserving its rigid layout.
-        val coverDetached = tgtCoverCoords != null && tgtCoverCoords?.isAttached == false
-        val titleDetached = tgtTitleCoords != null && tgtTitleCoords?.isAttached == false
-        val subDetached = tgtSubCoords != null && tgtSubCoords?.isAttached == false
-        if ((coverDetached || tgtCover == null) && (titleDetached || tgtTitle == null) && (subDetached || tgtSub == null)) {
-            val bottoms = listOfNotNull(
-                tgtCover?.takeIf { coverDetached }?.bottom,
-                tgtTitle?.takeIf { titleDetached }?.rect?.bottom,
-                tgtSub?.takeIf { subDetached }?.rect?.bottom,
-            )
-            val maxBottom = bottoms.maxOrNull()
-            if (maxBottom != null && maxBottom > -16f) {
-                val shift = Offset(0f, -(maxBottom + 16f))
-                tgtCover = tgtCover?.translate(shift)
-                tgtTitle = tgtTitle?.let { it.at(it.rect.translate(shift), OPEN_CLIP) }
-                tgtSub = tgtSub?.let { it.at(it.rect.translate(shift), OPEN_CLIP) }
-                tgtClip = OPEN_CLIP
-            }
+        // If the target header cover was scrolled off-screen, disable the floating shared-element cover/text return
+        // so we use a clean, smooth slide/fade transition without a detached cover flying over the Player or list.
+        if (fromPlayer || (!lyricsMode && !isTargetCoverVisible)) {
+            scrolledFallbackClose = true
+            drawCover = false
+            srcTitle = null
+            srcSub = null
+            tgtTitle = null
+            tgtSub = null
+        } else {
+            scrolledFallbackClose = false
         }
         returnRunning = false
         phase = HeroPhase.Closing
@@ -729,6 +777,7 @@ class HeroState {
             coverFades = prev.coverFades
             lyricsMode = prev.lyricsMode
             fromPlayer = prev.fromPlayer
+            scrolledFallbackClose = false
             anyPageOfKind = prev.anyPageOfKind
             coverAlbumId = prev.coverAlbumId
             coverAlbumTitle = prev.coverAlbumTitle
@@ -741,6 +790,7 @@ class HeroState {
         }
         phase = HeroPhase.Idle
         key = null
+        scrolledFallbackClose = false
         srcPicture = null
         srcCoverAnchor = null
         srcTitleAnchor = null
@@ -754,18 +804,8 @@ class HeroState {
         tgtSubCoords = null
     }
 
-    /**
-     * Back to the player the copy does not wait to be exactly home (its curve takes its last few pixels slowly, and it
-     * covered the player's controls meanwhile): over the last [HANDOVER] of the way the player's own element takes over,
-     * the copy fading out on top of it.
-     */
     internal fun handingOver(p: Float): Boolean = fromPlayer && phase == HeroPhase.Closing && p < HANDOVER
 
-    /**
-     * Where the copy is drawn, from the progress: back to the player it reaches its exact place a little early (at
-     * [HANDOVER] of the way, where the curve's slow tail begins) and hands over there, so the player's own element takes
-     * over the very pixels the copy was on: no jump, no double, and no long tail with the controls covered.
-     */
     internal fun drawn(p: Float): Float =
         if (fromPlayer && phase == HeroPhase.Closing) ((p - HANDOVER) / (1f - HANDOVER)).coerceIn(0f, 1f) else p
     internal fun handoverAlpha(p: Float): Float = if (handingOver(p)) 0f else 1f
@@ -777,9 +817,12 @@ class HeroState {
         anchor: HeroAnchor? = null,
         isFromPlayer: Boolean = false,
     ): Boolean {
+        if (scrolledFallbackClose && phase == HeroPhase.Closing) return false
         if (isFromPlayer != fromPlayer) return false
         if (!matches(key)) return false
         if (role == ROLE_COVER && !drawCover) return false
+        if (role == ROLE_TITLE && srcTitle == null) return false
+        if (role == ROLE_SUB && srcSub == null) return false
         val bound = when (role) {
             ROLE_TITLE -> srcTitleAnchor
             ROLE_SUB -> srcSubAnchor
@@ -796,17 +839,47 @@ class HeroState {
     }
 
     /** True while the page's own element for [key] must stay out of sight: the copy is standing in for it. */
-    fun hidesTarget(key: String): Boolean = matches(key) && when (phase) {
-        HeroPhase.Opening -> !arrived
-        HeroPhase.Closing -> true
-        else -> false
+    fun hidesTarget(key: String): Boolean {
+        if (lyricsMode) return false
+        if (scrolledFallbackClose && phase == HeroPhase.Closing) return false
+        return matchesTarget(key) && when (phase) {
+            HeroPhase.Opening -> !arrived
+            HeroPhase.Closing -> true
+            else -> false
+        }
+    }
+
+    /**
+     * The page's cover while the trip carries no copy of it (see [COVERS_FLY]): it comes in with the page's words instead of
+     * waiting hidden for a copy to land, and is simply there on the way back. Null when the cover does travel (or no trip).
+     */
+    fun coverWithoutFlightAlpha(key: String): Float? {
+        if (lyricsMode || drawCover || !matchesTarget(key)) return null
+        return if (phase == HeroPhase.Opening) smooth(tp(), 0.3f, 0.85f) else null
+    }
+
+    /**
+     * The page's line that the trip has no copy of (the artist under an album's title, when the item left only showed the
+     * title): it comes and goes with the title's flight, instead of waiting for the landing and appearing at the end.
+     * Null when the trip does carry that line (or none is under way): the line then follows [hidesTarget].
+     */
+    fun lineWithoutSourceAlpha(key: String): Float? {
+        if (lyricsMode || srcSub != null || srcTitle == null || !matchesTarget(key)) return null
+        return when (phase) {
+            HeroPhase.Opening, HeroPhase.Closing -> smooth(tp(), 0.3f, 0.8f)
+            else -> null
+        }
     }
 
     /** The player's ground under a trip: it gives way to the copy (which is a piece of it) and comes back as it lands. */
     fun playerGroundAlpha(): Float {
-        if (!fromPlayer) return 1f
+        if (!fromPlayer || !drawCover || scrolledFallbackClose) return 1f
         return when (phase) {
-            HeroPhase.Opening -> 1f - cp()
+            // Going: the ground carries the player's cover, and is gone within the first fifth of the way (the copy, which
+            // is that very picture, has taken over). Coming back it returns with the copy, not early: the page the trip
+            // left shows through a ground that is not there yet.
+            HeroPhase.Opening -> 1f - smooth((cp() / 0.2f).coerceIn(0f, 1f), 0f, 1f)
+            HeroPhase.Settled -> 0f
             HeroPhase.Closing -> if (landedBack || handingOver(cp())) 1f else 1f - drawn(cp())
             else -> 1f
         }
@@ -814,15 +887,19 @@ class HeroState {
 
     /** The player's own controls during a trip from it; outside one they are simply there. */
     fun playerUiAlpha(): Float =
-        // Never quite zero: a layer drawn at alpha 0 is skipped, and the player's parts that redraw only on a tick (the
-        // progress bar, the line being sung, the toolbar) then came back blank for a moment after the trip.
-        if (fromPlayer && (phase == HeroPhase.Opening || phase == HeroPhase.Closing)) uiAlpha.value.coerceAtLeast(0.004f) else 1f
+        if (fromPlayer && phase != HeroPhase.Idle && !(scrolledFallbackClose && phase == HeroPhase.Closing)) {
+            uiAlpha.value.coerceAtLeast(0.004f)
+        } else {
+            1f
+        }
 
     /** The player's controls settle into place as they come back (12 dp), rather than appearing where they are. */
-    fun playerUiRise(): Float =
-        if (fromPlayer && phase == HeroPhase.Closing) (1f - uiAlpha.value) else 0f
+    fun playerUiRise(): Float = 0f
 
     companion object {
+        /** Whether the cover of a card flies to its page (as on an album's) or not (as on a playlist's): see [begin]. */
+        const val COVERS_FLY = false
+
         const val ROLE_COVER = 0
         const val ROLE_TITLE = 1
         const val ROLE_SUB = 2
@@ -840,19 +917,19 @@ class HeroState {
             HeroPhase.Opening, HeroPhase.Settled -> {
                 // The touched item goes at once (it is where the trip starts); its cover and texts are already out of
                 // sight, this takes what is left of it (a count, a date) away too.
-                val delay = if (own || fast) 0f else min(110f, dist / 9f)
-                val t = ((clearMs() - delay) / (if (fast) 110f else 200f)).coerceIn(0f, 1f)
+                val delay = if (own || fast) 0f else min(40f, dist / 22f)
+                val t = ((clearMs() - delay) / (if (fast) 110f else 150f)).coerceIn(0f, 1f)
                 val e = EaseIn.transform(t)
                 (1f - e) to (1f - 0.04f * e)
             }
             HeroPhase.Closing -> {
                 if (own) {
-                    val t = ((returnMs() - 300f) / 180f).coerceIn(0f, 1f)
+                    val t = ((returnMs() - 200f) / 220f).coerceIn(0f, 1f)
                     return EaseOut.transform(t) to 1f
                 }
-                if (fast) return EaseOut.transform(((returnMs() - 200f) / 240f).coerceIn(0f, 1f)) to 1f
-                val delay = 260f + min(170f, dist / 6f)
-                val t = ((returnMs() - delay) / 360f).coerceIn(0f, 1f)
+                if (fast) return EaseOut.transform(((returnMs() - 90f) / 240f).coerceIn(0f, 1f)) to 1f
+                val delay = 110f + min(100f, dist / 9f)
+                val t = ((returnMs() - delay) / 300f).coerceIn(0f, 1f)
                 val e = EaseOut.transform(t)
                 e to (0.96f + 0.04f * e)
             }
@@ -876,6 +953,7 @@ fun Modifier.heroAnchor(
     this
         .onGloballyPositioned {
             anchor.coords = it
+            if (hero.phase != HeroPhase.Settled && hero.phase != HeroPhase.Closing) return@onGloballyPositioned
             val full = it.fullRectInRoot()
             if (full != null) {
                 hero.updateSource(key, role, full, text, it.containerClipInRoot(full), anchor, fromPlayer)
@@ -894,11 +972,17 @@ fun Modifier.heroRipple(
     hero: HeroState = LocalHero.current,
     pageKey: String? = null,
     fast: Boolean = false,
+    // For something that blends with what is behind it (the header's translucent title): the trip's fade is folded into
+    // this one layer, with its own alpha and shift, since a layer above it would isolate it and blank it for the trip.
+    blend: androidx.compose.ui.graphics.BlendMode? = null,
+    baseAlpha: (() -> Float)? = null,
+    shiftX: (() -> Float)? = null,
 ): Modifier {
     val center = remember { floatArrayOf(Float.NaN, Float.NaN) }
     val unitPx = with(LocalDensity.current) { designUnit().toPx() }
     return this
         .onGloballyPositioned {
+            if (hero.phase == HeroPhase.Idle) return@onGloballyPositioned
             val full = it.fullRectInRoot()
             if (full != null) {
                 val c = full.center
@@ -907,13 +991,17 @@ fun Modifier.heroRipple(
             }
         }
         .graphicsLayer {
+            if (blend != null) blendMode = blend
+            val base = baseAlpha?.invoke() ?: 1f
+            if (shiftX != null) translationX = shiftX()
+            alpha = base
             if (hero.phase == HeroPhase.Idle) return@graphicsLayer
-            if (pageKey != null && hero.matches(pageKey)) return@graphicsLayer
+            if (pageKey != null && hero.matchesTarget(pageKey)) return@graphicsLayer
             // Not placed yet (composed during the trip): treated as being at the touched item, so it never shows at full
             // strength for a frame, and this block still reads the trip's clocks, so it is redrawn with them.
             val at = if (center[0].isNaN()) hero.srcCover?.center ?: Offset.Zero else Offset(center[0], center[1])
-            val (a, s) = hero.rippleOf(at, key != null && hero.matches(key), unitPx, fast)
-            alpha = a
+            val (a, s) = hero.rippleOf(at, key != null && hero.matchesSource(key), unitPx, fast)
+            alpha = a * base
             scaleX = s
             scaleY = s
         }
@@ -956,7 +1044,21 @@ fun Modifier.heroTarget(
                 hero.reportTarget(key, null, OPEN_CLIP, 0f, if (isSub) null else t, if (isSub) t else null, c)
             }
         }
-        .graphicsLayer { if (hero.hidesTarget(key)) alpha = 0f }
+        .graphicsLayer {
+            val own = when {
+                text == null -> hero.coverWithoutFlightAlpha(key)
+                isSub -> hero.lineWithoutSourceAlpha(key)
+                else -> null
+            }
+            if (own != null) {
+                alpha = own
+            } else if (text == null && !hero.drawCover) {
+                // When covers do not fly, the page cover stays visible and fades out with the page (via heroPageOut)
+                alpha = 1f
+            } else if (hero.hidesTarget(key)) {
+                alpha = 0f
+            }
+        }
 }
 
 /**
@@ -965,7 +1067,7 @@ fun Modifier.heroTarget(
  * back. Outside a trip it is simply there.
  */
 @Composable
-fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current): Modifier {
+fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current, rows: Boolean = false): Modifier {
     val fromTrip = remember { hero.phase == HeroPhase.Opening }
     val myTripId = remember {
         when (hero.phase) {
@@ -974,20 +1076,31 @@ fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current): Modifier
             HeroPhase.Idle -> -1
         }
     }
+    // A list's rows (and the actions above them) only fade in, in place and all but together, once the words of the trip
+    // have gone over where they stand: before, the flying title crossed them and neither could be read.
     val p = remember { Animatable(if (fromTrip) 0f else 1f) }
     if (fromTrip) {
         LaunchedEffect(Unit) {
             val elapsed = (System.nanoTime() - hero.tripStartNanos) / 1_000_000L
-            delay((240L + index.coerceIn(0, 9) * 50L - elapsed).coerceAtLeast(0L))
-            p.animateTo(1f, tween(420, easing = EaseOut))
+            val wait = if (rows) 300L + index.coerceIn(0, 7) * 26L else 180L + index.coerceIn(0, 9) * 40L
+            delay((wait - elapsed).coerceAtLeast(0L))
+            p.animateTo(1f, tween(if (rows) 420 else 360, easing = if (rows) FastOutSlowInEasing else EaseOut))
         }
     }
     val unitPx = with(LocalDensity.current) { designUnit().toPx() }
+    // Once the page has been sent away it stays away: the trip's end (Idle) must not bring it back for the frames the
+    // navigation still keeps it composed.
+    val left = remember { BooleanArray(1) }
     return this.graphicsLayer {
-        val isClosingMine = hero.phase == HeroPhase.Closing && (myTripId == -1 || hero.tripId == myTripId)
-        val out = if (isClosingMine) EaseIn.transform(hero.contentOut.value) else 0f
+        // Only the trip this page came with is its own: a page opened without one (-1) is not closing when the album it opened is.
+        val isClosingMine = !hero.fromPlayer && hero.phase == HeroPhase.Closing && myTripId != -1 && hero.tripId == myTripId
+        if (isClosingMine) left[0] = true
+        else if (hero.phase == HeroPhase.Opening || hero.phase == HeroPhase.Settled) left[0] = false
+        val out = if (isClosingMine || left[0]) EaseIn.transform(if (isClosingMine) hero.contentOut.value else 1f) else 0f
         alpha = p.value * (1f - out)
-        translationY = 28f * unitPx * (1f - p.value) + 16f * unitPx * out
+        // Rows rise less than the page's other parts (14 against 28 design px): enough to read as arriving, not enough to
+        // cross the title in flight.
+        translationY = (if (rows) 14f else 28f) * unitPx * (1f - p.value) + 16f * unitPx * out
     }
 }
 
@@ -1004,9 +1117,13 @@ fun Modifier.heroPageOut(hero: HeroState = LocalHero.current): Modifier {
             HeroPhase.Idle -> -1
         }
     }
+    val left = remember { BooleanArray(1) }
     return this.graphicsLayer {
-        if (hero.phase == HeroPhase.Closing && (myTripId == -1 || hero.tripId == myTripId)) {
+        if (!hero.fromPlayer && hero.phase == HeroPhase.Closing && myTripId != -1 && hero.tripId == myTripId) {
+            left[0] = true
             alpha = 1f - EaseIn.transform(hero.contentOut.value)
+        } else if (left[0]) {
+            if (hero.phase == HeroPhase.Opening || hero.phase == HeroPhase.Settled) left[0] = false else alpha = 0f
         }
     }
 }
@@ -1025,17 +1142,19 @@ fun rememberHeroGround(hero: HeroState = LocalHero.current): State<Float> {
         }
     }
     val a = remember { Animatable(if (fromTrip) 0f else 1f) }
+    val left = remember { BooleanArray(1) }
     LaunchedEffect(hero.phase, hero.tripId) {
         when (hero.phase) {
             HeroPhase.Opening, HeroPhase.Settled -> if (a.value < 1f) {
                 if (hero.phase == HeroPhase.Opening && hero.tripId == myTripId) delay(100)
                 a.animateTo(1f, tween(460, easing = FastOutSlowInEasing))
             }
-            HeroPhase.Closing -> if (!hero.fromPlayer && (myTripId == -1 || hero.tripId == myTripId)) {
-                delay(140)
-                a.animateTo(0f, tween(380, easing = EaseIn))
+            HeroPhase.Closing -> if (!hero.fromPlayer && myTripId != -1 && hero.tripId == myTripId) {
+                left[0] = true
+                delay(30)
+                a.animateTo(0f, tween(190, easing = EaseIn))
             }
-            HeroPhase.Idle -> a.snapTo(1f)
+            HeroPhase.Idle -> if (!left[0]) a.snapTo(1f) else a.snapTo(0f)
         }
     }
     return remember(a) { object : State<Float> { override val value: Float get() = a.value } }
@@ -1061,7 +1180,12 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
     }
     val imageReady = !hero.drawCover || hero.uri == null || imageReadyKey == pictureKey
     val hasCoverTrip = hero.drawCover && hero.srcCover != null
-    val ready = imageReady && if (hasCoverTrip) hero.tgtCover != null else hero.tgtTitle != null || hero.tgtSub != null
+    val hasTextTrip = hero.srcTitle != null || hero.srcSub != null
+    val ready = imageReady && when {
+        hasCoverTrip -> hero.tgtCover != null
+        hasTextTrip -> hero.tgtTitle != null || hero.tgtSub != null
+        else -> true
+    }
     // A page that only has a name for the cover: the name goes, the cover fades towards it.
     val nameOnly = hasCoverTrip && hero.tgtCover == null && hero.tgtTitle != null
     // The texts' places are known (or will not be: a page may have no place for one of them).
@@ -1072,36 +1196,65 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
     LaunchedEffect(phase, hero.tripId) {
         when (phase) {
             HeroPhase.Opening -> {
+                hero.waitFade.snapTo(0f)
                 hero.clearClock.snapTo(0f)
                 hero.clearRunning = true
                 hero.contentOut.snapTo(0f)
                 coroutineScope {
                     launch { hero.clearClock.animateTo(310f, tween(ms(310), easing = LinearEasing)) }
-                    if (hero.fromPlayer) launch { hero.uiAlpha.animateTo(0f, tween(ms(140), easing = EaseOut)) }
                 }
             }
             HeroPhase.Closing -> {
+                hero.waitFade.snapTo(0f)
                 hero.returnClock.snapTo(0f)
                 hero.returnRunning = true
+                if (hero.fromPlayer) {
+                    hero.running = true
+                    hero.coverP.snapTo(0f)
+                    hero.textP.snapTo(0f)
+                    hero.uiAlpha.snapTo(1f)
+                    hero.buttonAlpha.snapTo(1f)
+                    delay(ms(380).toLong())
+                    hero.reset()
+                    return@LaunchedEffect
+                }
+                if (hero.scrolledFallbackClose) {
+                    hero.running = true
+                    coroutineScope {
+                        launch { hero.contentOut.animateTo(1f, tween(ms(260), easing = FastOutSlowInEasing)) }
+                        launch { hero.coverP.animateTo(0f, tween(ms(340), easing = FastOutSlowInEasing)) }
+                        launch { hero.textP.animateTo(0f, tween(ms(340), easing = FastOutSlowInEasing)) }
+                        launch { hero.uiAlpha.animateTo(1f, tween(ms(340), easing = FastOutSlowInEasing)) }
+                        launch { hero.buttonAlpha.animateTo(1f, tween(ms(240), easing = LinearEasing)) }
+                        // The list it comes back to returns on its own clock, as after a normal return: without it the
+                        // items stayed out until the trip's end and the screen was empty meanwhile.
+                        if (!hero.fromPlayer) launch { hero.returnClock.animateTo(560f, tween(ms(560), easing = LinearEasing)) }
+                    }
+                    hero.uiAlpha.snapTo(1f)
+                    hero.reset()
+                    return@LaunchedEffect
+                }
                 if (!hero.running) {
                     hero.coverP.snapTo(0f)
                     hero.textP.snapTo(0f)
                     hero.buttonAlpha.snapTo(1f)
                     hero.running = true
                 }
+                val closeDur = if (hero.lyricsMode) 380 else 520
+                val closeEasing = if (hero.lyricsMode) FastOutSlowInEasing else Morph
                 coroutineScope {
-                    launch { hero.contentOut.animateTo(1f, tween(ms(140), easing = LinearEasing)) }
-                    launch { hero.coverP.animateTo(0f, tween(ms(520), easing = Morph)) }
-                    launch { hero.textP.animateTo(0f, tween(ms(520), easing = Morph)) }
+                    launch { hero.contentOut.animateTo(1f, tween(ms(if (hero.lyricsMode) 260 else 140), easing = FastOutSlowInEasing)) }
+                    launch { hero.coverP.animateTo(0f, tween(ms(closeDur), easing = closeEasing)) }
+                    launch { hero.textP.animateTo(0f, tween(ms(closeDur), easing = closeEasing)) }
                     launch {
-                        delay((320 * k).toLong())
-                        hero.buttonAlpha.animateTo(1f, tween(ms(200), easing = LinearEasing))
+                        delay(((closeDur - 340).coerceAtLeast(60) * k).toLong())
+                        hero.buttonAlpha.animateTo(1f, tween(ms(220), easing = LinearEasing))
                     }
                     // The player's controls come back while the cover is still settling, not after it: the player is usable
                     // at once and never looks empty.
                     if (hero.fromPlayer) launch {
-                        delay((100 * k).toLong())
-                        hero.uiAlpha.animateTo(1f, tween(ms(300), easing = EaseOut))
+                        delay((if (hero.lyricsMode) 20 else 40 * k).toLong())
+                        hero.uiAlpha.animateTo(1f, tween(ms(if (hero.lyricsMode) 340 else 360), easing = FastOutSlowInEasing))
                     }
                     // A list is still coming back after the cover has landed: the trip is over with its last item. Back to
                     // the player there is no list: the trip is over when the cover is home and the controls are back.
@@ -1131,7 +1284,9 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                 // The page is built in a few frames, or a few seconds when it comes from a source: meanwhile the copy
                 // stays where it left from. If it never says where things go, the trip is simply dropped (the page is
                 // there, nothing is sent back to a place that is no longer on screen).
-                delay(4000)
+                delay(300)
+                hero.waitFade.animateTo(1f, tween(ms(240), easing = FastOutSlowInEasing))
+                delay(3500)
                 if (hero.phase == HeroPhase.Opening && hero.tgtCover == null && hero.tgtTitle == null) hero.reset()
                 return@LaunchedEffect
             }
@@ -1151,15 +1306,33 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
         coroutineScope {
             launch { hero.coverP.animateTo(1f, tween(ms(if (hero.lyricsMode) 640 else 620), easing = Morph)) }
             launch { hero.textP.animateTo(1f, tween(ms(if (hero.lyricsMode) 560 else 540), easing = Morph)) }
-            launch { hero.buttonAlpha.animateTo(0f, tween(ms(180), easing = LinearEasing)) }
+            launch { hero.buttonAlpha.animateTo(0f, tween(ms(110), easing = LinearEasing)) }
+            // The player's controls go when the copy leaves, not before: a page that is slow to say where things go
+            // (an artist's albums) left the player stripped and still for half a second.
+            if (hero.fromPlayer) launch { hero.uiAlpha.animateTo(0f, tween(ms(140), easing = EaseOut)) }
         }
         hero.settle()
     }
 
     if (phase != HeroPhase.Opening && phase != HeroPhase.Closing) return
+    if (hero.scrolledFallbackClose) return
     val src = hero.srcCover
 
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (hero.copyVisible) 1f else 0f }) {
+    // While the cover is travelling nothing underneath is touchable: the finger that has just opened a page is still
+    // on the screen where that page's rows are, and a second touch used to land on one of them (and play it).
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (hero.copyVisible) event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+            .graphicsLayer { alpha = if (hero.copyVisible) 1f else 0f },
+    ) {
         if (hero.drawCover && src != null) {
             val tgt = hero.tgtCover ?: src
             val baseW = max(src.width, tgt.width).coerceAtLeast(1f)
@@ -1172,8 +1345,31 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                         val to = hero.tgtCover ?: src
                         val toClip = if (hero.tgtCover != null) hero.tgtClip else hero.srcClip
                         val c = lerpContainerClip(src, hero.srcClip, to, toClip, p)
-                        clipRect(c.left, c.top, c.right, c.bottom) {
-                            this@drawWithContent.drawContent()
+                        val fadeBottom = hero.srcVisibleFromY
+                        // Full at the card's place and for the first half of the way, then it lets go: a copy that is half-faded
+                        // on its way in showed as a pale ghost above the card, where the page shows nothing.
+                        val s = ((1f - p) * 2f).coerceIn(0f, 1f)
+                        if (fadeBottom != null && s > 0.01f) {
+                            // At the card's place the copy is faded as the page fades the card (the same gradient), so that it
+                            // takes its place and leaves it with no jump; the fade lets go as it travels.
+                            drawIntoCanvas { canvas ->
+                                val paint = androidx.compose.ui.graphics.Paint()
+                                canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
+                                clipRect(c.left, c.top, c.right, c.bottom) { this@drawWithContent.drawContent() }
+                                val top = Color.Black.copy(alpha = 1f - s)
+                                drawRect(
+                                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        0f to top, 0.6f to top, 1f to Color.Black, startY = 0f, endY = fadeBottom,
+                                    ),
+                                    size = androidx.compose.ui.geometry.Size(size.width, fadeBottom),
+                                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                                )
+                                canvas.restore()
+                            }
+                        } else {
+                            clipRect(c.left, c.top, c.right, c.bottom) {
+                                this@drawWithContent.drawContent()
+                            }
                         }
                     }
             ) {
@@ -1193,7 +1389,9 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                             val sx = curW / size.width.coerceAtLeast(1f)
                             val sy = curH / size.height.coerceAtLeast(1f)
                             val toR = if (hero.tgtCover != null) hero.tgtRadiusPx else hero.srcRadiusPx
-                            val unscaledRadius = (lerpF(hero.srcRadiusPx, toR, p) / sx.coerceAtLeast(0.01f)).coerceAtLeast(0f)
+                            // Interpolate cornerRadius continuously across the entire 0..1 transition in both directions
+                            // so the cover never becomes square mid-flight.
+                            val unscaledRadius = (lerpF(hero.srcRadiusPx, toR, smooth(p, 0f, 1f)) / sx.coerceAtLeast(0.01f)).coerceAtLeast(0f)
                             transformOrigin = TransformOrigin(0f, 0f)
                             shape = RoundedCornerShape(unscaledRadius)
                             clip = true
@@ -1233,13 +1431,6 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                                 val r = size.width * (48f / 456f) * (0.8f + 0.2f * a)
                                 val cx = size.width - size.width * (74f / 456f)
                                 val cy = size.height - size.height * (84f / 456f)
-                                drawCircle(
-                                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                                        listOf(Color.Black.copy(alpha = 0.3f * a), Color.Transparent),
-                                        center = Offset(cx, cy + r * 0.12f), radius = r * 1.3f,
-                                    ),
-                                    radius = r * 1.3f, center = Offset(cx, cy + r * 0.12f),
-                                )
                                 drawCircle(Color(0xFFA9DCEF).copy(alpha = a), radius = r, center = Offset(cx, cy))
                                 val tri = Path().apply {
                                     moveTo(cx - 0.26f * r, cy - 0.34f * r)
@@ -1290,188 +1481,61 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
     }
 }
 
-private data class MeasuredGlyphBounds(
-    val lineCount: Int,
-    val hasVisualOverflow: Boolean,
-    val glyphLeft: Float,
-    val glyphRight: Float,
-) {
-    val glyphWidth: Float get() = (glyphRight - glyphLeft).coerceAtLeast(1f)
-    val glyphCenterX: Float get() = (glyphLeft + glyphRight) * 0.5f
-}
-
 /**
- * One text of the trip. Each end is drawn in its own layout (its width, its lines, its alignment), both moving and
- * scaling together from the source's place to the target's while their color interpolates continuously from [from.color]
- * to [to.color]. When the words are the same at both ends and fit on a single line, both layers stay locked to the exact
- * same glyph bounds and cross-dissolve without an opacity dip so font weight and letter-spacing morph seamlessly; when
- * the words or line wrapping differ, each end keeps its own composition and cross-fades on the way.
+ * Decoupled text transition:
+ * Texts (Title / Artist) are never clipped by or routed across the cover's geometric bounds.
+ * Instead, the departure text fades out quickly at its origin with a subtle vertical drift,
+ * and the arrival text fades in smoothly at its destination without any cover-frame clipping.
  */
 @Composable
 private fun HeroTextCopy(hero: HeroState, from: HeroText?, to: HeroText?) {
     if (from == null) return
     val end = to ?: from
-    val ratio = (end.style.fontSize.value / from.style.fontSize.value.coerceAtLeast(0.1f)).coerceAtLeast(0.05f)
-    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val composition = remember(from.text, from.style, from.rect.width, from.maxLines, from.align, to?.text, to?.style, to?.rect?.width, to?.maxLines, to?.align) {
-        fun shape(t: HeroText): MeasuredGlyphBounds {
-            val w = textWidth(t)
-            val res = measurer.measure(
-                text = t.text,
-                style = t.style.copy(textAlign = t.align),
-                overflow = TextOverflow.Ellipsis,
-                softWrap = t.maxLines > 1,
-                maxLines = t.maxLines,
-                constraints = Constraints(minWidth = if (t.align == TextAlign.Start) 0 else w, maxWidth = w),
-            )
-            val lc = res.lineCount.coerceAtLeast(1)
-            var minL = Float.POSITIVE_INFINITY
-            var maxR = Float.NEGATIVE_INFINITY
-            for (i in 0 until lc) {
-                minL = min(minL, res.getLineLeft(i))
-                maxR = max(maxR, res.getLineRight(i))
-            }
-            if (!minL.isFinite() || !maxR.isFinite() || maxR <= minL) {
-                minL = 0f
-                maxR = res.size.width.toFloat().coerceAtLeast(1f)
-            }
-            return MeasuredGlyphBounds(
-                lineCount = lc,
-                hasVisualOverflow = res.hasVisualOverflow,
-                glyphLeft = minL,
-                glyphRight = maxR,
-            )
-        }
-        shape(from) to (to?.let { shape(it) })
-    }
-    val fromShape = composition.first
-    val toShape = composition.second ?: fromShape
-    val sameWords = to != null && from.text.trim() == to.text.trim()
-    val sameShape = sameWords &&
-        fromShape.lineCount == 1 && toShape.lineCount == 1 &&
-        !fromShape.hasVisualOverflow && !toShape.hasVisualOverflow
-    val bothCentered = from.align == TextAlign.Center && end.align == TextAlign.Center
-    // Under the cover at the start: the text rides on the cover's frame instead of cutting across it (see [followPlace]).
-    val followMode = run {
-        val s = hero.srcCover
-        val g = hero.tgtCover
-        when {
-            !hero.textsFollowCover || to == null || s == null || g == null || from.rect.top < s.bottom - 2f -> 0
-            to.rect.top >= g.bottom - 2f -> 1
-            to.rect.left >= g.right - 2f -> 2
-            else -> 0
-        }
-    }
+    val dy = (end.rect.top - from.rect.top).coerceIn(-48f, 48f) * 0.25f
 
-    // Visual anchor points of the actual glyphs in root coordinates:
-    val fromVisualLeft = from.rect.left + fromShape.glyphLeft
-    val fromVisualCenter = from.rect.left + fromShape.glyphCenterX
-    val endVisualLeft = end.rect.left + toShape.glyphLeft
-    val endVisualCenter = end.rect.left + toShape.glyphCenterX
-
-    val ratioX = if (sameShape) {
-        (toShape.glyphWidth / fromShape.glyphWidth).coerceIn(ratio * 0.85f, ratio * 1.15f)
-    } else {
-        ratio
-    }
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .drawWithContent {
-                val p = hero.drawn(hero.tp())
-                val c = lerpContainerClip(from.rect, from.clip, end.rect, end.clip, p)
-                clipRect(c.left, c.top, c.right, c.bottom) {
-                    this@drawWithContent.drawContent()
-                }
-            }
-    ) {
+    Box(Modifier.fillMaxSize()) {
         HeroTextLayer(
             t = from,
-            tintColor = { lerp(from.color, end.color, hero.drawn(hero.tp())) },
+            tintColor = { from.color },
             alpha = {
                 val p = hero.drawn(hero.tp())
-                val fade = when {
-                    to == null -> 1f - smooth(p, 0f, 0.45f)
-                    sameShape -> 1f - smooth(p, 0.40f, 0.85f)
-                    sameWords -> 1f - smooth(p, 0.28f, 0.68f)
-                    else -> 1f - smooth(p, 0.22f, 0.58f)
-                }
-                hero.handoverAlpha(hero.tp()) * fade
+                val fadeOut = 1f - smooth(p, 0f, 0.28f)
+                hero.handoverAlpha(hero.tp()) * fadeOut * (1f - hero.waitFade.value)
             },
         ) {
             val p = hero.drawn(hero.tp())
-            val kx = lerpF(1f, ratioX, p)
-            val ky = lerpF(1f, ratio, p)
-            val targetX = if (bothCentered) {
-                endVisualCenter - ratioX * fromShape.glyphCenterX
-            } else {
-                endVisualLeft - ratioX * fromShape.glyphLeft
-            }
-            hero.followPlace(followMode, p, from.rect.left, from.rect.top, targetX, end.rect.top, kx, ky)
-                ?: TextPlacement(lerpF(from.rect.left, targetX, p), lerpF(from.rect.top, end.rect.top, p), kx, ky)
+            val progressOut = smooth(p, 0f, 0.32f)
+            TextPlacement(
+                x = from.rect.left,
+                y = from.rect.top + dy * progressOut,
+                scaleX = 1f,
+                scaleY = 1f,
+            )
         }
         if (to != null) {
             HeroTextLayer(
                 t = end,
-                tintColor = { lerp(from.color, end.color, hero.drawn(hero.tp())) },
+                tintColor = { end.color },
                 alpha = {
                     val p = hero.drawn(hero.tp())
-                    val fade = when {
-                        sameShape -> smooth(p, 0.15f, 0.70f)
-                        sameWords -> smooth(p, 0.18f, 0.62f)
-                        else -> smooth(p, 0.22f, 0.62f)
-                    }
-                    hero.handoverAlpha(hero.tp()) * fade
+                    val fadeIn = smooth(p, 0.48f, 0.92f)
+                    hero.handoverAlpha(hero.tp()) * fadeIn
                 },
             ) {
                 val p = hero.drawn(hero.tp())
-                val invRatioX = 1f / ratioX
-                val invRatioY = 1f / ratio
-                val kx = lerpF(invRatioX, 1f, p)
-                val ky = lerpF(invRatioY, 1f, p)
-                val startX = if (bothCentered) {
-                    fromVisualCenter - invRatioX * toShape.glyphCenterX
-                } else {
-                    fromVisualLeft - invRatioX * toShape.glyphLeft
-                }
-                hero.followPlace(followMode, p, startX, from.rect.top, end.rect.left, end.rect.top, kx, ky)
-                    ?: TextPlacement(lerpF(startX, end.rect.left, p), lerpF(from.rect.top, end.rect.top, p), kx, ky)
+                val progressIn = 1f - smooth(p, 0.42f, 0.95f)
+                TextPlacement(
+                    x = end.rect.left,
+                    y = end.rect.top - dy * progressIn,
+                    scaleX = 1f,
+                    scaleY = 1f,
+                )
             }
         }
     }
 }
 
 private data class TextPlacement(val x: Float, val y: Float, val scaleX: Float, val scaleY: Float)
-
-/**
- * A text that starts under the cover, placed in the cover's own frame as the cover moves, so it never crosses it.
- * [mode] 1: it ends under the cover too (it stays at the same distance below it). [mode] 2: it ends beside it (it first
- * slides out to the cover's right, still under it, then rises to the cover's top). Null: no such path, go straight.
- */
-private fun HeroState.followPlace(
-    mode: Int, p: Float, fromLeft: Float, fromTop: Float, endLeft: Float, endTop: Float, kx: Float, ky: Float,
-): TextPlacement? {
-    if (mode == 0) return null
-    val s = srcCover ?: return null
-    val g = tgtCover ?: return null
-    val c = coverNow() ?: return null
-    return if (mode == 1) {
-        TextPlacement(
-            c.left + lerpF(fromLeft - s.left, endLeft - g.left, p),
-            c.bottom + lerpF(fromTop - s.bottom, endTop - g.bottom, p),
-            kx, ky,
-        )
-    } else {
-        val ex = smooth(p, 0f, 0.45f)
-        val ey = smooth(p, 0.4f, 1f)
-        TextPlacement(
-            c.right + lerpF(fromLeft - s.right, endLeft - g.right, ex),
-            lerpF(c.bottom + (fromTop - s.bottom), c.top + (endTop - g.top), ey),
-            kx, ky,
-        )
-    }
-}
 
 /**
  * The width a copy is laid out in: the element's own. An element that hugs its text measured it at a fractional width
@@ -1523,3 +1587,50 @@ private fun smooth(p: Float, a: Float, b: Float): Float {
 }
 
 private fun lerpF(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+/**
+ * Keeps a press that starts inside the system back-gesture edge zone from rippling the list items under it (the system takes that
+ * touch as a back swipe). Anywhere else the touch is the children's: a carousel's drag and a swipe to dismiss are left alone.
+ */
+fun Modifier.suppressEdgeBackRipple(): Modifier = this.pointerInput(Unit) {
+    val edgeZonePx = 20.dp.toPx()
+    awaitEachGesture {
+        val down = awaitPointerEvent(PointerEventPass.Initial)
+        val firstChange = down.changes.firstOrNull() ?: return@awaitEachGesture
+        val startX = firstChange.position.x
+        if (startX <= edgeZonePx || startX >= size.width - edgeZonePx) {
+            down.changes.forEach { it.consume() }
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                event.changes.forEach { it.consume() }
+                if (event.changes.none { it.pressed }) break
+            }
+        }
+    }
+}
+
+/**
+ * Applies a smooth vertical alpha gradient mask at the top and/or bottom of a scrollable list
+ * so content fades cleanly before the status bar or navigation bar.
+ */
+fun Modifier.verticalFadingEdge(
+    topFade: Dp = 28.dp,
+    bottomFade: Dp = 36.dp,
+): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val h = size.height.coerceAtLeast(1f)
+        val topStop = (topFade.toPx() / h).coerceIn(0f, 0.25f)
+        val bottomStop = (1f - (bottomFade.toPx() / h).coerceIn(0f, 0.25f)).coerceAtLeast(topStop)
+        drawRect(
+            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                0f to Color.Transparent,
+                topStop to Color.Black,
+                bottomStop to Color.Black,
+                1f to Color.Transparent,
+            ),
+            blendMode = BlendMode.DstIn,
+        )
+    }
+

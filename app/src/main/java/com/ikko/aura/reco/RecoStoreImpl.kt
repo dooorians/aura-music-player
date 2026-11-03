@@ -21,6 +21,9 @@ class RecoStoreImpl @Inject constructor(
     private val genres: LocalGenres,
     private val prefs: RecoPreferences,
     private val sourceOrder: SourceOrder,
+    private val lastFm: com.ikko.aura.lastfm.LastFm,
+    private val smart: SmartDao,
+    private val enricher: LastFmEnricher,
 ) : RecoStore {
 
     /** The device's files once the first scan has landed (a library still loading would hide duplicates), or what there is after a while. */
@@ -39,6 +42,17 @@ class RecoStoreImpl @Inject constructor(
             .mapNotNull { e -> byId[e.trackId]?.let { MarkedTrack(it.id, it.title, it.artist, e.addedAtMs, it.year) } }
             .distinctBy { it.trackId }
         val albumArtist = musicRepository.albums.value.associate { it.id to it.artist }
+        // The first fill from the account's scrobbles, once, in the background.
+        enricher.bootstrap()
+        val metaGenres = smart.allArtists().associate { it.artistKey to it.genresJson }
+        // A file's own genre when it is a real one; else what Last.fm says of its artist (tags kept on the device).
+        fun genreFor(t: Track): String? {
+            val own = genreOf[t.id]?.let(GenreNormalizer::normalize)?.takeUnless { GenreNormalizer.isGeneric(it) }
+            if (own != null) return own
+            val json = metaGenres[ArtistNames.primaryKey(t.artist)] ?: return genreOf[t.id]?.let(GenreNormalizer::normalize)
+            return runCatching { org.json.JSONArray(json) }.getOrNull()?.let { a -> (0 until a.length()).map { a.getString(it) }.firstOrNull { !GenreNormalizer.isGeneric(it) } }
+                ?: genreOf[t.id]?.let(GenreNormalizer::normalize)
+        }
         return ProfileInputs(
             listens = dao.listensSince(nowMs - 365L * 86_400_000L, 4_000).map { e ->
                 ListenRecord(
@@ -52,7 +66,7 @@ class RecoStoreImpl @Inject constructor(
             favorites = marked(playlists.favoriteEntries()),
             playlistAdds = marked(playlists.userPlaylistEntries()),
             library = (local + kept).distinctBy { it.id }.map {
-                LibraryEntry(it.title, it.artist, it.year, genreOf[it.id], it.durationMs)
+                LibraryEntry(it.title, it.artist, it.year, genreFor(it), it.durationMs)
             },
             albumPlays = albumPlays.observeAll().first().mapNotNull { p ->
                 albumArtist[p.albumId]?.takeIf { it.isNotBlank() }?.let { AlbumPlayRecord(it, p.playCount, p.lastPlayedAtMs) }
@@ -61,7 +75,9 @@ class RecoStoreImpl @Inject constructor(
                 val kind = runCatching { FeedbackKind.valueOf(f.kind) }.getOrNull() ?: return@mapNotNull null
                 FeedbackRecord(kind, f.subject, f.artist, f.title, f.atMs, f.context)
             },
-            seedArtists = prefs.seedArtists.first(),
+            // What the listener plays on Last.fm counts as typed in: their taste, including what was heard outside this app.
+            pickedArtists = prefs.pickedArtists.first(),
+            seedArtists = (prefs.seedArtists.first() + runCatching { lastFm.listenerTopArtists().take(40) }.getOrDefault(emptyList())).distinctBy { ArtistNames.key(it) },
             nowMs = nowMs,
         )
     }
@@ -72,12 +88,18 @@ class RecoStoreImpl @Inject constructor(
     override suspend fun blockedArtists(): Set<String> =
         dao.allFeedback().filter { it.kind == FeedbackKind.BLOCK_ARTIST.name }.mapTo(HashSet()) { it.subject }
 
+    override suspend fun blockedNames(): List<String> =
+        dao.allFeedback().filter { it.kind == FeedbackKind.BLOCK_ARTIST.name }.map { it.artist }.filter { it.isNotBlank() }
+
     override suspend fun hidden(): Set<String> {
         val out = HashSet<String>()
         for (f in dao.allFeedback()) {
             if (f.kind == FeedbackKind.DISLIKE.name || f.kind == FeedbackKind.HIDE.name || f.kind == FeedbackKind.KNOWN.name) {
                 out += f.subject
                 out += TrackIdentity.key(f.title, f.artist)
+            } else if (f.kind == FeedbackKind.DISLIKE_ALBUM.name) {
+                out += f.subject
+                out += AlbumKeys.ofName(f.title, f.artist)
             }
         }
         return out

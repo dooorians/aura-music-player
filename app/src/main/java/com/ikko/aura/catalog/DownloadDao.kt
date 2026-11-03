@@ -20,6 +20,9 @@ data class YtmDownloadEntity(
     val updatedAt: Long,
 )
 
+/** A finished download and when it finished (its row's last update), in milliseconds. */
+data class DoneTime(val key: String, val updatedAt: Long)
+
 @Dao
 interface DownloadDao {
     @Query("SELECT * FROM ytm_downloads")
@@ -27,6 +30,9 @@ interface DownloadDao {
 
     @Query("SELECT `key` FROM ytm_downloads WHERE state = 'DONE'")
     fun observeDoneKeys(): Flow<List<String>>
+
+    @Query("SELECT `key`, updatedAt FROM ytm_downloads WHERE state = 'DONE'")
+    fun observeDoneTimes(): Flow<List<DoneTime>>
 
     @Query("SELECT * FROM ytm_downloads WHERE `key` = :key")
     suspend fun get(key: String): YtmDownloadEntity?

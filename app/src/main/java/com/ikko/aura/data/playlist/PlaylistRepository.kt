@@ -20,6 +20,7 @@ data class PlaylistSummary(
     val name: String,
     val trackCount: Int,
     val trackIds: List<String> = emptyList(),
+    val coverUris: List<String> = emptyList(),
 ) {
     /** The Favoris playlist: pinned first, and neither renamed nor deleted. */
     val isFavorites: Boolean get() = id == FAVORITES_PLAYLIST_ID
@@ -66,7 +67,11 @@ class PlaylistRepository @Inject constructor(
             }
         }
         // Favoris first, whenever it was made; the others newest first, as before.
-        .map { list -> list.sortedByDescending { it.isFavorites } }
+        // Also eliminate duplicate "Tes préférés" playlist so it doesn't repeat with Favoris.
+        .map { list ->
+            list.filter { p: PlaylistSummary -> p.id == FAVORITES_PLAYLIST_ID || (!p.name.equals("Tes préférés", ignoreCase = true) && !p.name.equals("Favoris", ignoreCase = true)) }
+                .sortedByDescending { it.isFavorites }
+        }
 
     /** The ids of the tracks with a heart. */
     val favoriteTrackIds: Flow<Set<String>> = playlistDao.observeTracksForPlaylist(FAVORITES_PLAYLIST_ID)
@@ -93,11 +98,12 @@ class PlaylistRepository @Inject constructor(
 
     private fun countFlow(entity: PlaylistEntity) =
         playlistDao.observeTracksForPlaylist(entity.id).map { tracks ->
+            val orderedIds = tracks.sortedBy { it.position }.map { it.trackId }
             PlaylistSummary(
                 id = entity.id,
                 name = entity.name,
                 trackCount = tracks.size,
-                trackIds = tracks.sortedBy { it.position }.map { it.trackId },
+                trackIds = orderedIds,
             )
         }
 
@@ -206,6 +212,14 @@ class PlaylistRepository @Inject constructor(
     }
 
     suspend fun removeTrack(playlistId: Long, trackId: String) = playlistDao.removeTrackFromPlaylist(playlistId, trackId)
+
+    fun playlistCustomArtwork(playlistId: Long): Flow<String?> = settingsStore.playlistCustomArtwork(playlistId)
+
+    val playlistCustomArtworks: Flow<Map<Long, String>> = settingsStore.playlistCustomArtworks
+
+    suspend fun setPlaylistCustomArtwork(playlistId: Long, uri: String?) {
+        settingsStore.setPlaylistCustomArtwork(playlistId, uri)
+    }
 }
 
 private const val AUTO_PLAYLIST_PERIOD_MS = 7L * 24 * 60 * 60 * 1000

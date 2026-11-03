@@ -177,7 +177,7 @@ fun Candidate.toTrack(): Track = when (sourceId) {
         id = id, title = title, artist = artist, album = album, artistId = 0L,
         albumId = com.ikko.aura.source.jiosaavn.jioSaavnAlbumId("", id.substringAfter(':')),
         artworkUri = artworkUrl?.let(android.net.Uri::parse),
-        contentUri = android.net.Uri.Builder().scheme("jiosaavn").authority(id.substringAfter(':')).build(),
+        contentUri = android.net.Uri.parse("jiosaavn://${id.substringAfter(':')}"),
         durationMs = durationMs, year = release.year,
         bitrateKbps = 320, sampleRateHz = 44100, bitDepth = 16,
     )

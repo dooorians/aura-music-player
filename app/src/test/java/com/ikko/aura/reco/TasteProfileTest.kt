@@ -81,4 +81,11 @@ class TasteProfileTest {
         assertTrue(p.artists.isEmpty())
         assertTrue(p.coldStart)
     }
+
+    @Test fun `an artist chosen in the picker weighs more than one typed in, and more than a first like`() {
+        val typed = TasteProfileBuilder.build(ProfileInputs(seedArtists = listOf("Magdalena Bay"), nowMs = NOW))
+        val picked = TasteProfileBuilder.build(ProfileInputs(seedArtists = listOf("Magdalena Bay"), pickedArtists = listOf("Magdalena Bay"), nowMs = NOW))
+        assertTrue(picked.affinity("magdalena bay") > typed.affinity("magdalena bay") + 0.2)
+        assertTrue(picked.affinity("magdalena bay") > 0.6)
+    }
 }

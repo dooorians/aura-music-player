@@ -49,6 +49,10 @@ data class YtmArtistState(
     val coverUrl: String? = null,
     val tracks: List<Track> = emptyList(),
     val albums: List<YtmAlbumRef> = emptyList(),
+    /** What each album of [albums] is, by its id, when the artist's discography says: an album, a single or an EP. */
+    val types: Map<String, com.ikko.aura.reco.authority.ReleaseType> = emptyMap(),
+    /** The year each album of [albums] came out, by its id, when the discography says. */
+    val years: Map<String, Int> = emptyMap(),
 )
 
 @HiltViewModel
@@ -61,7 +65,21 @@ class YtmAlbumViewModel @Inject constructor(
 ) : ViewModel() {
     private val albumId: String = savedStateHandle.get<String>("albumId").orEmpty()
     /** Opened from the search, which is explicitly online: the album as the source has it. Everywhere else, what is on the device wins. */
-    private val online: Boolean = savedStateHandle.get<Boolean>("online") ?: false
+    private val _online = MutableStateFlow(savedStateHandle.get<Boolean>("online") ?: false)
+    /** Which side of the source switch is on: the whole album on the source (true), or what is on the device. The page stays; its songs change. */
+    val onlineFlow: StateFlow<Boolean> = _online.asStateFlow()
+    val online: Boolean get() = _online.value
+    private val _hasLocal = MutableStateFlow(false)
+    /** Whether any of the album is on the device: what the "Local" side of the switch has to show. */
+    val hasLocal: StateFlow<Boolean> = _hasLocal.asStateFlow()
+
+    fun setOnline(on: Boolean) {
+        if (on == _online.value) return
+        _online.value = on
+        load(keepPage = true)
+    }
+    /** The album's reference on its source, for the page that lists all of it. */
+    val ref: String get() = albumId
     private val _state = MutableStateFlow(YtmAlbumState())
     val state: StateFlow<YtmAlbumState> = _state.asStateFlow()
 
@@ -89,13 +107,15 @@ class YtmAlbumViewModel @Inject constructor(
         _state.value.tracks.firstOrNull()?.let { favoritesStore.toggle(it.albumId) }
     }
 
-    fun load() {
-        _state.value = YtmAlbumState()
+    /** [keepPage]: the source switch changes the songs of the page that is there, it does not empty it first. */
+    fun load(keepPage: Boolean = false) {
+        if (!keepPage) _state.value = YtmAlbumState()
         viewModelScope.launch {
+            val onDevice = library.downloadedOfAlbum(albumId)
+            _hasLocal.value = onDevice.isNotEmpty()
             // Once any of it is downloaded, the album is the one on the device: its downloaded songs, no network, from
             // wherever it is opened but the search.
-            if (!online) {
-                val onDevice = library.downloadedOfAlbum(albumId)
+            if (!_online.value) {
                 if (onDevice.isNotEmpty()) {
                     _state.value = YtmAlbumState(
                         loading = false,
@@ -109,9 +129,11 @@ class YtmAlbumViewModel @Inject constructor(
             }
             val album = runCatching { withContext(Dispatchers.IO) { client.album(albumId) } }.getOrNull()
             _state.value = if (album == null || album.songs.isEmpty()) {
-                // No answer (no network, the source off): the downloaded songs of this album are files, and the page
-                // can be drawn from them.
-                val saved = library.downloadedOfAlbum(albumId)
+                // No answer (no network, the source off): the downloaded or known songs of this album are used so the page
+                // can still be drawn from them.
+                val saved = library.downloadedOfAlbum(albumId).ifEmpty {
+                    library.known().filter { it.remoteAlbumId == albumId }
+                }
                 if (saved.isEmpty()) YtmAlbumState(loading = false, failed = true)
                 else YtmAlbumState(
                     loading = false,
@@ -136,57 +158,36 @@ class YtmAlbumViewModel @Inject constructor(
 @HiltViewModel
 class YtmArtistViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val client: YtmClient,
+    client: YtmClient,
+    discographies: com.ikko.aura.reco.authority.ArtistDiscographies,
 ) : ViewModel() {
     private val name: String = savedStateHandle.get<String>("name").orEmpty()
-    private val _state = MutableStateFlow(YtmArtistState(name = name))
-    val state: StateFlow<YtmArtistState> = _state.asStateFlow()
+    private val page = OnlineArtistPage(name, client, discographies, viewModelScope)
+    val state: StateFlow<YtmArtistState> = page.state
 
     /** The same state a local artist page is drawn from. */
-    val uiState: StateFlow<ArtistUiState> = _state.map { s ->
-        ArtistUiState(
-            name = s.name,
-            albums = s.albums.map { ref ->
-                Album(
-                    id = YtmLibrary.pseudoAlbumId(ref.id),
-                    title = ref.title,
-                    artist = ref.artist,
-                    artistId = 0L,
-                    artworkUri = ref.thumbnailUrl?.let(android.net.Uri::parse),
-                    trackCount = 0,
-                    year = 0,
-                    remoteId = ref.id,
-                )
-            },
-            tracks = s.tracks,
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, ArtistUiState(name = name))
+    val uiState: StateFlow<ArtistUiState> = state.map { s -> artistUiStateOf(s) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ArtistUiState(name = name))
 
     init { load() }
 
-    fun load() {
-        _state.value = YtmArtistState(name = name)
-        viewModelScope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    coroutineScope {
-                        val songs = async { client.artistSongs(name) }
-                        val albums = async { runCatching { client.artistAlbums(name) }.getOrDefault(emptyList()) }
-                        songs.await() to albums.await()
-                    }
-                }
-            }.getOrNull()
-            _state.value = if (result == null || (result.first.isEmpty() && result.second.isEmpty())) {
-                YtmArtistState(loading = false, failed = result == null, name = name)
-            } else {
-                YtmArtistState(
-                    loading = false,
-                    name = name,
-                    coverUrl = result.first.firstOrNull()?.thumbnailUrl ?: result.second.firstOrNull()?.thumbnailUrl,
-                    tracks = result.first.map(YtmLibrary::trackOf),
-                    albums = result.second,
-                )
-            }
-        }
-    }
+    fun load() = page.load()
+}
+
+/** The artist page's state from what an online artist's page found: albums apart from singles and EPs, as the discography types them. */
+internal fun artistUiStateOf(s: YtmArtistState): ArtistUiState {
+    fun albumOf(ref: YtmAlbumRef) = Album(
+        id = YtmLibrary.pseudoAlbumId(ref.id),
+        title = ref.title,
+        artist = ref.artist,
+        artistId = 0L,
+        artworkUri = ref.thumbnailUrl?.let(android.net.Uri::parse),
+        trackCount = 0,
+        year = s.years[ref.id] ?: 0,
+        remoteId = ref.id,
+    )
+    val (small, full) = s.albums.partition { s.types[it.id].let { t -> t == com.ikko.aura.reco.authority.ReleaseType.SINGLE || t == com.ikko.aura.reco.authority.ReleaseType.EP } }
+    // The most recent first; the ones with no year known after those that have one.
+    fun newestFirst(list: List<YtmAlbumRef>) = list.map(::albumOf).sortedByDescending { it.year }
+    return ArtistUiState(name = s.name, albums = newestFirst(full), singles = newestFirst(small), tracks = s.tracks)
 }

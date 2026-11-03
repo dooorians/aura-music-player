@@ -134,6 +134,10 @@ interface RecoDao {
     @Query("DELETE FROM reco_items WHERE trackId IN (:trackIds)")
     suspend fun removeItems(trackIds: List<String>)
 
+    /** Every song proposed from an album, by its page's reference or, with none, by its name and artist. */
+    @Query("DELETE FROM reco_items WHERE (albumRef != '' AND albumRef = :ref) OR (album = :title AND artist = :artist)")
+    suspend fun removeItemsOfAlbum(ref: String, title: String, artist: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putItems(items: List<RecoItemEntity>)
 

@@ -62,7 +62,7 @@ fun ProfileAvatar(imageUri: String?, modifier: Modifier = Modifier, contentDescr
             contentDescription = contentDescription,
             tint = AuraColors.TextSecondary,
             modifier = modifier.clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.12f))
+                .background(Color.Black.copy(alpha = 0.26f))
                 .padding(8.dp),
         )
     }

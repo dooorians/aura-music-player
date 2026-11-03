@@ -47,6 +47,8 @@ sealed class RecoQuery {
     data class ByArtist(val artist: String, val affinity: Double, val suffix: String = "") : RecoQuery() {
         override val text get() = if (suffix.isEmpty()) artist else "$artist $suffix"
     }
+    /** Songs by [name], an artist Last.fm lists as close to [seed], one the listener plays. */
+    data class SimilarArtist(val name: String, val seed: String, val affinity: Double) : RecoQuery() { override val text get() = name }
     data class SimilarTo(val title: String, val artist: String, val affinity: Double) : RecoQuery() { override val text get() = "$artist $title" }
     data class ByGenre(val genre: String, val share: Double) : RecoQuery() { override val text get() = genre }
     data class ByMood(val term: String, val mood: Mood) : RecoQuery() { override val text get() = term }
@@ -129,6 +131,12 @@ object CandidateGatherer {
                     async {
                         when (q) {
                             is RecoQuery.ByArtist -> run(source) { source.search(q.text, Provenance(ProvKind.ARTIST, q.artist, q.affinity)) }
+                            is RecoQuery.SimilarArtist -> run(source) {
+                                val wanted = ArtistNames.key(q.name)
+                                // That artist only: a search for a name also answers with covers, namesakes and songs that mention it.
+                                source.search(q.name, Provenance(ProvKind.RELATED_TRACK, q.seed, q.affinity))
+                                    .filter { c -> wanted in c.credits.take(2) || ArtistNames.key(c.artist) == wanted }
+                            }
                             is RecoQuery.SimilarTo -> run(source) { source.related(q.title, q.artist, Provenance(ProvKind.RELATED_TRACK, q.artist, q.affinity)) }
                             is RecoQuery.ByGenre -> run(source) { source.search(q.genre, Provenance(ProvKind.GENRE, q.genre, q.share.coerceIn(0.3, 0.9))) }
                             is RecoQuery.ByMood -> run(source) { source.search(q.term, Provenance(ProvKind.MOOD_QUERY, q.term, 0.0, q.mood)) }

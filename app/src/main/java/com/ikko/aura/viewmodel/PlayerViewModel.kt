@@ -88,6 +88,10 @@ class PlayerViewModel @Inject constructor(
     private val listeningRecorder: com.ikko.aura.reco.ListeningRecorder,
     private val recommendations: com.ikko.aura.reco.RecommendationEngine,
     private val albumResolver: com.ikko.aura.source.StreamedAlbumResolver,
+    private val smartEngine: com.ikko.aura.reco.SmartRecommendationEngine,
+    private val ytmClient: com.ikko.aura.source.ytm.YtmClient,
+    private val remoteSources: com.ikko.aura.source.remote.RemoteSources,
+    private val jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient,
     @param:ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -96,6 +100,31 @@ class PlayerViewModel @Inject constructor(
      * made in "Nuit" is evidence about "Nuit", not about the listener's taste in general.
      */
     private var listeningContext: String? = null
+    /** The song the listener started from the interface and that has not been left yet: its listen counts as chosen. */
+    private var manualTrackId: String? = null
+    private var refilling = false
+
+    /**
+     * Automix keeps the queue going: with fewer than three songs to come, the recommendations add the next ones (the library's,
+     * chosen on the listener's taste and on Last.fm, and a share of streamed ones when online). Never on the main thread.
+     */
+    private fun refillIfNeeded() {
+        val state = _uiState.value
+        if (!state.automixEnabled || refilling || state.currentTrack == null) return
+        val remaining = state.queue.size - state.queueIndex - 1
+        if (remaining >= com.ikko.aura.reco.RecommendationConfig.REFILL_BELOW) return
+        refilling = true
+        viewModelScope.launch {
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    runCatching { smartEngine.nextTracks(state.currentTrack, com.ikko.aura.reco.RecommendationConfig.REFILL_COUNT, allowStreaming = true) }
+                        .getOrDefault(emptyList())
+                }
+                // Not if something else was started meanwhile.
+                if (next.isNotEmpty() && _uiState.value.currentTrack?.id == state.currentTrack.id) addToQueue(next)
+            } finally { refilling = false }
+        }
+    }
 
     private var paletteJob: Job? = null
 
@@ -127,6 +156,156 @@ class PlayerViewModel @Inject constructor(
         recommendations.likedTrackIds,
     ) { id, liked -> id != null && id in liked }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * The songs of an album of an external source, by its reference (a YouTube Music playlist id, or `<source>:<id>`): what the
+     * menu of an album that is not in the library acts on. Empty when the source does not answer.
+     */
+    suspend fun streamedAlbumTracks(ref: String): List<Track> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (ref.contains(':')) {
+                val source = ref.substringBefore(':')
+                val id = ref.substringAfter(':')
+                val client = remoteSources.client(source) ?: return@runCatching emptyList<Track>()
+                val page = client.album(id)
+                page.songs.map { song ->
+                    com.ikko.aura.source.remote.RemoteTracks.trackOf(
+                        source, song.copy(albumId = id, album = page.album.title.ifEmpty { song.album }), client,
+                    )
+                }
+            } else {
+                ytmClient.album(ref).songs.map(com.ikko.aura.source.ytm.YtmLibrary::trackOf)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * "Lancer la radio": the song plays at once, and what resembles it is added behind it as soon as a source has said what:
+     * what JioSaavn and YouTube Music list as close to it, else the artist's other songs of the library.
+     */
+    fun startRadio(track: Track) {
+        // The song and some of the artist's own, at once: a queue of one song would be filled by the automix before the radio added anything.
+        val key = com.ikko.aura.reco.ArtistNames.primaryKey(track.artist)
+        val ownNow = musicRepository.tracks.value.filter { it.id != track.id && isOfArtist(it, key) }.shuffled().take(8)
+        playQueue(listOf(track) + ownNow, 0)
+        val shown = ownNow.mapTo(hashSetOf(track.id)) { it.id }
+        viewModelScope.launch(Dispatchers.IO) {
+            val own = runCatching { artistOwnSongs(track.artist) }.getOrDefault(emptyList()).filter { it.id !in shown }.shuffled()
+            val close = runCatching { radioCandidates(track) }.getOrDefault(emptyList()).filter { it.id !in shown && !isOfArtist(it, key) }
+            val more = com.ikko.aura.reco.RadioMix.mix(own, close).distinctBy { it.id }.take(RADIO_SIZE)
+            if (more.isEmpty()) return@launch
+            withContext(Dispatchers.Main) {
+                // Not if something else was started meanwhile.
+                if (_uiState.value.currentTrack?.id == track.id) addToQueue(more)
+            }
+        }
+    }
+
+    /** Whether [t] is by the artist whose key is [key], as its first or second credit. */
+    private fun isOfArtist(t: Track, key: String): Boolean =
+        key.isNotEmpty() && key in com.ikko.aura.reco.ArtistNames.creditsOf(t.artist, t.title).take(2)
+
+    /** The songs of [artist] the library and the sources have, so that their radio is theirs. */
+    private suspend fun artistOwnSongs(artist: String): List<Track> {
+        val key = com.ikko.aura.reco.ArtistNames.primaryKey(artist)
+        val library = musicRepository.tracks.first().filter { isOfArtist(it, key) }
+        val online = if (ytmClient.isEnabled()) {
+            runCatching {
+                ytmClient.artistSongs(com.ikko.aura.reco.ArtistNames.primary(artist, beforeAmpersand = true))
+                    .map(com.ikko.aura.source.ytm.YtmLibrary::trackOf).filter { isOfArtist(it, key) }
+            }.getOrDefault(emptyList())
+        } else emptyList()
+        return (library + online).distinctBy { com.ikko.aura.reco.TrackIdentity.key(it.title, it.artist) }
+    }
+
+    /**
+     * The radio of one artist (a station of Home): their songs lead and play at once, with a little of what is close to them between
+     * them. [found] is what the engine already found for it.
+     */
+    fun startArtistRadio(artist: String, found: List<Track>, context: String?) {
+        val key = com.ikko.aura.reco.ArtistNames.primaryKey(artist)
+        viewModelScope.launch(Dispatchers.IO) {
+            val ownFound = found.filter { isOfArtist(it, key) }.distinctBy { it.id }
+            // Their songs are looked for before the queue starts, when the engine found few: a queue started with what it had would be
+            // other artists' after the first three, and the automix would fill it before the radio could add theirs.
+            val extra = if (ownFound.size >= RADIO_OWN_ENOUGH) emptyList() else
+                kotlinx.coroutines.withTimeoutOrNull(5_000L) { runCatching { artistOwnSongs(artist) }.getOrDefault(emptyList()) }.orEmpty()
+            val own = (ownFound + extra).distinctBy { it.id }.shuffled()
+            val queue = com.ikko.aura.reco.RadioMix.mix(own, found.filterNot { isOfArtist(it, key) }.distinctBy { it.id }).take(RADIO_SIZE)
+            if (queue.isEmpty()) return@launch
+            val shown = queue.mapTo(HashSet()) { it.id }
+            withContext(Dispatchers.Main) { playQueue(queue, 0, context = context) }
+            // A little of what is close to them, from the source, behind it.
+            val close = runCatching { radioCandidates(queue.first()) }.getOrDefault(emptyList())
+                .filter { it.id !in shown && !isOfArtist(it, key) }.distinctBy { it.id }.take(RADIO_SIZE / 2)
+            if (close.isEmpty()) return@launch
+            withContext(Dispatchers.Main) {
+                // Not if something else was started meanwhile.
+                if (_uiState.value.currentTrack?.id in shown) addToQueue(close)
+            }
+        }
+    }
+
+    private suspend fun radioCandidates(t: Track): List<Track> {
+        if (t.id.startsWith("jiosaavn:")) {
+            return jioSaavnClient.recommendationsOrThrow(t.id.substringAfter(':')).map(com.ikko.aura.source.jiosaavn.JioSaavnTracks::trackOf)
+        }
+        if (ytmClient.isEnabled()) {
+            val videoId = if (t.id.startsWith("ytm:")) t.id.substringAfter(':')
+            else ytmClient.search("${t.title} ${t.artist}").songs.firstOrNull()?.videoId
+            if (videoId != null) {
+                val related = ytmClient.related(videoId).map(com.ikko.aura.source.ytm.YtmLibrary::trackOf)
+                if (related.isNotEmpty()) return related
+            }
+        }
+        val library = musicRepository.tracks.first()
+        return library.filter { it.artist == t.artist }.shuffled() + library.shuffled().take(RADIO_SIZE)
+    }
+
+    /** Every song the listener liked (the long-press menu's "J'aime"). */
+    val likedTrackIds: StateFlow<Set<String>> = recommendations.likedTrackIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** Likes any song, or takes its like back. */
+    /** The albums liked as a whole, by every key each answers to (see [com.ikko.aura.reco.AlbumKeys]). */
+    val likedAlbumKeys: StateFlow<Set<String>> = recommendations.likedAlbumKeys
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** Likes an album as a whole, or takes the like back: it counts for the album even when none of its songs is known. */
+    fun toggleLikeAlbum(ref: String?, title: String, artist: String, tracks: List<Track>) {
+        viewModelScope.launch {
+            if (com.ikko.aura.reco.AlbumKeys.of(ref, title, artist).any { it in likedAlbumKeys.value }) recommendations.unlikeAlbum(ref, title, artist, tracks)
+            else recommendations.likeAlbum(ref, title, artist, tracks, listeningContext)
+        }
+    }
+
+    fun toggleLikeOf(track: Track) {
+        viewModelScope.launch {
+            if (track.id in likedTrackIds.value) recommendations.unlike(track) else recommendations.like(track, listeningContext)
+        }
+    }
+
+    /** "Je n'aime pas": the song is not proposed again. */
+    fun dislike(track: Track) {
+        viewModelScope.launch { recommendations.dislike(track, listeningContext) }
+    }
+
+    /** "Je n'aime pas" on an album of a source: all its songs, and the album itself, are not proposed again. */
+    fun dislikeAlbum(ref: String?, title: String, artist: String, tracks: List<Track>) {
+        viewModelScope.launch {
+            recommendations.dislikeAlbum(ref, title, artist, tracks, listeningContext)
+            // What the listener refused weighs in the profile now: the playlists are made again without it, with something
+            // else of their taste in its place.
+            runCatching { recommendations.refreshNow() }
+        }
+    }
+
+    /** "Je n'aime pas" in the player: the song goes at once, is never proposed again, and counts against it in the profile. */
+    fun dislikeCurrent() {
+        val track = _uiState.value.currentTrack ?: return
+        dislike(track)
+        playerController.skipNext()
+    }
 
     /** Likes the song playing, or takes the like back. The playlist it was started from counts as its context. */
     fun toggleLike() {
@@ -162,15 +341,10 @@ class PlayerViewModel @Inject constructor(
             tickerWake.trySend(Unit)
             val player = boundPlayer ?: return
             val index = player.currentMediaItemIndex
-            val track = _uiState.value.queue.getOrNull(index)
-            // MediaController re-delivers this on every periodic session resync, not just on a
-            // genuine track change — observed firing dozens of times per second with the same
-            // track/reason=REPEAT. Without this guard each of those spuriously reset positionMs
-            // back to 0, freezing the displayed position even though real playback (confirmed via
-            // dumpsys) kept advancing normally the whole time. Compared against currentTrack
-            // rather than queueIndex: queueIndex is set synchronously by playQueue() before this
-            // first fires for real, so comparing against it would also skip that genuine event.
-            if (track?.id == _uiState.value.currentTrack?.id) return
+            val mediaId = mediaItem?.mediaId ?: player.currentMediaItem?.mediaId
+            val track = _uiState.value.queue.getOrNull(index)?.takeIf { mediaId == null || it.id == mediaId }
+                ?: _uiState.value.queue.firstOrNull { it.id == mediaId }
+            if (track == null || track.id == _uiState.value.currentTrack?.id) return
             // The song just left: how much of it was heard, and how it was left.
             _uiState.value.currentTrack?.let { left ->
                 val transition = when (reason) {
@@ -180,18 +354,22 @@ class PlayerViewModel @Inject constructor(
                     Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> com.ikko.aura.reco.Transition.REPEAT
                     else -> com.ikko.aura.reco.Transition.UNKNOWN
                 }
-                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, transition, listeningContext)
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, transition, listeningContext, manualStart = left.id == manualTrackId)
+                if (left.id == manualTrackId) manualTrackId = null
             }
+            listeningRecorder.songStarted(track)
             _uiState.update {
                 it.copy(
                     currentTrack = track,
-                    queueIndex = index,
+                    queueIndex = index.coerceIn(0, (it.queue.size - 1).coerceAtLeast(0)),
                 )
             }
+            refillIfNeeded()
             _positionMs.value = 0L
-            _durationMs.value = player.duration.coerceAtLeast(0L)
-            track?.let(::extractPalette)
-            track?.let { recentlyPlayedTracker.recordPlayed(it.albumForPlays(), it.id) }
+            _durationMs.value = player.duration.takeIf { it > 0L && it != androidx.media3.common.C.TIME_UNSET }
+                ?: track.durationMs.coerceAtLeast(0L)
+            extractPalette(track)
+            recentlyPlayedTracker.recordPlayed(track.albumForPlays(), track.id)
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -231,11 +409,15 @@ class PlayerViewModel @Inject constructor(
             // a transient buffering blip right at the first play() call) leaves position frozen
             // for the rest of the session with no further event to recover it.
             while (isActive) {
-                // Also while paused: after a skip made on pause the new track's length and start are read at once. They used
-                // to be read only while playing, so the bar kept the previous track's duration, and a touch on it
-                // asked for a moment of the wrong length (past the end of a shorter track).
-                _positionMs.value = player.currentPosition.coerceAtLeast(0L)
-                _durationMs.value = player.duration.coerceAtLeast(0L)
+                val expectedId = _uiState.value.currentTrack?.id
+                val playerMediaId = player.currentMediaItem?.mediaId
+                if (expectedId == null || playerMediaId == expectedId) {
+                    _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+                    val dur = player.duration
+                    if (dur > 0L && dur != androidx.media3.common.C.TIME_UNSET) {
+                        _durationMs.value = dur
+                    }
+                }
                 reconcileCurrentItem(player)
                 // Paused, nothing moves: rather than waking twice a second for the whole time the app is
                 // open, it sleeps until the player says something changed (play, pause, a new item, a
@@ -275,27 +457,17 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Pulls the playing item back off the player when a listener callback did not report it.
-     *
-     * [PlaybackService][com.ikko.aura.player.PlaybackService] runs two ExoPlayers so an Automix
-     * transition can overlap two tracks, and the queue moving on during one is not an item
-     * transition on a single player — the incoming track starts as its *own* player's first
-     * item, and the session is then moved onto it. [onMediaItemTransition] can legitimately
-     * never fire for that change. Rather than guess which callback a given Media3 version
-     * surfaces the swap through, the ticker that is already running reconciles: same comparison
-     * the listener makes, so a genuine transition still costs one update and a steady state
-     * costs none.
-     */
     private fun reconcileCurrentItem(player: Player) {
+        val mediaId = player.currentMediaItem?.mediaId ?: return
         val index = player.currentMediaItemIndex
-        val track = _uiState.value.queue.getOrNull(index) ?: return
+        val track = _uiState.value.queue.getOrNull(index)?.takeIf { it.id == mediaId } ?: return
         val state = _uiState.value
         if (track.id == state.currentTrack?.id && index == state.queueIndex) return
         // The change was not announced by the listener's callback (two players during a mix): how the song was left is not known.
         if (track.id != state.currentTrack?.id) {
             state.currentTrack?.let { left ->
-                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.UNKNOWN, listeningContext)
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.UNKNOWN, listeningContext, manualStart = left.id == manualTrackId)
+                if (left.id == manualTrackId) manualTrackId = null
             }
         }
         _uiState.update {
@@ -305,7 +477,8 @@ class PlayerViewModel @Inject constructor(
             )
         }
         _positionMs.value = player.currentPosition.coerceAtLeast(0L)
-        _durationMs.value = player.duration.coerceAtLeast(0L)
+        val dur = player.duration
+        _durationMs.value = if (dur > 0L && dur != androidx.media3.common.C.TIME_UNSET) dur else track.durationMs.coerceAtLeast(0L)
         extractPalette(track)
         recentlyPlayedTracker.recordPlayed(track.albumForPlays(), track.id)
     }
@@ -442,7 +615,13 @@ class PlayerViewModel @Inject constructor(
      */
     fun removeDownloads(tracks: List<Track>) = unkeepStreamed(tracks)
 
-    fun playQueue(tracks: List<Track>, startIndex: Int, shuffle: Boolean = false, context: String? = null) {
+    fun playQueue(
+        tracks: List<Track>,
+        startIndex: Int,
+        shuffle: Boolean = false,
+        context: String? = null,
+        alreadyShuffled: Boolean = false,
+    ) {
         if (tracks.isEmpty()) return
         listeningContext = context
         rememberStreamed(tracks)
@@ -450,35 +629,65 @@ class PlayerViewModel @Inject constructor(
         val keys = entryKeys.fresh(tracks.size)
         originalQueueKeys = keys
 
+        val safeStartIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        val startTrack = tracks[safeStartIndex]
+        val prevTrack = _uiState.value.currentTrack
+        if (prevTrack != null && prevTrack.id != startTrack.id) {
+            listeningRecorder.songLeft(prevTrack, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.QUEUE_REPLACED, listeningContext, manualStart = prevTrack.id == manualTrackId)
+        }
+        // A queue started from the interface: the song it opens on was chosen by the listener, not reached by the queue.
+        manualTrackId = startTrack.id
+        _positionMs.value = 0L
+        _durationMs.value = startTrack.durationMs.coerceAtLeast(0L)
+
         if (shuffle) {
-            val startTrack = tracks.getOrElse(startIndex) { tracks.first() }
-            val startKey = keys.getOrElse(startIndex) { keys.first() }
-            val remainderIndices = tracks.indices.filter { it != startIndex }.shuffled()
-            val newQueue = listOf(startTrack) + remainderIndices.map { tracks[it] }
-            val newKeys = listOf(startKey) + remainderIndices.map { keys[it] }
+            val newQueue: List<Track>
+            val newKeys: List<Long>
+            val newIndex: Int
+            if (alreadyShuffled) {
+                newQueue = tracks
+                newKeys = keys
+                newIndex = safeStartIndex
+            } else {
+                val startKey = keys[safeStartIndex]
+                val remainderIndices = tracks.indices.filter { it != safeStartIndex }.shuffled()
+                newQueue = listOf(startTrack) + remainderIndices.map { tracks[it] }
+                newKeys = listOf(startKey) + remainderIndices.map { keys[it] }
+                newIndex = 0
+            }
             _uiState.update {
                 it.copy(
+                    currentTrack = startTrack,
+                    isPlaying = true,
                     queue = newQueue,
                     queueKeys = newKeys,
-                    queueIndex = 0,
+                    queueIndex = newIndex,
                     shuffleEnabled = true,
                 )
             }
+            extractPalette(startTrack)
+            recentlyPlayedTracker.recordPlayed(startTrack.albumForPlays(), startTrack.id)
             playerController.setShuffleActive(true)
             viewModelScope.launch { settingsStore.setShuffleEnabled(true) }
-            playerController.playQueue(newQueue, 0)
+            playerController.playQueue(newQueue, newIndex)
+            refillIfNeeded()
         } else {
             _uiState.update {
                 it.copy(
+                    currentTrack = startTrack,
+                    isPlaying = true,
                     queue = tracks,
                     queueKeys = keys,
-                    queueIndex = startIndex,
+                    queueIndex = safeStartIndex,
                     shuffleEnabled = false,
                 )
             }
+            extractPalette(startTrack)
+            recentlyPlayedTracker.recordPlayed(startTrack.albumForPlays(), startTrack.id)
             playerController.setShuffleActive(false)
             viewModelScope.launch { settingsStore.setShuffleEnabled(false) }
-            playerController.playQueue(tracks, startIndex)
+            playerController.playQueue(tracks, safeStartIndex)
+            refillIfNeeded()
         }
     }
 
@@ -544,7 +753,7 @@ class PlayerViewModel @Inject constructor(
                 }
                 playerController.setShuffleActive(true)
                 viewModelScope.launch { settingsStore.setShuffleEnabled(true) }
-                playerController.reorderUpcoming(upcomingStart, newQueue.map { it.id })
+                playerController.replaceUpcoming(upcomingStart, newUpcoming)
             } else {
                 _uiState.update { it.copy(shuffleEnabled = true) }
                 playerController.setShuffleActive(true)
@@ -564,7 +773,8 @@ class PlayerViewModel @Inject constructor(
                     origKeyOrder[key] ?: Int.MAX_VALUE
                 }
 
-                val newQueue = pastAndCurrent + restoredPairs.map { it.first }
+                val restoredUpcoming = restoredPairs.map { it.first }
+                val newQueue = pastAndCurrent + restoredUpcoming
                 val newKeys = pastAndCurrentKeys + restoredPairs.map { it.second }
 
                 _uiState.update {
@@ -576,7 +786,7 @@ class PlayerViewModel @Inject constructor(
                 }
                 playerController.setShuffleActive(false)
                 viewModelScope.launch { settingsStore.setShuffleEnabled(false) }
-                playerController.reorderUpcoming(upcomingStart, newQueue.map { it.id })
+                playerController.replaceUpcoming(upcomingStart, restoredUpcoming)
             } else {
                 _uiState.update { it.copy(shuffleEnabled = false) }
                 playerController.setShuffleActive(false)
@@ -860,3 +1070,8 @@ private fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
 
 /** The album a play counts for: a streamed song that is not known through an album has none. */
 private fun Track.albumForPlays(): Long = if (YtmLibrary.isStreamed(this) && remoteAlbumId == null) 0L else albumId
+
+private const val RADIO_SIZE = 40
+
+/** With this many songs of the artist found, their radio does not wait to look for more. */
+private const val RADIO_OWN_ENOUGH = 8

@@ -80,6 +80,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     val pageSwitchButton: StateFlow<Boolean> = settingsStore.pageSwitchButton
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val miniPlayerGlass: StateFlow<Boolean> = settingsStore.miniPlayerGlass
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private companion object {
         const val SLEEP_TICK_MS = 20_000L
@@ -111,6 +113,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setProfileFirstName(name: String) {
         viewModelScope.launch { settingsStore.setProfileFirstName(name) }
+    }
+
+    fun setMiniPlayerGlass(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setMiniPlayerGlass(enabled) }
     }
 
     fun setPageSwitchButton(enabled: Boolean) {

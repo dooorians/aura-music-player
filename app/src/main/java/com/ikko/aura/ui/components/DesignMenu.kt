@@ -78,7 +78,7 @@ private val Danger = Color(0xFFFF8AA8)
 
 /** The page's colour, for the menu to be made from: the album or card the page is lit with, else the playing track's. */
 @Composable
-private fun menuBase(): Color =
+internal fun menuBase(): Color =
     LocalPageTheme.current.value?.accent ?: LocalCoverColors.current.accent
 
 private class MenuPlacementRef(var openUpward: Boolean = false)
@@ -146,7 +146,6 @@ fun DesignMenu(
                             scaleY = s
                             alpha = (p / 0.5f).coerceIn(0f, 1f)
                         }
-                        .shadow(24.dp, shape, ambientColor = Color.Black.copy(alpha = 0.55f), spotColor = Color.Black.copy(alpha = 0.55f))
                         .clip(shape)
                         .background(surface)
                         .border(BorderStroke(Rim, Color.White.copy(alpha = 0.18f)), shape)

@@ -70,6 +70,12 @@ class SettingsStore @Inject constructor(
      */
     val pageSwitchButton = setting { prefs -> prefs[booleanPreferencesKey("nav_page_switch_button")] ?: true }
 
+    /**
+     * The mini player: the docked black bar (false, the default) or the floating pastille of liquid glass it used to be
+     * (true). Only its look and place change: the player opens from it in the same way.
+     */
+    val miniPlayerGlass = setting { prefs -> prefs[booleanPreferencesKey("mini_player_glass")] ?: false }
+
     /** The Home cards' order (ids, comma-separated; the ones not listed follow in their usual order) and the hidden ones. */
     val homeCardOrder = setting { prefs -> prefs[stringPreferencesKey("home_card_order")].orEmpty().split(',').filter { it.isNotBlank() } }
     val homeCardHidden = setting { prefs -> prefs[stringPreferencesKey("home_card_hidden")].orEmpty().split(',').filter { it.isNotBlank() }.toSet() }
@@ -113,6 +119,10 @@ class SettingsStore @Inject constructor(
 
     suspend fun setProfileFirstName(name: String) {
         context.settingsDataStore.edit { it[profileFirstNameKey] = name.trim() }
+    }
+
+    suspend fun setMiniPlayerGlass(enabled: Boolean) {
+        context.settingsDataStore.edit { it[booleanPreferencesKey("mini_player_glass")] = enabled }
     }
 
     suspend fun setPageSwitchButton(enabled: Boolean) {
@@ -196,6 +206,26 @@ class SettingsStore @Inject constructor(
 
     suspend fun setAutomixEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[automixKey] = enabled }
+    }
+
+    fun playlistCustomArtwork(id: Long): Flow<String?> = setting { prefs ->
+        prefs[stringPreferencesKey("playlist_custom_cover_$id")]
+    }
+
+    val playlistCustomArtworks: Flow<Map<Long, String>> = setting { prefs ->
+        prefs.asMap().entries.mapNotNull { (key, value) ->
+            if (key.name.startsWith("playlist_custom_cover_") && value is String) {
+                val id = key.name.removePrefix("playlist_custom_cover_").toLongOrNull() ?: return@mapNotNull null
+                id to value
+            } else null
+        }.toMap()
+    }
+
+    suspend fun setPlaylistCustomArtwork(id: Long, uri: String?) {
+        context.settingsDataStore.edit { prefs ->
+            val key = stringPreferencesKey("playlist_custom_cover_$id")
+            if (uri.isNullOrBlank()) prefs.remove(key) else prefs[key] = uri
+        }
     }
 
     private val eqEnabledKey = booleanPreferencesKey("eq_enabled")

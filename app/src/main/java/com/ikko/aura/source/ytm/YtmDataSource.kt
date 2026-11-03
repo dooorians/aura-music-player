@@ -35,6 +35,7 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
     private var chunkLeft = 0L
     private var ended = false
     private var httpOpen = false
+    private var directHttp = false
 
     override fun addTransferListener(transferListener: TransferListener) = http.addTransferListener(transferListener)
 
@@ -42,6 +43,14 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
         spec = dataSpec
         videoId = dataSpec.uri.takeIf { it.scheme == YTM_SCHEME }?.schemeSpecificPart?.removePrefix("//")
         url = videoId?.let { Uri.parse(streamOrFail(it, dataSpec).url) } ?: dataSpec.uri
+        directHttp = videoId == null && url.host?.endsWith("googlevideo.com") != true
+        if (directHttp) {
+            if (httpOpen) http.close()
+            httpOpen = false
+            val opened = http.open(dataSpec.buildUpon().setUri(url).build())
+            httpOpen = true
+            return opened
+        }
         pos = dataSpec.position
         end = if (dataSpec.length != C.LENGTH_UNSET.toLong()) pos + dataSpec.length else C.LENGTH_UNSET.toLong()
         ended = false
@@ -53,6 +62,7 @@ class YtmDataSource(private val client: YtmClient, private val chunkBytes: Int =
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (length == 0) return 0
+        if (directHttp) return http.read(buffer, offset, length)
         if (ended) return C.RESULT_END_OF_INPUT
         if (chunkLeft == 0L) {
             if (end != C.LENGTH_UNSET.toLong() && pos >= end) { ended = true; return C.RESULT_END_OF_INPUT }

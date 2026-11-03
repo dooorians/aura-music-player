@@ -85,6 +85,7 @@ class YtmLibrary @Inject constructor(
      * another source that was kept but whose file is gone is a stream, and is left out.
      */
     suspend fun withFiles(tracks: List<Track>): List<Track> {
+        if (tracks.none(::isStreamed)) return tracks
         val done = downloads.observeDoneKeys().first().toHashSet()
         return tracks.filter { !isStreamed(it) || it.id in done }
     }
@@ -97,6 +98,22 @@ class YtmLibrary @Inject constructor(
         combine(observeKnown(), downloads.observeDoneKeys()) { known, done ->
             val doneKeys = done.toHashSet()
             albumsOf(known.filter { it.id in doneKeys })
+        }
+
+    /**
+     * When each downloaded album last gained a song, in seconds, by the id it has in the lists (see [albumsOf]): what the
+     * library's "Ajoutés récemment" orders them by, beside the device's own files' dates.
+     */
+    fun observeDownloadedAlbumDates(): Flow<Map<Long, Long>> =
+        combine(observeKnown(), downloads.observeDoneTimes()) { known, done ->
+            val finished = done.associate { it.key to it.updatedAt }
+            val newest = HashMap<Long, Long>()
+            for (t in known) {
+                val remote = t.remoteAlbumId ?: continue
+                val at = finished[t.id] ?: continue
+                newest.merge(pseudoAlbumId(remote), at / 1000L, ::maxOf)
+            }
+            newest
         }
 
     /**

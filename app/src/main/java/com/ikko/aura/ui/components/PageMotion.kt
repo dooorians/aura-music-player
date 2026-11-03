@@ -65,11 +65,15 @@ object PageMotionSpec {
      * The settle after a release. A very light bounce: one overshoot of about 0.6% of the way travelled
      * (~7 px over a whole page), where 0.75 gave ~2.8% (~30 px) and read as bouncy.
      */
-    const val PAGE_DAMPING = 0.85f
-    const val PAGE_STIFFNESS = 140f
+    // The board's spring (mass 1, k 300, c 31): a damping ratio of 31 / (2·√300) ≈ 0.895.
+    const val PAGE_DAMPING = 0.895f
+    const val PAGE_STIFFNESS = 300f
 
     /** The target page is the nearest to where the page would be this long after release. */
-    const val FLING_LOOKAHEAD_S = 0.35f
+    const val FLING_LOOKAHEAD_S = 0.16f
+
+    /** Past either end the pages follow the finger at this fraction of its travel (the board's 0.28). */
+    const val EDGE_FOLLOW = 0.28f
 
     /** How close to its page, in pages, the settle runs before it is finished: well under a pixel. */
     const val PAGE_REST_THRESHOLD = 0.0002f
@@ -146,6 +150,9 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
      */
     var swipeEnabled by mutableStateOf(false)
 
+    /** A page pushed on one of the pages (a library page): the pages do not answer a swipe until it is gone. */
+    var locked by mutableStateOf(false)
+
     /** A row that keeps its own drags is being dragged: what it cannot use at its ends is not the pager's (see [keepsDragInRow]). */
     var rowKeepsDrag: Boolean = false
 
@@ -182,17 +189,19 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
         if (!dragging) {
             // A new drag starts from where the pages are — which may be past an end, settling back.
             fingerPosition = when {
-                p < 0f -> -unrubber(-p)
-                p > last -> last + unrubber(p - last)
+                p < 0f -> p / PageMotionSpec.EDGE_FOLLOW
+                p > last -> last + (p - last) / PageMotionSpec.EDGE_FOLLOW
                 else -> p
             }
         }
         stop()
         dragging = true
         fingerPosition += pages
+        // Past an end the pages follow the finger at a fraction of its travel (the background is under them, not black).
         position.floatValue = when {
-            // No stretch past the first/last page: it only uncovered a black band beside the page.
-            else -> fingerPosition.coerceIn(0f, last)
+            fingerPosition < 0f -> fingerPosition * PageMotionSpec.EDGE_FOLLOW
+            fingerPosition > last -> last + (fingerPosition - last) * PageMotionSpec.EDGE_FOLLOW
+            else -> fingerPosition
         }
     }
 
@@ -210,29 +219,18 @@ class PageMotionState(val pageCount: Int, val reduceMotion: Boolean) {
      */
     fun goTo(scope: kotlinx.coroutines.CoroutineScope, page: Int, initialVelocity: Float = 0f) {
         stop()
-        if (!swipeEnabled) {
-            dragging = false
-            position.floatValue = page.toFloat().coerceIn(0f, (pageCount - 1).toFloat())
-            speed.floatValue = 0f
-            return
-        }
+        dragging = false
+        // The same spring whatever sent the pages there (a lifted finger, or the Accueil / Bibliothèque button).
         settleJob = scope.launch {
             if (reduceMotion) {
                 position.floatValue = page.toFloat()
                 speed.floatValue = 0f
             } else {
-                // Let go past an end, the pages come back without a bounce and without the drag's speed (which points
-                // outwards and would throw them further): a slow, even return.
-                val beyond = p < 0f || p > (pageCount - 1).toFloat()
                 animate(
                     initialValue = p,
                     targetValue = page.toFloat(),
-                    initialVelocity = if (beyond) 0f else initialVelocity,
-                    animationSpec = spring(
-                        if (beyond) 1f else PageMotionSpec.PAGE_DAMPING,
-                        if (beyond) PageMotionSpec.EDGE_RETURN_STIFFNESS else PageMotionSpec.PAGE_STIFFNESS,
-                        PageMotionSpec.PAGE_REST_THRESHOLD,
-                    ),
+                    initialVelocity = initialVelocity,
+                    animationSpec = spring(PageMotionSpec.PAGE_DAMPING, PageMotionSpec.PAGE_STIFFNESS, PageMotionSpec.PAGE_REST_THRESHOLD),
                 ) { value, _ -> position.floatValue = value }
             }
         }
@@ -306,7 +304,7 @@ fun PagedContainer(
 
             // What a row of covers could not use at its edge becomes the pages' drag (swipe navigation only).
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (state.swipeEnabled && source == NestedScrollSource.UserInput && available.x != 0f && !state.rowKeepsDrag) {
+                if (state.swipeEnabled && !state.locked && source == NestedScrollSource.UserInput && available.x != 0f && !state.rowKeepsDrag) {
                     state.dragBy(-available.x / state.widthPx)
                     return Offset(available.x, 0f)
                 }
@@ -370,7 +368,7 @@ fun PagedContainer(
                     state = scrollableState,
                     orientation = Orientation.Horizontal,
                     flingBehavior = flingBehavior,
-                    enabled = state.swipeEnabled,
+                    enabled = state.swipeEnabled && !state.locked,
                 ),
         ) {
             pages.forEachIndexed { index, content ->
@@ -500,7 +498,7 @@ fun Modifier.keepsDragInRow(
                     val d = change.positionChange()
                     change.consume()
                     total += d
-                    if (state.swipeEnabled) {
+                    if (state.swipeEnabled && !state.locked) {
                         if (!claimed && abs(total.x) > viewConfiguration.touchSlop && abs(total.x) > abs(total.y)) {
                             claimed = true
                             state.stop()
@@ -510,7 +508,7 @@ fun Modifier.keepsDragInRow(
                         }
                     }
                 }
-                if (claimed && state.swipeEnabled) {
+                if (claimed && state.swipeEnabled && !state.locked) {
                     val vx = tracker.calculateVelocity().x
                     state.release(scope, -vx / state.widthPx)
                 }

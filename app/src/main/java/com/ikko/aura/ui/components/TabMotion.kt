@@ -113,6 +113,8 @@ fun Modifier.tabStagger(
     slidePx: Float = 0f,
     extraDelayMs: Int = 0,
     stepCap: Int = TabMotion.ROW_STEP_CAP,
+    /** Where the cascade starts: after the old panel has begun to leave for a tab change, at once for a page opening. */
+    baseMs: Int = TabMotion.ENTER_DELAY_MS,
 ): Modifier {
     val entry = LocalTabEntry.current
     // Decided once, when the item first composes: an item scrolled back into view later is a new composition, and by
@@ -126,7 +128,7 @@ fun Modifier.tabStagger(
         launch { snapshotFlow { entry.entering }.first { !it }; progress.snapTo(1f) }
         progress.animateTo(
             1f,
-            tween(durationMs, TabMotion.ENTER_DELAY_MS + minOf(index, stepCap) * stepMs + extraDelayMs, TabMotion.Enter),
+            tween(durationMs, baseMs + minOf(index, stepCap) * stepMs + extraDelayMs, TabMotion.Enter),
         )
     }
     return graphicsLayer {

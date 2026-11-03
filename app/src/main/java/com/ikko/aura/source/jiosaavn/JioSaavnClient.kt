@@ -24,6 +24,19 @@ class JioSaavnClient @Inject constructor() {
 
     private val baseUrl = String(Base64.decode("aHR0cHM6Ly93d3cuamlvc2Fhdm4uY29tL2FwaS5waHA=", Base64.DEFAULT), Charsets.UTF_8)
 
+    private val streamCache = java.util.concurrent.ConcurrentHashMap<String, SaavnStream>()
+
+    private fun cacheStreams(items: List<RawSongItem>): List<RawSongItem> =
+        items.filter { raw ->
+            val stream = bestStream(raw.moreInfo.encryptedMediaUrl, raw.moreInfo.supports320)
+            if (stream != null && raw.id.isNotBlank()) {
+                streamCache[raw.id] = stream
+                true
+            } else {
+                false
+            }
+        }
+
     /** Opens the connection (lookup, handshake) ahead of the first real search. */
     suspend fun warmUp() { searchSongs("music") }
 
@@ -31,7 +44,7 @@ class JioSaavnClient @Inject constructor() {
     suspend fun searchSongsOrThrow(query: String): List<RawSongItem> = withContext(Dispatchers.IO) {
         val urlString = "$baseUrl?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&p=1&n=10&q=${java.net.URLEncoder.encode(query, "UTF-8")}"
         val body = json.decodeFromString<RawSearchResponse>(executeRequest(urlString))
-        body.results.sortedByDescending { it.isExplicit }
+        cacheStreams(body.results).sortedByDescending { it.isExplicit }
     }
 
     suspend fun searchSongs(query: String): List<RawSongItem> = withContext(Dispatchers.IO) {
@@ -39,7 +52,7 @@ class JioSaavnClient @Inject constructor() {
             val urlString = "$baseUrl?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&p=1&n=10&q=${java.net.URLEncoder.encode(query, "UTF-8")}"
             val response = executeRequest(urlString)
             val body = json.decodeFromString<RawSearchResponse>(response)
-            body.results.sortedByDescending { it.isExplicit }
+            cacheStreams(body.results).sortedByDescending { it.isExplicit }
         }.getOrElse { emptyList() }
     }
 
@@ -52,10 +65,11 @@ class JioSaavnClient @Inject constructor() {
             is JsonObject -> root.values.firstOrNull { it is JsonArray } as? JsonArray
             else -> null
         } ?: return@withContext emptyList()
-        array.mapNotNull { runCatching { json.decodeFromJsonElement(RawSongItem.serializer(), it) }.getOrNull() }
+        cacheStreams(array.mapNotNull { runCatching { json.decodeFromJsonElement(RawSongItem.serializer(), it) }.getOrNull() })
     }
 
     suspend fun getStreamUrl(saavnSongId: String): SaavnStream? = withContext(Dispatchers.IO) {
+        streamCache[saavnSongId]?.let { return@withContext it }
         runCatching {
             val urlString = "$baseUrl?__call=song.getDetails&_format=json&_marker=0&api_version=4&ctx=android&pids=$saavnSongId"
             val response = executeRequest(urlString)
@@ -66,7 +80,9 @@ class JioSaavnClient @Inject constructor() {
                 ?: return@runCatching null
                 
             val rawSong = json.decodeFromJsonElement(RawSongItem.serializer(), songElement)
-            bestStream(rawSong.moreInfo.encryptedMediaUrl, rawSong.moreInfo.supports320)
+            bestStream(rawSong.moreInfo.encryptedMediaUrl, rawSong.moreInfo.supports320)?.also {
+                if (saavnSongId.isNotBlank()) streamCache[saavnSongId] = it
+            }
         }.getOrNull()
     }
 
@@ -106,8 +122,12 @@ class JioSaavnClient @Inject constructor() {
         if (!supports320) return SaavnStream(decryptedUrl, offered)
         
         val extension = rendition.groupValues[2]
-        val rewrittenUrl = decryptedUrl.replaceRange(rendition.range, "_320.\$extension")
-        return SaavnStream(rewrittenUrl, 320)
+        val rewrittenUrl = decryptedUrl.replaceRange(rendition.range, "_320.$extension")
+        return SaavnStream(
+            url = rewrittenUrl,
+            kbps = 320,
+            fallbackUrl = decryptedUrl.takeIf { it != rewrittenUrl },
+        )
     }
 
     private fun decryptUrl(encryptedUrl: String): String {

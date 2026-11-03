@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -59,24 +60,54 @@ import com.ikko.aura.viewmodel.YtmArtistViewModel
 fun YtmAlbumScreen(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
+    isTransitioning: Boolean = false,
     viewModel: YtmAlbumViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val page by viewModel.page.collectAsStateWithLifecycle()
+    val online by viewModel.onlineFlow.collectAsStateWithLifecycle()
+    val hasLocal by viewModel.hasLocal.collectAsStateWithLifecycle()
     val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
     val downloads by playerViewModel.downloadStates.collectAsStateWithLifecycle()
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // The cover the trip carried: kept for the life of the page, so when the source's own picture arrives it does not replace
+    // the one on show (that swap was a blink of the cover as the page opened).
+    val tripCover = remember { if (hero.phase != com.ikko.aura.ui.components.HeroPhase.Idle) hero.uri else null }
+
     when {
-        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
         state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
         else -> {
-            val tracks = uiState.tracks
+            val effectiveUiState = if (state.loading && uiState.title.isBlank()) {
+                com.ikko.aura.viewmodel.AlbumUiState(
+                    title = hero.srcTitle?.text.orEmpty(),
+                    artist = hero.srcSub?.text.orEmpty(),
+                    coverUri = hero.uri,
+                    loading = true,
+                )
+            } else {
+                uiState.copy(loading = state.loading, coverUri = tripCover ?: uiState.coverUri)
+            }
+            val heroCover = hero.uri
+            val fallbackTheme by androidx.compose.runtime.produceState<com.ikko.aura.ui.components.AlbumTheme?>(
+                if (heroCover == null) com.ikko.aura.ui.components.AlbumTheme.Neutral else null, heroCover,
+            ) {
+                if (heroCover != null) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    com.ikko.aura.ui.components.AlbumArtCache.load(context, heroCover, 192, heroCover.toString())
+                        ?.let { com.ikko.aura.ui.components.albumThemeFromBitmap(it, heroCover.toString().hashCode()) }
+                        ?: com.ikko.aura.ui.components.AlbumTheme.Neutral
+                }
+            }
+            val effectivePage = page ?: fallbackTheme?.let { com.ikko.aura.viewmodel.AlbumPage(it, com.ikko.aura.viewmodel.FileTags()) }
+
+            val tracks = effectiveUiState.tracks
             AlbumPageContent(
-                uiState = uiState,
-                page = page,
+                uiState = effectiveUiState,
+                page = effectivePage,
                 navController = navController,
                 playerViewModel = playerViewModel,
-                isTransitioning = false,
+                isTransitioning = isTransitioning,
                 onFavorite = viewModel::toggleFavorite,
                 streamed = StreamedAlbumControls(
                     kept = tracks.isNotEmpty() && tracks.all { it.id in kept },
@@ -88,6 +119,11 @@ fun YtmAlbumScreen(
                     onRemoveAlbumDownloads = { playerViewModel.removeDownloads(tracks) },
                     onDownloadTrack = { playerViewModel.downloadStreamed(listOf(it)) },
                     prepare = { playerViewModel.rememberForUse(tracks) },
+                    // Opened from the library, the page lists what is on the device: the whole album is one step away.
+                    // The source switch changes the songs of this page, in place: it is the same page, with the same header.
+                    onShowFullAlbum = if (online) null else { { viewModel.setOnline(true) } },
+                    onShowLocal = if (online) { { viewModel.setOnline(false) } } else null,
+                    localAvailable = hasLocal,
                 ),
             )
         }
@@ -103,11 +139,12 @@ fun YtmArtistScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // One call for the page while it loads and once it has loaded, so the page is the same one throughout: it is there at
+    // once (its parts grey), and the cover has a place to land on without waiting for the source.
     when {
-        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
         state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
-        state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
-        else -> ArtistPageContent(uiState, navController, playerViewModel)
+        !state.loading && state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
+        else -> ArtistPageContent(uiState, navController, playerViewModel, loading = state.loading, online = true)
     }
 }
 
@@ -116,24 +153,54 @@ fun YtmArtistScreen(
 fun RemoteAlbumScreen(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
+    isTransitioning: Boolean = false,
     viewModel: RemoteAlbumViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val page by viewModel.page.collectAsStateWithLifecycle()
+    val online by viewModel.onlineFlow.collectAsStateWithLifecycle()
+    val hasLocal by viewModel.hasLocal.collectAsStateWithLifecycle()
     val kept by playerViewModel.keptStreamedIds.collectAsStateWithLifecycle()
     val downloads by playerViewModel.downloadStates.collectAsStateWithLifecycle()
+    val hero = com.ikko.aura.ui.components.LocalHero.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // The cover the trip carried: kept for the life of the page, so when the source's own picture arrives it does not replace
+    // the one on show (that swap was a blink of the cover as the page opened).
+    val tripCover = remember { if (hero.phase != com.ikko.aura.ui.components.HeroPhase.Idle) hero.uri else null }
+
     when {
-        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
         state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
         else -> {
-            val tracks = uiState.tracks
+            val effectiveUiState = if (state.loading && uiState.title.isBlank()) {
+                com.ikko.aura.viewmodel.AlbumUiState(
+                    title = hero.srcTitle?.text.orEmpty(),
+                    artist = hero.srcSub?.text.orEmpty(),
+                    coverUri = hero.uri,
+                    loading = true,
+                )
+            } else {
+                uiState.copy(loading = state.loading, coverUri = tripCover ?: uiState.coverUri)
+            }
+            val heroCover = hero.uri
+            val fallbackTheme by androidx.compose.runtime.produceState<com.ikko.aura.ui.components.AlbumTheme?>(
+                if (heroCover == null) com.ikko.aura.ui.components.AlbumTheme.Neutral else null, heroCover,
+            ) {
+                if (heroCover != null) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    com.ikko.aura.ui.components.AlbumArtCache.load(context, heroCover, 192, heroCover.toString())
+                        ?.let { com.ikko.aura.ui.components.albumThemeFromBitmap(it, heroCover.toString().hashCode()) }
+                        ?: com.ikko.aura.ui.components.AlbumTheme.Neutral
+                }
+            }
+            val effectivePage = page ?: fallbackTheme?.let { com.ikko.aura.viewmodel.AlbumPage(it, com.ikko.aura.viewmodel.FileTags()) }
+
+            val tracks = effectiveUiState.tracks
             AlbumPageContent(
-                uiState = uiState,
-                page = page,
+                uiState = effectiveUiState,
+                page = effectivePage,
                 navController = navController,
                 playerViewModel = playerViewModel,
-                isTransitioning = false,
+                isTransitioning = isTransitioning,
                 onFavorite = viewModel::toggleFavorite,
                 streamed = StreamedAlbumControls(
                     kept = tracks.isNotEmpty() && tracks.all { it.id in kept },
@@ -145,6 +212,11 @@ fun RemoteAlbumScreen(
                     onRemoveAlbumDownloads = { playerViewModel.removeDownloads(tracks) },
                     onDownloadTrack = { playerViewModel.downloadStreamed(listOf(it)) },
                     prepare = { playerViewModel.rememberForUse(tracks) },
+                    // Opened from the library, the page lists what is on the device: the whole album is one step away.
+                    // The source switch changes the songs of this page, in place: it is the same page, with the same header.
+                    onShowFullAlbum = if (online) null else { { viewModel.setOnline(true) } },
+                    onShowLocal = if (online) { { viewModel.setOnline(false) } } else null,
+                    localAvailable = hasLocal,
                 ),
             )
         }
@@ -160,11 +232,12 @@ fun RemoteArtistScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // One call for the page while it loads and once it has loaded, so the page is the same one throughout: it is there at
+    // once (its parts grey), and the cover has a place to land on without waiting for the source.
     when {
-        state.loading -> GradientScreenScaffold { Centered("Chargement…") }
         state.failed -> GradientScreenScaffold { Failed(onRetry = viewModel::load) }
-        state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
-        else -> ArtistPageContent(uiState, navController, playerViewModel)
+        !state.loading && state.tracks.isEmpty() && state.albums.isEmpty() -> GradientScreenScaffold { Centered("Rien trouvé pour ${state.name}") }
+        else -> ArtistPageContent(uiState, navController, playerViewModel, loading = state.loading, online = true)
     }
 }
 
@@ -195,7 +268,7 @@ private fun Centered(text: String) {
 private fun Failed(onRetry: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("YouTube Music ne répond pas pour le moment", style = MaterialTheme.typography.bodyLarge, color = AuraColors.TextSecondary)
+            Text("La source ne répond pas pour le moment", style = MaterialTheme.typography.bodyLarge, color = AuraColors.TextSecondary)
             Spacer(Modifier.height(12.dp))
             AuraButton(onClick = onRetry) { Text("Réessayer", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
         }

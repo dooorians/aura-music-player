@@ -82,17 +82,17 @@ fun rememberLiveLyricClock(
     active: Boolean = true,
     leadMs: Long = LYRIC_LEAD_MS,
 ): MutableLongState {
-    val clock = remember { mutableLongStateOf(livePosition()) }
+    val clock = remember { mutableLongStateOf(livePosition() + leadMs) }
     val read = androidx.compose.runtime.rememberUpdatedState(livePosition)
     LaunchedEffect(isPlaying, active) {
-        clock.longValue = read.value() + if (isPlaying) leadMs else 0L
+        clock.longValue = read.value() + leadMs
         if (!active) return@LaunchedEffect
         if (isPlaying) {
             while (true) withFrameMillis { clock.longValue = read.value() + leadMs }
         } else {
             while (true) {
                 kotlinx.coroutines.delay(PAUSED_POLL_MS)
-                clock.longValue = read.value()
+                clock.longValue = read.value() + leadMs
             }
         }
     }

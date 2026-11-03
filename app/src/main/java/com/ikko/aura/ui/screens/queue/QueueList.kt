@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.ui.components.TrackListItem
+import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.ui.theme.CupertinoIcons
@@ -61,8 +62,10 @@ fun QueueList(
     modifier: Modifier = Modifier,
     /** Greys what is behind the playing entry: heard, until it is played again (then it is the playing one). */
     dimPlayed: Boolean = false,
+    animateEntry: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
+    val firstVisibleIndex = remember { listState.firstVisibleItemIndex }
 
     // The row under the finger, and how far it has been dragged from where it sits. The
     // index moves with the row rather than staying where the drag began: each swap re-homes
@@ -102,6 +105,13 @@ fun QueueList(
                 artSize = 52.dp,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (animateEntry) {
+                            Modifier.heroRise((index - firstVisibleIndex).coerceAtLeast(0), rows = true)
+                        } else {
+                            Modifier
+                        },
+                    )
                     // Lifted above its neighbours while it moves, so it slides over them
                     // rather than being clipped between two of them.
                     .zIndex(if (isDragged) 1f else 0f)

@@ -52,6 +52,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import com.ikko.aura.ui.components.AuraButton
 import com.ikko.aura.ui.components.ButtonTone
+import com.ikko.aura.ui.components.LocalHero
+import com.ikko.aura.ui.components.heroPageOut
+import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.suppressEdgeBackRipple
 
 @Composable
 fun QueueScreen(
@@ -59,9 +63,16 @@ fun QueueScreen(
     playerViewModel: PlayerViewModel,
 ) {
     val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
+    val hero = LocalHero.current
+
+    val sheetCard = com.ikko.aura.LocalSheetCard.current
+    androidx.activity.compose.BackHandler(enabled = sheetCard.owner == null || sheetCard.leavingSideways) {
+        if (hero.canClose) hero.startClosing()
+        navController.popBackStack()
+    }
 
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
-    GradientScreenScaffold {
+    GradientScreenScaffold(modifier = Modifier.suppressEdgeBackRipple()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -71,6 +82,7 @@ fun QueueScreen(
                 text = "File d'attente",
                 style = MaterialTheme.typography.headlineLarge,
                 color = AuraColors.TextPrimary,
+                modifier = Modifier.heroRise(0),
             )
             // Only offered when there is something to clear beyond the track playing.
             if (uiState.queue.size > 1) {
@@ -79,6 +91,7 @@ fun QueueScreen(
                     tone = ButtonTone.Neutral,
                     minHeight = 36.dp,
                     contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.heroRise(1),
                 ) {
                     Text(text = "Vider", style = MaterialTheme.typography.labelLarge)
                 }
@@ -86,7 +99,7 @@ fun QueueScreen(
         }
 
         if (uiState.queue.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().heroRise(1).heroPageOut(), contentAlignment = Alignment.Center) {
                 Text(
                     text = "Rien en cours de lecture",
                     style = MaterialTheme.typography.bodyLarge,
@@ -104,8 +117,9 @@ fun QueueScreen(
             listState = listState,
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
             onRowLongClick = menu::show,
-            modifier = Modifier.listTopBlur(listState),
+            modifier = Modifier.heroPageOut().listTopBlur(listState),
             dimPlayed = true,
+            animateEntry = true,
         )
     }
     }

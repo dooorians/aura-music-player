@@ -416,6 +416,16 @@ object AlbumArtCache {
      */
     private suspend fun decode(context: Context, uri: Uri, targetSizePx: Int): Decoded {
         if (isRemote(uri)) return Decoded(fetchRemote(context, uri, targetSizePx))
+        // A picture the app keeps in its own storage (an artist's photo): read at the size it is shown at.
+        if (uri.scheme == "file") return withContext(Dispatchers.IO) {
+            val path = uri.path ?: return@withContext Decoded.ABSENT
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= targetSizePx && bounds.outHeight / (sample * 2) >= targetSizePx) sample *= 2
+            BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.let { Decoded(it) } ?: Decoded.ABSENT
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val signal = CancellationSignal()
             suspendCancellableCoroutine { continuation ->

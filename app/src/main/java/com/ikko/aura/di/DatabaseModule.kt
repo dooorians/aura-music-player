@@ -32,7 +32,7 @@ object DatabaseModule {
     @Singleton
     fun provideAuraDatabase(@ApplicationContext context: Context): AuraDatabase =
         Room.databaseBuilder(context, AuraDatabase::class.java, "aura.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, com.ikko.aura.reco.MIGRATION_9_10)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, com.ikko.aura.reco.MIGRATION_9_10, com.ikko.aura.reco.MIGRATION_10_11)
             .build()
 
     @Provides
@@ -52,6 +52,9 @@ object DatabaseModule {
 
     @Provides
     fun provideRecoDao(database: AuraDatabase): com.ikko.aura.reco.RecoDao = database.recoDao()
+
+    @Provides
+    fun provideSmartDao(database: AuraDatabase): com.ikko.aura.reco.SmartDao = database.smartDao()
 
     @Provides
     fun provideSourceConfigDao(database: AuraDatabase): SourceConfigDao = database.sourceConfigDao()

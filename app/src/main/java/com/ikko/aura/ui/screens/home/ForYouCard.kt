@@ -299,6 +299,7 @@ private val Float.em get() = androidx.compose.ui.unit.TextUnit(this, androidx.co
 /** The Home card an automatic playlist ([key]: "disc", "top", "style") was opened from. */
 fun cardAmbienceOf(key: String): CardAmbience? = when (key) {
     "disc" -> CardAmbience.DECOUVERTE
+    "fav" -> CardAmbience.FAVORIS
     "top" -> CardAmbience.ENERGIE
     "style", "new" -> CardAmbience.NOUVEAUTES
     "night" -> CardAmbience.NUIT
@@ -307,24 +308,41 @@ fun cardAmbienceOf(key: String): CardAmbience? = when (key) {
     else -> null
 }
 
-/**
- * The card's colours as a picture, today's look of [ambience] — the same as on Home. It is the playlist page's cover,
- * and what that page's background and colours are made from. Null for the first frame, while it is drawn.
- */
-@Composable
-fun rememberCardArt(ambience: CardAmbience, sizePx: Int = 400): android.graphics.Bitmap? {
-    val day = remember { java.time.LocalDate.now().toEpochDay() }
-    val look = remember(ambience, day) { dailyLook(ambience, day) }
-    val out = rememberGraphicsLayer()
-    val blob = rememberGraphicsLayer()
-    val sheen = rememberGraphicsLayer()
-    val density = LocalDensity.current
-    val direction = androidx.compose.ui.platform.LocalLayoutDirection.current
-    var bitmap by remember(ambience, day) { androidx.compose.runtime.mutableStateOf<android.graphics.Bitmap?>(null) }
-    androidx.compose.runtime.LaunchedEffect(look) {
-        val rec = LongArray(1)
-        out.record(density, direction, IntSize(sizePx, sizePx)) { drawAmbience(look, blob, sheen, rec) }
-        bitmap = out.toImageBitmap().asAndroidBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-    }
-    return bitmap
+private val MixBackgrounds = intArrayOf(
+    com.ikko.aura.R.drawable.mix_bg_01, com.ikko.aura.R.drawable.mix_bg_02, com.ikko.aura.R.drawable.mix_bg_03,
+    com.ikko.aura.R.drawable.mix_bg_04, com.ikko.aura.R.drawable.mix_bg_05, com.ikko.aura.R.drawable.mix_bg_06,
+    com.ikko.aura.R.drawable.mix_bg_07, com.ikko.aura.R.drawable.mix_bg_08, com.ikko.aura.R.drawable.mix_bg_09,
+    com.ikko.aura.R.drawable.mix_bg_10, com.ikko.aura.R.drawable.mix_bg_11, com.ikko.aura.R.drawable.mix_bg_12,
+    com.ikko.aura.R.drawable.mix_bg_13, com.ikko.aura.R.drawable.mix_bg_14, com.ikko.aura.R.drawable.mix_bg_15,
+    com.ikko.aura.R.drawable.mix_bg_16, com.ikko.aura.R.drawable.mix_bg_17, com.ikko.aura.R.drawable.mix_bg_18,
+)
+
+/** The plain gradients: one of the 18 under a veil of two random colours (for covers that have no colours to use). */
+internal fun mixGradientBitmap(context: android.content.Context, ambience: CardAmbience, day: Long, sizePx: Int): Bitmap {
+    val rnd = Random(day * 104729L + ambience.ordinal * 31L + 5)
+    val bg = MixBackgrounds[rnd.nextInt(MixBackgrounds.size)]
+    // randomColor(): each of the six hex digits drawn on its own, so the colours can be any.
+    fun randomColor() = android.graphics.Color.rgb(rnd.nextInt(256) and 0xFF, rnd.nextInt(256), rnd.nextInt(256))
+    val angle = Math.toRadians(rnd.nextInt(180).toDouble())
+    val c1 = randomColor()
+    val c2 = randomColor()
+    val veil = 0.1f + rnd.nextFloat() * 0.6f
+    val out = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(out)
+    val src = android.graphics.BitmapFactory.decodeResource(context.resources, bg)
+    canvas.drawBitmap(src, null, android.graphics.Rect(0, 0, sizePx, sizePx), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+    src.recycle()
+    // CSS linear-gradient(angle): along (sin, -cos), its line as long as the square's projection on it.
+    val half = (sizePx * (kotlin.math.abs(kotlin.math.sin(angle)) + kotlin.math.abs(kotlin.math.cos(angle)))).toFloat() / 2f
+    val mid = sizePx / 2f
+    val dx = kotlin.math.sin(angle).toFloat() * half
+    val dy = -kotlin.math.cos(angle).toFloat() * half
+    canvas.drawRect(
+        0f, 0f, sizePx.toFloat(), sizePx.toFloat(),
+        android.graphics.Paint().apply {
+            shader = android.graphics.LinearGradient(mid - dx, mid - dy, mid + dx, mid + dy, c1, c2, Shader.TileMode.CLAMP)
+            alpha = (veil * 255f).toInt()
+        },
+    )
+    return out
 }

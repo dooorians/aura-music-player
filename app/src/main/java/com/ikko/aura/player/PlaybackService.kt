@@ -73,6 +73,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
     @Inject lateinit var ytmClient: YtmClient
     @Inject lateinit var jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient
+    @Inject lateinit var remoteSources: com.ikko.aura.source.remote.RemoteSources
     @Inject lateinit var streamCache: StreamCache
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
@@ -239,7 +240,33 @@ class PlaybackService : MediaSessionService() {
         ExoPlayer.Builder(this, filteredRenderers(filter, beat))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
-                    DefaultDataSource.Factory(this, DataSource.Factory { com.ikko.aura.source.jiosaavn.JioSaavnDataSource(jioSaavnClient, YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource())) }),
+                    DefaultDataSource.Factory(
+                        this,
+                        DataSource.Factory {
+                            val upstream = com.ikko.aura.source.jiosaavn.JioSaavnDataSource(
+                                jioSaavnClient,
+                                YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource()),
+                            )
+                            object : DataSource by upstream {
+                                override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
+                                    val uri = dataSpec.uri
+                                    if (uri.scheme == "remote") {
+                                        val sourceId = uri.authority ?: uri.host.orEmpty()
+                                        val itemId = uri.path?.removePrefix("/").orEmpty()
+                                        val resolved = remoteSources.streamFor("$sourceId:$itemId")
+                                            ?: throw androidx.media3.datasource.HttpDataSource.HttpDataSourceException(
+                                                "Remote source $sourceId unavailable",
+                                                dataSpec,
+                                                androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                                                androidx.media3.datasource.HttpDataSource.HttpDataSourceException.TYPE_OPEN,
+                                            )
+                                        return upstream.open(dataSpec.buildUpon().setUri(android.net.Uri.parse(resolved)).build())
+                                    }
+                                    return upstream.open(dataSpec)
+                                }
+                            }
+                        },
+                    ),
                     DefaultExtractorsFactory(),
                 ),
             )

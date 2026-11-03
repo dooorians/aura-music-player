@@ -31,14 +31,15 @@ import androidx.compose.ui.viewinterop.AndroidView
  * the battery saver.
  */
 @Composable
-fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Modifier) {
+fun AuroraBackground(theme: AlbumTheme, active: Boolean, modifier: Modifier = Modifier, lively: Boolean = false) {
     // The aurora stays on a settled frame. Liquid Glass samples it and the page backdrop;
     // animating this separate SurfaceView underneath would still consume CPU/GPU during
     // navigation and make the glass transitions compete with an unrelated render loop.
-    val animate = false
+    // The library's pages are the one place where it moves, and in stronger colours (see [AuroraRenderer]'s vivid).
+    val animate = lively
     AndroidView(
         factory = { AuroraSurfaceView(it) },
-        update = { it.update(theme, active, animate) },
+        update = { it.update(theme, active, animate, lively) },
         modifier = modifier,
     )
 }
@@ -93,6 +94,8 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
     @Volatile private var wanted: AlbumTheme? = null
     @Volatile private var active = true
     @Volatile private var animate = true
+    @Volatile private var vivid = false
+    private var builtVivid = false
     @Volatile private var surfaceReady = false
 
     // Touched only on the render thread from here down.
@@ -140,7 +143,8 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         holder.setFormat(PixelFormat.RGBX_8888)
     }
 
-    fun update(theme: AlbumTheme, active: Boolean, animate: Boolean) {
+    fun update(theme: AlbumTheme, active: Boolean, animate: Boolean, vivid: Boolean) {
+        this.vivid = vivid
         this.wanted = theme
         this.active = active
         this.animate = animate
@@ -183,12 +187,13 @@ private class AuroraSurfaceView(context: Context) : SurfaceView(context), Surfac
         val next = wanted
         var changed = false
         val step = if (now - AuroraPace.lastTouchAt < BUSY_HOLD_MS) STEP_BUSY_MS else STEP_MS
-        if (next != null && !next.sameLook(theme)) {
+        if (next != null && (!next.sameLook(theme) || builtVivid != vivid)) {
             // Whatever is on screen right now — a settled picture, or a change caught half way — becomes
             // the picture to fade out of, so a change that arrives during another starts from what the
             // eye is looking at rather than jumping back to the earlier one.
             outgoing = if (haveShown) arrayOf(shownR.copyOf(), shownG.copyOf(), shownB.copyOf()) else null
-            renderer = AuroraRenderer(next.art ?: neutralArt(next))
+            renderer = AuroraRenderer(next.art ?: neutralArt(next), vivid)
+            builtVivid = vivid
             theme = next
             changed = true
         } else if (next != null) {

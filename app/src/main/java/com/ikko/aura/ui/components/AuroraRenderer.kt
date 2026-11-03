@@ -82,7 +82,8 @@ private const val MESH_H = 16
 
 internal const val AURORA_PIXELS = AURORA_W * AURORA_H
 
-internal class AuroraRenderer(originalArt: Bitmap) {
+/** [vivid]: the colourful look of the library's pages, saturated well past the cover's own and a little brighter. */
+internal class AuroraRenderer(originalArt: Bitmap, private val vivid: Boolean = false) {
     private val art = android.graphics.Bitmap.createScaledBitmap(originalArt, 64, 64, true)
     private val scene = Bitmap.createBitmap(AURORA_W, AURORA_H, Bitmap.Config.ARGB_8888)
     private val sceneCanvas = AndroidCanvas(scene)
@@ -149,7 +150,9 @@ internal class AuroraRenderer(originalArt: Bitmap) {
         vCap = (targetV + V_HEADROOM).coerceAtMost(0.80f)
     }
 
-    fun render(t: Float) {
+    fun render(clock: Float) {
+        // The library's aurora drifts about three times faster: the colours visibly travel.
+        val t = if (vivid) clock * 3.2f else clock
         val w = AURORA_W.toFloat()
         val h = AURORA_H.toFloat()
 
@@ -254,6 +257,10 @@ internal class AuroraRenderer(originalArt: Bitmap) {
             val meanS = if (vSum > 0f) sWeighted / vSum else 0f
             boost = (targetS / meanS.coerceAtLeast(0.02f)).coerceIn(0.85f, 2.2f)
             vGain = (targetV / meanV.coerceAtLeast(0.05f)).coerceIn(0.55f, 1.5f)
+            if (vivid) {
+                boost = (boost * 2.3f).coerceAtMost(4.5f)
+                vGain = (vGain * 1.12f).coerceAtMost(1.6f)
+            }
             calibrated = true
         }
         for (i in 0 until AURORA_PIXELS) {

@@ -97,7 +97,7 @@ class LocalMusicRepository @Inject constructor(
             // Off the main thread: refresh() is launched from a ViewModel, and grouping, folding every album and artist name
             // and ordering every album's files landed in the frames right after start-up.
             val initial = withContext(Dispatchers.Default) {
-                canonicaliseAlbums(scan.tracks).filterNot { it.id in forgotten }.map { track ->
+                LibraryNormalizer.canonicalise(scan.tracks, scan.extras).filterNot { it.id in forgotten }.map { track ->
                     cached[track.id]?.takeIf { it.stamp == scan.stamps[track.id] }
                         ?.let { track.withProperties(it.properties) }
                         ?: track
@@ -139,6 +139,7 @@ class LocalMusicRepository @Inject constructor(
         val tracks: List<Track>,
         val stamps: Map<String, String>,
         val files: List<ScannedFile> = emptyList(),
+        val extras: Map<String, FileExtras> = emptyMap(),
     )
 
     /**
@@ -165,6 +166,7 @@ class LocalMusicRepository @Inject constructor(
             tracks = scan.tracks.map { t -> key[t.id]?.takeIf { it != t.id }?.let { t.copy(id = it) } ?: t },
             stamps = scan.stamps.mapKeys { (id, _) -> key[id] ?: id },
             files = scan.files,
+            extras = scan.extras.mapKeys { (id, _) -> key[id] ?: id },
         )
     } catch (e: Exception) {
         scan
@@ -184,8 +186,11 @@ class LocalMusicRepository @Inject constructor(
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.DATE_MODIFIED,
+            MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.ALBUM_ARTIST,
+            MediaStore.Audio.Media.RELATIVE_PATH,
         )
         // Not only what the scanner flagged as music: a file it left unflagged (a mix, a set, a flac
         // with no tags) is still audio, and those flags are NULL rather than 0 when unknown. Ringtones, notifications and
@@ -199,6 +204,7 @@ class LocalMusicRepository @Inject constructor(
         val results = mutableListOf<Track>()
         val stamps = HashMap<String, String>()
         val files = ArrayList<ScannedFile>()
+        val extras = HashMap<String, FileExtras>()
         context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -211,8 +217,11 @@ class LocalMusicRepository @Inject constructor(
             val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+            val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+            val albumArtistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ARTIST)
+            val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.RELATIVE_PATH)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
@@ -234,16 +243,22 @@ class LocalMusicRepository @Inject constructor(
                     contentUri = contentUri,
                     durationMs = cursor.getLong(durationCol),
                     trackNumber = if (rawTrackNumber >= 1000) rawTrackNumber % 1000 else rawTrackNumber,
+                    discNumber = if (rawTrackNumber >= 1000) rawTrackNumber / 1000 else 0,
                     year = cursor.getInt(yearCol),
                     format = mimeToFormat(cursor.getString(mimeCol)),
+                    addedAtSec = cursor.getLong(addedCol),
                 )
                 results += track
+                extras[track.id] = FileExtras(
+                    albumArtist = cursor.getString(albumArtistCol)?.takeIf { it.isNotBlank() },
+                    dir = cursor.getString(pathCol),
+                )
                 // What survives a re-index that gives the file a new id: its name, size and length.
                 val fingerprint = "${cursor.getString(nameCol)}|${cursor.getLong(sizeCol)}|${track.durationMs / 1000}"
                 files += ScannedFile(track.id, fingerprint, track.title, track.artist, track.album, track.durationMs)
             }
         }
-        Scan(results, stamps, files)
+        Scan(results, stamps, files, extras)
     }
 
     /**
@@ -299,36 +314,6 @@ class LocalMusicRepository @Inject constructor(
         bitrateKbps = properties.bitrateKbps,
     )
 
-    /**
-     * Puts every track of an album under one album id, whatever MediaStore thinks.
-     *
-     * MediaStore mints a new album row whenever the tags it keys on differ at all — a different
-     * album-artist on one file, a stray space, a cover embedded in some files and not others. The
-     * result on a real library is the same record appearing two or three times, each holding a
-     * few of its tracks, with the odd single carrying the album's artwork off on its own. That is
-     * what the duplicated cards on Home were: not a carousel drawing an item twice, but two album
-     * rows that should have been one.
-     *
-     * Grouped instead on the album's name and its artist, folded to ignore case, accents and
-     * spacing. The canonical id is the smallest MediaStore id in the group — a real id, so
-     * anything already keyed on it (favourites, play counts, artwork cache entries) still
-     * resolves, and stable across rescans as long as the files are.
-     *
-     * Deliberately not stripping "(Deluxe)" or "- Single": those name genuinely different
-     * releases, and merging them would be the same mistake in the other direction.
-     */
-    private fun canonicaliseAlbums(tracks: List<Track>): List<Track> {
-        val canonicalIds = tracks
-            .groupBy { albumKey(it) }
-            .mapValues { (_, group) -> group.minOf { it.albumId } }
-        return tracks.map { track ->
-            val canonical = canonicalIds[albumKey(track)] ?: track.albumId
-            if (canonical == track.albumId) track else track.copy(albumId = canonical)
-        }
-    }
-
-    private fun albumKey(track: Track): String = "${track.album.foldForMatching()}\u0000${track.artist.foldForMatching()}"
-
     private fun groupAlbums(tracks: List<Track>): List<Album> = tracks
         .groupBy { it.albumId }
         .map { (albumId, groupTracks) ->
@@ -339,8 +324,8 @@ class LocalMusicRepository @Inject constructor(
                 ?: groupTracks.first()
             // The most common spelling wins the label, since the group exists precisely because
             // the files disagree about it.
-            val title = groupTracks.groupingBy { it.album }.eachCount().maxByOrNull { it.value }?.key.orEmpty()
-            val artist = groupTracks.groupingBy { it.artist }.eachCount().maxByOrNull { it.value }?.key.orEmpty()
+            val title = groupTracks.groupingBy { LibraryNormalizer.displayTitle(it.album) }.eachCount().maxByOrNull { it.value }?.key.orEmpty()
+            val artist = LibraryNormalizer.albumArtistOf(groupTracks.map { it.artist })
             Album(
                 id = albumId,
                 title = title,
@@ -353,12 +338,18 @@ class LocalMusicRepository @Inject constructor(
         }
         .sortedBy { it.title.lowercase() }
 
-    private fun groupArtists(tracks: List<Track>): List<Artist> = tracks
+    private fun groupArtists(tracks: List<Track>): List<Artist> {
+        val standalone = LibraryNormalizer.standaloneArtists(tracks.map { it.artist })
+        return groupArtistsBy(tracks, standalone)
+    }
+
+    private fun groupArtistsBy(tracks: List<Track>, standalone: Set<String>): List<Artist> = tracks
         .groupBy { it.artistId }
         .map { (artistId, groupTracks) ->
             Artist(
                 id = artistId,
-                name = groupTracks.first().artist,
+                // The main artist, as most often written: "A feat. B" is a song of A's, not an artist of its own.
+                name = groupTracks.groupingBy { LibraryNormalizer.primaryOf(it.artist, standalone) }.eachCount().maxByOrNull { it.value }?.key.orEmpty(),
                 trackCount = groupTracks.size,
                 albumCount = groupTracks.map { it.albumId }.distinct().size,
             )

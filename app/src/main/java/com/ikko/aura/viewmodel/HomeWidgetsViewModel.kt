@@ -24,6 +24,7 @@ import com.ikko.aura.source.ytm.YtmLibrary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 
 /** One "Pour toi" card: what it says, the mood it is dressed in, and what it plays or opens. */
 @Immutable
@@ -75,6 +82,10 @@ data class ForYouUiState(
     val userPlaylists: List<UserPlaylistCard> = emptyList(),
     /** Every card there is, in the listener's order, hidden ones included: what the organiser shows. */
     val layout: List<CardSlot> = emptyList(),
+    /** The rows under the mixes: what is played again and what the external sources offer for it (see [HomeSections]). */
+    val sections: List<com.ikko.aura.data.home.HomeSection> = emptyList(),
+    /** The draw [sections] were made with: they are kept still once seen, and made again only when this changes. */
+    val sectionsSeed: Long = 0L,
 )
 
 @Immutable
@@ -90,11 +101,165 @@ class HomeWidgetsViewModel @Inject constructor(
     repository: MusicRepository,
     recentlyPlayedTracker: RecentlyPlayedTracker,
     favoritesStore: FavoritesStore,
-    ytmLibrary: YtmLibrary,
+    private val ytmLibrary: YtmLibrary,
     private val playlistRepository: PlaylistRepository,
     private val settingsStore: SettingsStore,
     private val recommendations: com.ikko.aura.reco.RecommendationEngine,
+    private val ytmClient: com.ikko.aura.source.ytm.YtmClient,
+    private val artistAuthority: com.ikko.aura.reco.authority.ArtistAuthority,
+    private val albumRefs: com.ikko.aura.source.ytm.AlbumRefResolver,
+    private val albumResolver: com.ikko.aura.source.StreamedAlbumResolver,
+    private val smartDao: com.ikko.aura.reco.SmartDao,
+    private val enricher: com.ikko.aura.reco.LastFmEnricher,
+    private val deezer: com.ikko.aura.data.deezer.DeezerClient,
 ) : ViewModel() {
+
+    /**
+     * What draws the rows between the fixed ones (see [com.ikko.aura.data.home.HomeRotation]): chosen once for the session, so Home
+     * does not rearrange itself on a recomposition or a trip to another page; [reshuffleSections] draws another set.
+     */
+    private val rotationSeed = MutableStateFlow(kotlin.random.Random.nextLong())
+
+    /** "Ne plus recommander": the artist is blocked (everywhere, with those that sound like them), and the renewal makes up for it. */
+    fun blockArtist(name: String) {
+        viewModelScope.launch {
+            runCatching { recommendations.blockArtist(name) }
+            recommendations.refreshInBackground()
+        }
+    }
+
+    /** The albums most listened to in each genre of the catalogue, from Deezer's charts, fetched once and in the background. */
+    private val chartAlbums = MutableStateFlow<Map<Int, List<com.ikko.aura.data.deezer.DeezerChartAlbum>>>(emptyMap())
+    /** The albums of the artists the listener chose, from their discographies: what the rows of Home are made from beside what the engine found. */
+    private val chosenAlbums = MutableStateFlow<List<com.ikko.aura.data.deezer.DeezerChartAlbum>>(emptyList())
+    /** Set once every chart has been asked for (found or not), and once the styles of the first artists have been looked up. */
+    private val chartsDone = MutableStateFlow(false)
+    private val tagsDone = MutableStateFlow(false)
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (id in CHART_GENRES) {
+                val albums = runCatching { deezer.chartAlbums(id) }.getOrDefault(emptyList())
+                if (albums.isNotEmpty()) chartAlbums.value = chartAlbums.value + (id to albums)
+            }
+            chartsDone.value = true
+        }
+        // The artists chosen before their identity was settled get it now (in the background): what follows relies on it.
+        recommendations.pinChosenArtists()
+        // The albums of the chosen artists, a few at a time (Deezer is asked slowly, see its client).
+        viewModelScope.launch(Dispatchers.IO) {
+            val names = (recommendations.pickedArtists.first() + recommendations.seedArtists.first())
+                .filter { it.isNotBlank() }.distinctBy { com.ikko.aura.reco.ArtistNames.primaryKey(it) }.take(CHOSEN_ARTISTS_ASKED)
+            val gate = kotlinx.coroutines.sync.Semaphore(3)
+            kotlinx.coroutines.coroutineScope {
+                names.map { name ->
+                    async {
+                        gate.withPermit {
+                            // The artist of that name, among the namesakes (see ArtistAuthority.deezerArtist): never the first answer of a search.
+                            val profile = runCatching { artistAuthority.deezerArtist(com.ikko.aura.reco.ArtistNames.askName(name)) }.getOrNull()
+                            val albums = profile?.let { runCatching { deezer.artistAlbumsWithCovers(it.id, it.name) }.getOrDefault(emptyList()) }.orEmpty()
+                            if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
+                        }
+                    }
+                }.awaitAll()
+            }
+            chosenDone.value = true
+        }
+    }
+
+    private val chosenDone = MutableStateFlow(false)
+
+    /** An explicit refresh: another set of rows. */
+    fun reshuffleSections() {
+        sectionsHeld.value = null
+        rotationSeed.value = kotlin.random.Random.nextLong()
+        refreshCarousels()
+        freezeSectionsWhenReady()
+    }
+
+    /** The rows of Home once they have settled (the styles and the charts have come in): kept as they are for the whole session. */
+    private val sectionsHeld = MutableStateFlow<List<com.ikko.aura.data.home.HomeSection>?>(null)
+    private val sectionsSettled = MutableStateFlow(false)
+    private var freezeJob: kotlinx.coroutines.Job? = null
+
+    init {
+        // Not before what the rows are made from has come in, or they would be drawn once and then again: the charts, at most a few seconds.
+        viewModelScope.launch {
+            kotlinx.coroutines.withTimeoutOrNull(SETTLE_MS) { combine(chartsDone, tagsDone, chosenDone) { a, b, c -> a && b && c }.first { it } }
+            sectionsSettled.value = true
+        }
+    }
+
+    /** Artist key → the tags Last.fm gives it, for the artists the sources offer: the rows of themes are drawn from them. */
+    private val externalTags = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+
+    init {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            recommendations.items.collect { items ->
+                val gate = kotlinx.coroutines.sync.Semaphore(8)
+                val chosenNames = (recommendations.pickedArtists.first() + recommendations.seedArtists.first()).map { com.ikko.aura.reco.ArtistNames.askName(it) }
+                val missing = (chosenNames + items.values.flatten().map { com.ikko.aura.reco.ArtistNames.primary(it.artist) })
+                    .filter { it.isNotBlank() }.distinctBy { com.ikko.aura.reco.ArtistNames.key(it) }
+                    .filter { com.ikko.aura.reco.ArtistNames.key(it) !in externalTags.value || externalTags.value[com.ikko.aura.reco.ArtistNames.key(it)].isNullOrEmpty() }
+                    .take(220)
+                kotlinx.coroutines.coroutineScope {
+                    missing.chunked(20).forEach { batch ->
+                        val found = batch.map { n -> async { gate.withPermit { com.ikko.aura.reco.ArtistNames.key(n) to runCatching { enricher.tagsOf(n) }.getOrDefault(emptySet()) } } }.awaitAll()
+                        externalTags.value = externalTags.value + found
+                    }
+                }
+                tagsDone.value = true
+            }
+        }
+    }
+
+    init {
+        // What Last.fm says of the library's artists is fetched in the background, a few at a time: the style rows are drawn from it.
+        enricher.enrichLibrary()
+    }
+
+    /**
+     * The page reference of a Home album: the one the source gave, else the album found by its name, else the album its first
+     * song is on (looked up from the song, which finds albums whose name the search does not match, "<Hyper-Ego>").
+     */
+    suspend fun albumRefOf(item: com.ikko.aura.data.home.SectionAlbum): String? {
+        item.ref?.let { return it }
+        albumRefFor(item.title, item.artist)?.let { return it }
+        val track = item.items.firstOrNull()?.let { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } } ?: return null
+        val route = albumResolver.routeOf(track) ?: return null
+        val path = route.substringBefore('?').split('/')
+        return when (path.firstOrNull()) {
+            "ytm_album" -> path.getOrNull(1)?.let(android.net.Uri::decode)
+            "remote_album" -> if (path.size >= 3) android.net.Uri.decode(path[1]) + ":" + android.net.Uri.decode(path[2]) else null
+            else -> null
+        }
+    }
+
+    /**
+     * The page of an external album that came with no reference (JioSaavn gives none): found on YouTube Music by its title and
+     * artist, the same record only. Null when that source is off, does not answer or does not have it.
+     */
+    /**
+     * Has the page of a YouTube Music album read before it opens (the client keeps it a few minutes): the page then draws at once,
+     * and the opening animation plays on a page that is there rather than on an empty one that is still loading.
+     */
+    private val preparing = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Boolean>>()
+
+    suspend fun prepareAlbum(ref: String): Boolean {
+        if (ref.contains(':')) return true
+        // One read at a time for a page, whoever asks (the finger going down on it, then the tap): the second asks wait for the first.
+        val job = preparing.getOrPut(ref) {
+            viewModelScope.async(Dispatchers.IO) {
+                runCatching { ytmClient.album(ref).songs.isNotEmpty() }.getOrDefault(false) ||
+                    runCatching { ytmLibrary.downloadedOfAlbum(ref).isNotEmpty() }.getOrDefault(false)
+            }.also { d -> d.invokeOnCompletion { preparing.remove(ref) } }
+        }
+        return job.await()
+    }
+
+    private val spacesRegex = Regex("\\s+")
+
+    suspend fun albumRefFor(title: String, artist: String): String? = albumRefs.find(title, artist)
 
     init {
         // Renewals that are due run when the app is opened; and at once when the listener turns the switch on.
@@ -105,7 +270,7 @@ class HomeWidgetsViewModel @Inject constructor(
 
     /** Whether a renewal is running, and a manual renewal of everything. */
     val recoRefreshing: StateFlow<Boolean> = recommendations.refreshing
-    fun refreshRecommendations() { viewModelScope.launch { recommendations.refreshNow() } }
+    fun refreshRecommendations() { reshuffleSections(); viewModelScope.launch { recommendations.refreshNow() } }
 
     val profileImageUri: StateFlow<String?> = settingsStore.profileImageUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -156,6 +321,14 @@ class HomeWidgetsViewModel @Inject constructor(
         recommendations.items,
         recommendations.consent,
         recommendations.status,
+        rotationSeed,
+        externalTags,
+        chartAlbums,
+        recommendations.blockedArtists,
+        recommendations.refusedAlbumKeys,
+        recommendations.pickedArtists,
+        recommendations.seedArtists,
+        chosenAlbums,
     ) { values ->
         @Suppress("UNCHECKED_CAST") val tracks = values[0] as List<Track>
         @Suppress("UNCHECKED_CAST") val albums = values[1] as List<Album>
@@ -171,6 +344,13 @@ class HomeWidgetsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST") val recoItems = values[11] as Map<String, List<com.ikko.aura.reco.RecoItem>>
         val recoConsent = values[12] as Boolean
         @Suppress("UNCHECKED_CAST") val recoStatus = values[13] as Map<String, com.ikko.aura.reco.RecoStatus>
+        val seed = values[14] as Long
+        @Suppress("UNCHECKED_CAST") val sourceTags = values[15] as Map<String, Set<String>>
+        @Suppress("UNCHECKED_CAST") val charts = values[16] as Map<Int, List<com.ikko.aura.data.deezer.DeezerChartAlbum>>
+        @Suppress("UNCHECKED_CAST") val blockedNow = values[17] as List<com.ikko.aura.reco.BlockedArtist>
+        @Suppress("UNCHECKED_CAST") val refusedAlbums = values[18] as Set<String>
+        @Suppress("UNCHECKED_CAST") val chosenArtists = (values[19] as List<String>) + (values[20] as List<String>)
+        @Suppress("UNCHECKED_CAST") val chosenPool = values[21] as List<com.ikko.aura.data.deezer.DeezerChartAlbum>
 
         // Streamed songs count as the library's own once played or kept, as on the old Home.
         // Streamed songs count only as kept ones (not everything ever played from a source), and only the downloaded among
@@ -193,6 +373,18 @@ class HomeWidgetsViewModel @Inject constructor(
         val albumsById = allAlbums.associateBy { it.id }
         val ranked = CARDS.sortedBy { spec -> order.indexOf(spec.id).let { if (it < 0) Int.MAX_VALUE else it } }
         val built = ranked.mapNotNull { spec ->
+                // "Tes préférés": the songs the listener hearted, in the playlist they live in (which the card opens).
+                if (spec.id == "fav") {
+                    val liked = playlists.firstOrNull { it.isFavorites }?.trackIds.orEmpty().mapNotNull { byId[it] }
+                    if (liked.isEmpty()) return@mapNotNull null
+                    return@mapNotNull ForYouCard(
+                        spec.id, spec.ambience, spec.heading, spec.kicker, artistsOf(liked),
+                        WidgetContent(
+                            title = spec.heading, subtitle = null, artwork = emptyList(), tracks = liked.take(MIX_SIZE), hue = 0f,
+                            openRoute = AuraDestination.PlaylistPattern.route(com.ikko.aura.data.playlist.FAVORITES_PLAYLIST_ID.toString()),
+                        ),
+                    )
+                }
                 // The seven recommended playlists: what the engine made from external sources, when the listener agreed
                 // to it and there is something; the selection from the library (below) otherwise.
                 val generated = if (recoConsent && com.ikko.aura.reco.RecoKind.ofKey(spec.id) != null) recoItems[spec.id].orEmpty() else emptyList()
@@ -225,9 +417,9 @@ class HomeWidgetsViewModel @Inject constructor(
                 }
                 if (content.isEmpty) null else ForYouCard(spec.id, spec.ambience, spec.heading, spec.kicker, artistsOf(content.tracks), content)
         }
-        val recentAlbums = recentAlbumIds.mapNotNull { albumsById[it] }.take(MAX_RECENT)
+        val recentAlbums = recentAlbumIds.mapNotNull { albumsById[it] }.oneOfEach().take(MAX_RECENT)
         val resumeAlbums = (recentAlbums + recentTrackIds.mapNotNull { byId[it]?.albumId?.let(albumsById::get) })
-            .distinctBy { it.id }
+            .oneOfEach()
             .ifEmpty { allAlbums }
             .take(MAX_RECENT)
 
@@ -263,7 +455,7 @@ class HomeWidgetsViewModel @Inject constructor(
             .take(MAX_RECENT)
 
         val autoIds = playlistRepository.autoPlaylistIds()
-        val autoHeadings = CARDS.map { it.heading }.toSet() + setOf("Découvertes", "Tes préférés")
+        val autoHeadings = CARDS.map { it.heading }.toSet() + setOf("Découverte", "Favoris")
         val allTracksAndKeptById = (allTracks + kept).associateBy { it.id }
         val userPlaylists = playlists
             .filter { !it.isFavorites && it.id !in autoIds && it.name !in autoHeadings }
@@ -294,14 +486,151 @@ class HomeWidgetsViewModel @Inject constructor(
             quickTracks = quickTracks,
             userPlaylists = userPlaylists,
             layout = built.map { CardSlot(it.id, it.heading, it.id in hidden) },
+            sectionsSeed = seed,
+            sections = run {
+                // The listening, the device's and the sources' alike: "En boucle" and "Replay" count both.
+                val knownStreams = runCatching { ytmLibrary.known() }.getOrDefault(emptyList()).associateBy { it.id }
+                val listenRows = runCatching { recommendations.listensSince(System.currentTimeMillis() - 365L * MILLIS_PER_DAY) }
+                    .getOrDefault(emptyList())
+                    .map { com.ikko.aura.data.home.ListenRow(it.trackId, it.title, it.artist, it.album, it.year, it.outcome, it.endedAtMs) }
+                // What the sources offer is made only with the listener's consent (see the recommendations' settings), and only of artists the
+                // listener chose (the taste picker, the ones typed in) or has among the device's files: anything else has nothing to do with them.
+                val closeKeys = HashSet<String>().apply {
+                    fun addArtist(name: String) {
+                        this.addAll(com.ikko.aura.reco.ArtistNames.split(name))
+                        this.add(com.ikko.aura.reco.ArtistNames.primaryKey(name))
+                    }
+                    chosenArtists.forEach { addArtist(it) }
+                    // The device's own files, not what was kept or played from a source: a song a radio played is not an artist chosen.
+                    tracks.filter { !com.ikko.aura.source.ytm.YtmLibrary.isStreamed(it) }.forEach { addArtist(it.artist) }
+                    remove("")
+                }
+                // A style the listener does not want, whatever the artist: none of its albums, wherever they come from.
+                fun unwanted(artist: String) = com.ikko.aura.data.home.HomeRotation.isUnwantedStyle(sourceTags[com.ikko.aura.reco.ArtistNames.primaryKey(artist)].orEmpty())
+                fun ofCloseArtist(artist: String) = !unwanted(artist) && (
+                    com.ikko.aura.reco.ArtistNames.creditsOf(artist, "").take(2).any { it in closeKeys } ||
+                        com.ikko.aura.reco.ArtistNames.primaryKey(artist) in closeKeys)
+                // For an artist whose real discography is known, only what belongs to it: a search by name answers with the namesake's records too.
+                val discographyOf: Map<String, Set<String>> = chosenPool
+                    .groupBy { com.ikko.aura.reco.ArtistNames.primaryKey(it.artist) }
+                    .mapValues { (_, albums) -> albums.mapTo(HashSet()) { com.ikko.aura.reco.TrackIdentity.baseKey(it.title) } }
+                fun ofTheirDiscography(artist: String, album: String, title: String): Boolean {
+                    val titles = discographyOf[com.ikko.aura.reco.ArtistNames.primaryKey(artist)] ?: return true
+                    return com.ikko.aura.reco.TrackIdentity.baseKey(album) in titles || com.ikko.aura.reco.TrackIdentity.baseKey(title) in titles
+                }
+                val offered = if (recoConsent) {
+                    recoItems.mapValues { (_, list) ->
+                        list.filter {
+                            !com.ikko.aura.data.home.HomeSections.isExcludedAlbum(it.title) &&
+                                !com.ikko.aura.data.home.HomeSections.isExcludedAlbum(it.album) &&
+                                ofCloseArtist(it.artist) && ofTheirDiscography(it.artist, it.album, it.title)
+                        }
+                    }
+                } else emptyMap()
+                val base = com.ikko.aura.data.home.HomeSections.build(
+                    items = offered, library = allAlbums, recentAlbumIds = recentAlbumIds, topPlayedAlbumIds = topPlayedAlbumIds,
+                    maxSections = 40,
+                )
+                fun place(r: com.ikko.aura.data.home.ListenRow): com.ikko.aura.data.home.SectionAlbum? {
+                    val track = byId[r.trackId]
+                    if (track != null) return albumsById[track.albumId]?.let { com.ikko.aura.data.home.SectionAlbum(it.title, it.artist, album = it) }
+                    val stream = knownStreams[r.trackId] ?: return null
+                    val ref = stream.remoteAlbumId
+                    fun cleanAlbum(s: String) = if (s.equals("YouTube Music", ignoreCase = true) || s.equals("JioSaavn", ignoreCase = true)) "" else s.trim()
+                    val realAlbumName = cleanAlbum(stream.album).ifBlank { cleanAlbum(r.album) }
+                    val displayAlbum = realAlbumName.ifBlank { stream.title.ifBlank { r.title } }.ifBlank { return null }
+                    val item = com.ikko.aura.reco.RecoItem(
+                        trackId = stream.id,
+                        title = stream.title,
+                        artist = stream.artist,
+                        album = realAlbumName,
+                        durationMs = stream.durationMs,
+                        artworkUrl = stream.artworkUri?.toString().orEmpty(),
+                        albumRef = ref.orEmpty(),
+                        sourceId = stream.id.substringBefore(':'),
+                        sourceName = stream.id.substringBefore(':'),
+                        reason = null,
+                        verified = true,
+                    )
+                    return com.ikko.aura.data.home.SectionAlbum(
+                        title = displayAlbum, artist = stream.artist, ref = ref,
+                        artworkUrl = stream.artworkUri?.toString().orEmpty(),
+                        items = listOf(item),
+                    )
+                }
+                val now = System.currentTimeMillis()
+                val zone = java.time.ZoneId.systemDefault()
+                val loop = com.ikko.aura.data.home.ListeningAlbums.group(
+                    com.ikko.aura.data.home.ListeningAlbums.since(listenRows, now - 30L * MILLIS_PER_DAY), zone, ::place,
+                ).filter { it.count >= 2 }.map { it.album }
+                val everything = com.ikko.aura.data.home.ListeningAlbums.group(listenRows, zone, ::place)
+                val owned = allAlbums.mapTo(HashSet()) { it.title.trim().lowercase() + "\u0000" + it.artist.trim().lowercase() }
+                // The styles of the artists the listener cares about, with how much: the rows of genres are drawn from them.
+                val tasteTags = HashMap<String, Double>()
+                for (meta in runCatching { smartDao.allArtists() }.getOrDefault(emptyList())) {
+                    if (meta.affinityScore <= 0.0 || meta.isBlocked) continue
+                    val arr = runCatching { org.json.JSONArray(meta.genresJson) }.getOrNull() ?: continue
+                    for (i in 0 until arr.length()) tasteTags.merge(arr.getString(i).lowercase(), meta.affinityScore, Double::plus)
+                }
+                com.ikko.aura.data.home.HomeRotation.arrange(
+                    com.ikko.aura.data.home.RotationContext(
+                        base = base, loop = loop, listens = everything,
+                        // What the engine found, and the albums of the artists chosen (their discographies): the pool the rows are drawn from.
+                        external = (
+                            com.ikko.aura.data.home.HomeSections.externalAlbums(offered) +
+                                chosenPool.filter { a ->
+                                    !unwanted(a.artist) && !com.ikko.aura.data.home.HomeSections.isExcludedAlbum(a.title) &&
+                                        com.ikko.aura.reco.ArtistNames.split(a.artist).none { it in blockedNow.mapTo(HashSet()) { b -> b.key } } &&
+                                        com.ikko.aura.reco.AlbumKeys.ofName(a.title, a.artist) !in refusedAlbums
+                                }.map { a -> com.ikko.aura.data.home.SectionAlbum(a.title, a.artist, artworkUrl = a.coverXl) }
+                            ).distinctBy { it.sameAs }.filter { it.sameAs !in owned },
+                        artistTags = sourceTags, recoItems = offered, nowMs = now, seed = seed, zone = zone,
+                        tasteTags = tasteTags,
+                        // What the genres' charts offer, without any album already in the library, of a blocked artist, or refused as a whole.
+                        chartAlbums = charts.mapValues { (_, list) ->
+                            val blockedKeys = blockedNow.mapTo(HashSet()) { it.key }
+                            list.filter { a ->
+                                !com.ikko.aura.data.home.HomeSections.isExcludedAlbum(a.title) &&
+                                    ofCloseArtist(a.artist) &&
+                                    com.ikko.aura.reco.ArtistNames.split(a.artist).none { it in blockedKeys } &&
+                                    com.ikko.aura.reco.AlbumKeys.ofName(a.title, a.artist) !in refusedAlbums &&
+                                    (a.title.trim().lowercase() + "\u0000" + a.artist.trim().lowercase()) !in owned
+                            }.map { a -> com.ikko.aura.data.home.SectionAlbum(a.title, a.artist, artworkUrl = a.coverXl) }
+                        },
+                        // The library's artists and the ones chosen: the rows "Plus de…" are made for them.
+                        knownArtists = (allAlbums.map { it.artist } + chosenArtists).flatMap { name -> com.ikko.aura.reco.ArtistNames.split(name) + com.ikko.aura.reco.ArtistNames.primaryKey(name) }.filter { it.isNotEmpty() }.toSet(),
+                    ),
+                )
+            },
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
 
     /** The carousels as the listener first saw them: what is played meanwhile does not move them (see [refreshCarousels]). */
     private val frozenCarousels = MutableStateFlow<ForYouUiState?>(null)
 
+    /** Takes the arrangement of Home as it is once settled, and holds it. */
+    private fun freezeSectionsWhenReady() {
+        freezeJob?.cancel()
+        freezeJob = viewModelScope.launch {
+            val seed = rotationSeed.value
+            sectionsSettled.first { it }
+            val live = uiState.first { it.loaded && it.sectionsSeed == seed && it.sections.isNotEmpty() }
+            sectionsHeld.value = live.sections
+        }
+    }
+
+    init { freezeSectionsWhenReady() }
+
     init {
-        viewModelScope.launch { frozenCarousels.compareAndSet(null, uiState.first { it.loaded }) }
+        viewModelScope.launch {
+            uiState.collect { live ->
+                if (!live.loaded) return@collect
+                val current = frozenCarousels.value
+                if (current == null || live.sections.size > current.sections.size) {
+                    frozenCarousels.value = live
+                }
+            }
+        }
     }
 
     /**
@@ -309,15 +638,22 @@ class HomeWidgetsViewModel @Inject constructor(
      * [refreshCarousels]'d: a song played while Home is on screen, or an album opened and left, does not reorder them
      * under the finger or under a returning transition.
      */
-    val homeState: StateFlow<ForYouUiState> = combine(uiState, frozenCarousels) { live, held ->
+    val homeState: StateFlow<ForYouUiState> = combine(
+        uiState, frozenCarousels, sectionsHeld, recommendations.blockedArtists, recommendations.refusedAlbumKeys,
+    ) { live, held, rows, blocked, refused ->
+        // The rows are the ones held, never the live ones: nothing moves in them because of what is played or found meanwhile.
+        // Not drawn before they have settled, rather than drawn and then drawn again.
+        val sections = rows?.let { com.ikko.aura.data.home.SectionHold.reconcile(it, live.sections, blocked.mapTo(HashSet()) { b -> b.key }, refused) }
+            ?: emptyList()
         // Nothing held until there is something to hold: a library still being read must not freeze empty carousels.
-        if (held == null || (held.resumeAlbums.isEmpty() && held.favoriteAlbums.isEmpty() && held.newAlbums.isEmpty() && held.discoveryAlbums.isEmpty())) live
+        if (held == null || (held.resumeAlbums.isEmpty() && held.favoriteAlbums.isEmpty() && held.newAlbums.isEmpty() && held.discoveryAlbums.isEmpty())) live.copy(sections = sections)
         else live.copy(
             resumeAlbums = held.resumeAlbums,
             lastPlayedAt = held.lastPlayedAt,
             favoriteAlbums = held.favoriteAlbums,
             newAlbums = held.newAlbums,
             discoveryAlbums = held.discoveryAlbums,
+            sections = sections,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
 
@@ -338,8 +674,20 @@ class HomeWidgetsViewModel @Inject constructor(
         val pick: ((HomeSourceData) -> List<Track>)? = null,
     )
 
+    /**
+     * One entry per album: a streamed album that was then downloaded is on the device as well, as the file's own album, and
+     * both turn up in what was played - the stream's under its own id, the file's under the media store's. They are the same
+     * record (the same title by the same artist): the first place either holds is kept, as the downloaded one when there is
+     * one (it plays without a network and opens the album as the library has it).
+     */
+    private fun List<Album>.oneOfEach(): List<Album> {
+        fun key(a: Album) = a.title.trim().lowercase() + "\u0000" + a.artist.trim().lowercase()
+        val bestOf = groupBy(::key).mapValues { (_, same) -> same.firstOrNull { it.remoteId == null } ?: same.first() }
+        return distinctBy(::key).map { bestOf.getValue(key(it)) }
+    }
+
     private fun artistsOf(tracks: List<Track>): String {
-        val names = tracks.map { it.artist.replace(Regex("\\s+"), " ").trim() }.filter { it.isNotBlank() }.distinct()
+        val names = tracks.map { it.artist.replace(spacesRegex, " ").trim() }.filter { it.isNotBlank() }.distinct()
         if (names.isEmpty()) return ""
         return names.take(3).joinToString(", ") + if (names.size > 3) " et plus" else ""
     }
@@ -352,8 +700,12 @@ class HomeWidgetsViewModel @Inject constructor(
         const val THREE_MIN_MS = 3L * 60_000L
         // The six moods of the design, in its order, then the three the app already had.
         val CARDS = listOf(
-            Spec("fav", WidgetKind.FAVORITE_ALBUMS, CardAmbience.FAVORIS, "Favoris", "Fait pour toi"),
-            Spec("disc", WidgetKind.REDISCOVER, CardAmbience.DECOUVERTE, "Découverte", "À redécouvrir", weekly = true),
+            Spec("fav", WidgetKind.FAVORITE_ALBUMS, CardAmbience.FAVORIS, "Tes préférés", "Ce que tu aimes"),
+            // What the listener has never played: albums with no play at all, in a new order each day.
+            Spec("disc", null, CardAmbience.DECOUVERTE, "Découvertes", "Une sélection pour toi", weekly = true) { d ->
+                d.allTracks.filter { (d.albumPlays[it.albumId] ?: 0) == 0 && it.albumId !in d.recentAlbumIds }
+                    .sortedBy { HomeWidgetRules.dailyRank(it.id, d.day) }
+            },
             Spec("new", null, CardAmbience.NOUVEAUTES, "Nouveautés", "Fait pour toi", weekly = true) { d ->
                 d.allTracks.filter { it.year > 0 }.sortedWith(compareByDescending<Track> { it.year }.thenBy { HomeWidgetRules.dailyRank(it.id, d.day) })
             },
@@ -373,3 +725,12 @@ class HomeWidgetsViewModel @Inject constructor(
         )
     }
 }
+
+/** Deezer's ids of the genres whose chart fills a row (see HomeRotation): pop, rock, rap, electro, dance, jazz, funk, metal, reggae, folk, classical, blues, African music. */
+private val CHART_GENRES = listOf(132, 152, 116, 106, 113, 169, 464, 144, 466, 98, 153, 2)
+
+/** How many of the chosen artists have their albums looked up. */
+private const val CHOSEN_ARTISTS_ASKED = 36
+
+/** The most that Home waits for its rows to settle before showing them. */
+private const val SETTLE_MS = 12_000L

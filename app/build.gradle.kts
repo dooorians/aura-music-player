@@ -1,4 +1,5 @@
 import com.android.build.api.variant.BuildConfigField
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -6,6 +7,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// The database's schema is written out at each version, so an upgrade can be checked against the one before it.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 android {
@@ -31,6 +37,14 @@ android {
         // False and empty everywhere but in the QA variant (see androidComponents below), where Réglages shows the text.
         // A constant `false` lets the compiler drop the whole branch that reads them: the other builds do not contain it.
         buildConfigField("boolean", "IS_QA", "false")
+        // The app's Last.fm key and secret (last.fm/api/account/create), kept out of git in local.properties:
+        //   lastfm.apiKey=...   lastfm.secret=...
+        // With them the connection is just the page on Last.fm; without, the settings ask for them once.
+        val localProps = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+        }
+        buildConfigField("String", "LASTFM_KEY", "\"${localProps.getProperty("lastfm.apiKey", "").trim()}\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"${localProps.getProperty("lastfm.secret", "").trim()}\"")
         buildConfigField("String", "QA_INFO", "\"\"")
 
         vectorDrawables { useSupportLibrary = true }
@@ -64,6 +78,10 @@ android {
             versionNameSuffix = "-qa"
             matchingFallbacks += "release"
         }
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     compileOptions {
@@ -178,4 +196,5 @@ dependencies {
     // pure logic that decides what gets played (see source/ and playback/).
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation("org.json:json:20240303")
 }

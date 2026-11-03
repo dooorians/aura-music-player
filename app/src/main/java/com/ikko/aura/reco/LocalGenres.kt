@@ -35,8 +35,8 @@ class LocalGenres @Inject constructor(@param:ApplicationContext private val cont
         )?.use { genres ->
             while (genres.moveToNext()) {
                 val id = genres.getLong(0)
-                val name = genres.getString(1)?.trim().orEmpty()
-                if (name.isEmpty() || name.equals("unknown", ignoreCase = true)) continue
+                // Variants fold into one genre ("Hip Hop" and "Hip-Hop"), ID3 numbers become names, "Other" and "Unknown" are none.
+                val name = GenreNormalizer.normalize(genres.getString(1)) ?: continue
                 resolver.query(
                     MediaStore.Audio.Genres.Members.getContentUri("external", id),
                     arrayOf(MediaStore.Audio.Genres.Members.AUDIO_ID), null, null, null,

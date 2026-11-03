@@ -15,10 +15,19 @@ import kotlinx.coroutines.launch
 import com.ikko.aura.source.ytm.YtmLibrary
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.route
 import com.ikko.aura.navigation.streamedAlbumRoute
 import com.ikko.aura.navigation.streamedArtistRoute
 import com.ikko.aura.viewmodel.PlayerViewModel
@@ -60,6 +69,7 @@ fun MediaContextHost(
     // comes back, so the target alone cannot say what was deleted.
     var pendingDeletion by remember { mutableStateOf<List<Track>>(emptyList()) }
     var playlistTargetIds by remember { mutableStateOf<List<String>?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
     val context = LocalContext.current
 
     // Deleting media the app did not write needs the system's own confirmation on modern Android:
@@ -88,26 +98,58 @@ fun MediaContextHost(
         val request = MediaStore.createDeleteRequest(context.contentResolver, doomed.map { it.contentUri })
         deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
     }
-    val controller = remember { MediaContextController(onShow = { target = it }, onDelete = { deleteTracks(it) }) }
     val keptStreamed by playerViewModel.keptStreamedIds.collectAsState()
     val downloads by playerViewModel.downloadStates.collectAsState()
     val scope = rememberCoroutineScope()
     val albumsVm: com.ikko.aura.viewmodel.AlbumTracksViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val favoriteAlbums by albumsVm.favoriteAlbumIds.collectAsState()
+    val likedIds by playerViewModel.likedTrackIds.collectAsState()
+    val likedAlbums by playerViewModel.likedAlbumKeys.collectAsState()
 
-    content(controller)
+    var rootPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var pressAt by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    var origin by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    val controller = remember {
+        MediaContextController(onShow = { origin = pressAt; target = it }, onDelete = { deleteTracks(it) })
+    }
+    // The last finger down, in window coordinates: the menu opens out of it.
+    androidx.compose.foundation.layout.Box(
+        Modifier
+            .onGloballyPositioned { rootPos = it.positionInWindow() }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        e.changes.firstOrNull { it.pressed }?.let { pressAt = it.position + rootPos }
+                    }
+                }
+            },
+    ) { content(controller) }
+
+    // What an action applies to: for an album of another source, its songs are fetched first.
+    fun withTracks(shown: LibraryContextTarget, run: (List<Track>) -> Unit) {
+        if (shown !is LibraryContextTarget.RemoteAlbumTarget) { run(shown.tracks()); return }
+        scope.launch {
+            val tracks = shown.ref?.let { playerViewModel.streamedAlbumTracks(it) }.orEmpty().ifEmpty { shown.tracks }
+            if (tracks.isEmpty()) android.widget.Toast.makeText(context, "Album indisponible", android.widget.Toast.LENGTH_SHORT).show()
+            else run(tracks)
+        }
+    }
 
     target?.let { shown ->
         MediaContextSheet(
             target = shown,
             onDismiss = { target = null },
-            onPlayNext = { playerViewModel.playNext(shown.tracks()) },
-            onAddToQueue = { playerViewModel.addToQueue(shown.tracks()) },
+            origin = origin,
+            onPlayNext = { withTracks(shown) { playerViewModel.playNext(it) } },
+            onAddToQueue = { withTracks(shown) { playerViewModel.addToQueue(it) } },
             // A streamed song is made known first, so the playlist can name it afterwards.
             onAddToPlaylist = {
-                scope.launch {
-                    playerViewModel.rememberForUse(shown.tracks())
-                    playlistTargetIds = shown.tracks().map { it.id }
+                withTracks(shown) { tracks ->
+                    scope.launch {
+                        playerViewModel.rememberForUse(tracks)
+                        playlistTargetIds = tracks.map { it.id }
+                    }
                 }
             },
             streamed = (shown as? LibraryContextTarget.TrackTarget)?.track?.let(YtmLibrary::isStreamed) == true,
@@ -131,6 +173,8 @@ fun MediaContextHost(
                     }
                     return@MediaContextSheet
                 }
+                (shown as? LibraryContextTarget.RemoteAlbumTarget)?.ref?.let { navController.navigate(streamedAlbumRoute(it, online = true)); return@MediaContextSheet }
+                (shown as? LibraryContextTarget.AlbumTarget)?.let { navController.navigate(it.album.route()); return@MediaContextSheet }
                 val albumId = (shown as? LibraryContextTarget.TrackTarget)?.track?.albumId
                     ?: return@MediaContextSheet
                 navController.navigate(AuraDestination.AlbumPattern.route(albumId.toString()))
@@ -139,6 +183,10 @@ fun MediaContextHost(
                 val streamedTrack = (shown as? LibraryContextTarget.TrackTarget)?.track?.takeIf(YtmLibrary::isStreamed)
                 if (streamedTrack != null) {
                     navController.navigate(streamedTrack.streamedArtistRoute())
+                    return@MediaContextSheet
+                }
+                (shown as? LibraryContextTarget.RemoteAlbumTarget)?.let { remote ->
+                    withTracks(remote) { navController.navigate(it.first().streamedArtistRoute()) }
                     return@MediaContextSheet
                 }
                 val streamedAlbumArtist = (shown as? LibraryContextTarget.AlbumTarget)
@@ -150,6 +198,7 @@ fun MediaContextHost(
                 val artistId = when (shown) {
                     is LibraryContextTarget.TrackTarget -> shown.track.artistId
                     is LibraryContextTarget.AlbumTarget -> shown.album.artistId
+                    is LibraryContextTarget.RemoteAlbumTarget -> return@MediaContextSheet
                 }
                 navController.navigate(AuraDestination.ArtistPattern.route(artistId.toString()))
             },
@@ -157,8 +206,46 @@ fun MediaContextHost(
             albumFavorite = (shown as? LibraryContextTarget.AlbumTarget)?.takeIf { it.album.remoteId == null }?.let { it.album.id in favoriteAlbums },
             onToggleAlbumFavorite = { (shown as? LibraryContextTarget.AlbumTarget)?.let { albumsVm.toggleFavorite(it.album.id) } },
             onDelete = { deleteTracks(shown.tracks()) },
+            liked = when (shown) {
+                is LibraryContextTarget.TrackTarget -> shown.track.id in likedIds
+                is LibraryContextTarget.RemoteAlbumTarget -> com.ikko.aura.reco.AlbumKeys.of(shown.ref, shown.title, shown.artist).any { it in likedAlbums }
+                else -> false
+            },
+            onToggleLike = {
+                if (shown is LibraryContextTarget.RemoteAlbumTarget) {
+                    // The album counts at once; its songs, when its page answers, count with it.
+                    scope.launch {
+                        val page = shown.ref?.let { playerViewModel.streamedAlbumTracks(it) }.orEmpty().ifEmpty { shown.tracks }
+                        playerViewModel.toggleLikeAlbum(shown.ref, shown.title, shown.artist, page)
+                    }
+                } else withTracks(shown) { it.forEach(playerViewModel::toggleLikeOf) }
+            },
+            onDislike = {
+                if (shown is LibraryContextTarget.RemoteAlbumTarget) {
+                    // The album is refused whether or not its page answers: its own songs (the ones the tile holds, which are the ones
+                    // that were recommended) and the page's, and the album itself, are what is kept.
+                    scope.launch {
+                        val page = shown.ref?.let { playerViewModel.streamedAlbumTracks(it) }.orEmpty()
+                        playerViewModel.dislikeAlbum(shown.ref, shown.title, shown.artist, (shown.tracks + page).distinctBy { it.id })
+                    }
+                } else withTracks(shown) { it.forEach(playerViewModel::dislike) }
+            },
+            onShare = { shareMedia(context, shown) },
+            onPlay = { withTracks(shown) { playerViewModel.playQueue(it, 0) } },
+            onShuffle = { withTracks(shown) { playerViewModel.playShuffled(it) } },
+            onRadio = {
+                withTracks(shown) { playerViewModel.startRadio((shown as? LibraryContextTarget.TrackTarget)?.track ?: it.first()) }
+            },
+            onDownloadAll = when {
+                shown is LibraryContextTarget.RemoteAlbumTarget -> ({ withTracks(shown) { playerViewModel.downloadStreamed(it) } })
+                shown is LibraryContextTarget.AlbumTarget && shown.album.remoteId != null -> ({ playerViewModel.downloadStreamed(shown.tracks) })
+                else -> null
+            },
+            onInfo = { infoTrack = (shown as? LibraryContextTarget.TrackTarget)?.track },
         )
     }
+
+    infoTrack?.let { TrackInfoDialog(it) { infoTrack = null } }
 
     playlistTargetIds?.let { ids ->
         AddToPlaylistDialog(
@@ -175,4 +262,63 @@ fun MediaContextHost(
 internal fun LibraryContextTarget.tracks(): List<Track> = when (this) {
     is LibraryContextTarget.TrackTarget -> listOf(track)
     is LibraryContextTarget.AlbumTarget -> tracks
+    is LibraryContextTarget.RemoteAlbumTarget -> emptyList()
+}
+
+/** Shares what was pressed: a local song's file, or the names of a streamed song or an album. */
+private fun shareMedia(context: android.content.Context, target: LibraryContextTarget) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND)
+    when (target) {
+        is LibraryContextTarget.TrackTarget -> {
+            val t = target.track
+            if (YtmLibrary.isStreamed(t)) {
+                intent.type = "text/plain"
+                intent.putExtra(android.content.Intent.EXTRA_TEXT, "${t.title} - ${t.artist}")
+            } else {
+                intent.type = "audio/*"
+                intent.putExtra(android.content.Intent.EXTRA_STREAM, t.contentUri)
+                intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        is LibraryContextTarget.AlbumTarget -> {
+            intent.type = "text/plain"
+            intent.putExtra(android.content.Intent.EXTRA_TEXT, "${target.album.title} - ${target.album.artist}")
+        }
+        is LibraryContextTarget.RemoteAlbumTarget -> {
+            intent.type = "text/plain"
+            intent.putExtra(android.content.Intent.EXTRA_TEXT, "${target.title} - ${target.artist}")
+        }
+    }
+    runCatching { context.startActivity(android.content.Intent.createChooser(intent, null).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+
+/** What the app knows of a song, in its own words. */
+@Composable
+private fun TrackInfoDialog(track: Track, onDismiss: () -> Unit) {
+    fun mmss(ms: Long): String = (ms / 1000).let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" }
+    val lines = buildList {
+        add("Titre" to track.title)
+        add("Artiste" to track.artist)
+        if (track.album.isNotBlank()) add("Album" to track.album)
+        if (track.year > 0) add("Année" to track.year.toString())
+        if (track.durationMs > 0) add("Durée" to mmss(track.durationMs))
+        if (track.format != com.ikko.aura.data.model.AudioFormat.UNKNOWN) add("Format" to track.format.name)
+        if (track.bitrateKbps > 0) add("Débit" to "${track.bitrateKbps} kb/s")
+        if (track.sampleRateHz > 0) add("Fréquence" to "${track.sampleRateHz / 1000.0} kHz · ${track.bitDepth} bits")
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text("Informations sur le titre") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                lines.forEach { (k, v) ->
+                    androidx.compose.foundation.layout.Row(Modifier.padding(vertical = 3.dp)) {
+                        androidx.compose.material3.Text(k, modifier = Modifier.width(92.dp), color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f))
+                        androidx.compose.material3.Text(v)
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Fermer") } },
+    )
 }

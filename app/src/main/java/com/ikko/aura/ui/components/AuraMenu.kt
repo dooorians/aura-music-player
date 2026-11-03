@@ -36,31 +36,19 @@ object AuraMenu {
     val Shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
     val SheetShape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
+    /**
+     * The menus' colour: black, with no hue (it was the cover's accent, darkened). Not at the 26 % of the cards: a menu is
+     * laid over rows of covers and words, and at 26 % they read through it and cross its own.
+     */
     @Composable
-    fun tint(): Color {
-        val accent = LocalCoverColors.current.accent
-        // Which hue is the page's: the accent, at a third of its brightness — a dark panel of that colour, as drawn.
-        return remember(accent) {
-            val c = accent.toArgb()
-            Color(
-                android.graphics.Color.rgb(
-                    (android.graphics.Color.red(c) * 0.3f).toInt(),
-                    (android.graphics.Color.green(c) * 0.3f).toInt(),
-                    (android.graphics.Color.blue(c) * 0.3f).toInt(),
-                ),
-            )
-        }
-    }
+    fun tint(): Color = Color.Black.copy(alpha = 0.88f)
 
-    /** The body of the surface: the tint, a touch darker towards the bottom. */
+    /** The body of the surface: the same glass, flat. */
     @Composable
-    fun fill(): Brush {
-        val t = tint()
-        return Brush.verticalGradient(listOf(t, lerp(t, Color.Black, 0.25f)))
-    }
+    fun fill(): Brush = Brush.verticalGradient(listOf(tint(), tint()))
 
     val rim: Brush
-        get() = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.14f)))
+        get() = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.07f), Color.White.copy(alpha = 0.07f)))
 
     val rimStroke: BorderStroke get() = BorderStroke(1.dp, rim)
 }

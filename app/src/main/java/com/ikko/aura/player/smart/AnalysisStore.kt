@@ -65,6 +65,10 @@ class AnalysisStore(private val context: Context) {
      * Only ever grows within a session, and a write clears the entry.
      */
     private val known = ConcurrentHashMap<String, Boolean>()
+    private val cache = ConcurrentHashMap<String, TrackAnalysis>()
+    private val existingFiles: MutableSet<String> by lazy {
+        ConcurrentHashMap.newKeySet<String>().apply { directory.list()?.let(::addAll) }
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -74,9 +78,16 @@ class AnalysisStore(private val context: Context) {
     /** Reads [trackId]'s stored analysis, or null when there isn't one. */
     fun load(trackId: String): TrackAnalysis? {
         if (trackId.isBlank()) return null
+        cache[trackId]?.let { return it }
         if (known[trackId] == false) return null
-        val file = File(directory, fileNameFor(trackId))
+        val fileName = fileNameFor(trackId)
+        if (fileName !in existingFiles) {
+            known[trackId] = false
+            return null
+        }
+        val file = File(directory, fileName)
         if (!file.exists()) {
+            existingFiles.remove(fileName)
             known[trackId] = false
             return null
         }
@@ -88,12 +99,18 @@ class AnalysisStore(private val context: Context) {
             require(stored.version == SCHEMA_VERSION) { "schema ${stored.version}" }
             stored.toAnalysis(trackId)
         }
+            .onSuccess {
+                cache[trackId] = it
+                known[trackId] = true
+            }
             .onFailure {
                 // A half-written or outdated file is worth exactly nothing and
                 // costs a re-analysis to replace, so it goes rather than being
                 // returned as a partly-filled result.
                 Log.w(TAG, "Discarding unreadable analysis for $trackId", it)
                 file.delete()
+                existingFiles.remove(fileName)
+                cache.remove(trackId)
                 known[trackId] = false
             }
             .getOrNull()
@@ -108,12 +125,15 @@ class AnalysisStore(private val context: Context) {
         if (trackId.isBlank() || !analysis.isUsable) return
         runCatching {
             directory.mkdirs()
-            val file = File(directory, fileNameFor(trackId))
+            val fileName = fileNameFor(trackId)
+            val file = File(directory, fileName)
             // Written aside and renamed, so a kill mid-write leaves the old
             // entry rather than a truncated one.
             val temporary = File(directory, file.name + ".tmp")
             temporary.writeText(json.encodeToString(Stored.serializer(), Stored.of(analysis)))
             if (!temporary.renameTo(file)) temporary.delete()
+            existingFiles.add(fileName)
+            cache[trackId] = analysis
             known[trackId] = true
         }.onFailure { Log.w(TAG, "Could not store analysis for $trackId", it) }
         prune()
@@ -127,11 +147,15 @@ class AnalysisStore(private val context: Context) {
      * analysis.
      */
     private fun prune() {
+        if (existingFiles.size <= MAX_ENTRIES) return
         val files = directory.listFiles() ?: return
         if (files.size <= MAX_ENTRIES) return
         files.sortedBy { it.lastModified() }
             .take(files.size - MAX_ENTRIES)
-            .forEach { it.delete() }
+            .forEach {
+                existingFiles.remove(it.name)
+                it.delete()
+            }
     }
 
     /** Hashed rather than used raw: a track id is not guaranteed to be a legal filename. */

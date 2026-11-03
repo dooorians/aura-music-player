@@ -16,6 +16,13 @@ sealed class AuraDestination(val route: String) {
     data object Lyrics : AuraDestination("lyrics")
     data object Equalizer : AuraDestination("equalizer")
 
+    /** The grid of artist bubbles that calibrates the recommendations. */
+    data object TastePicker : AuraDestination("taste_picker")
+
+    /** The artists the listener likes, and the ones they blocked: a page each, with their photos and a way to remove them. */
+    data object LikedArtists : AuraDestination("liked_artists")
+    data object BlockedArtists : AuraDestination("blocked_artists")
+
     data object AlbumPattern : AuraDestination("album/{albumId}") {
         fun route(albumId: String) = "album/$albumId"
     }
@@ -58,10 +65,12 @@ sealed class AuraDestination(val route: String) {
         fun route(mode: String) = "album_list/$mode"
     }
 
+    data object Playlists : AuraDestination("playlists")
+
     companion object {
         /** Routes with no mini-player pill at all (their own full-bleed player UI). */
         /** Reached from the player and part of it: the mini player has no business on any of them. */
-        val fullScreenRoutes = setOf(NowPlaying.route, Lyrics.route, Queue.route, Equalizer.route)
+        val fullScreenRoutes = setOf(NowPlaying.route, Lyrics.route, Queue.route, Equalizer.route, TastePicker.route)
 
         /** The pager's pages, in swipe order. Search is not one: it opens over whichever page is showing. */
         val topLevelRoutes = listOf(Home, Library)

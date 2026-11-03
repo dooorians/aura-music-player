@@ -181,7 +181,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
             .fillMaxWidth()
             .height(46.dp)
             .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.10f))
+            .background(Color.Black.copy(alpha = 0.26f))
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -219,7 +219,7 @@ private fun PlaylistRow(playlist: PlaylistSummary, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.10f)),
+            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.26f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

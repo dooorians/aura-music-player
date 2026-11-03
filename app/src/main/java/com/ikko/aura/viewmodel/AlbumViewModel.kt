@@ -37,6 +37,10 @@ data class AlbumUiState(
     val artist: String = "",
     val tracks: List<Track> = emptyList(),
     val isFavorite: Boolean = false,
+    /** The album's cover when no song carries it yet (a page that is still being fetched). */
+    val coverUri: android.net.Uri? = null,
+    /** The page is a placeholder: what the card it came from knows, in the places the real page will fill. */
+    val loading: Boolean = false,
 )
 
 /** Everything the album page needs before it can be drawn in one go. See [AlbumViewModel.page]. */
@@ -63,10 +67,10 @@ class AlbumViewModel @Inject constructor(
     private fun stateFor(tracks: List<Track>, favoriteIds: Set<Long>): AlbumUiState {
         val albumTracks = tracks
             .filter { it.albumId == albumId }
-            .sortedBy { it.trackNumber }
+            .sortedWith(compareBy({ it.discNumber }, { it.trackNumber }))
         return AlbumUiState(
-            title = albumTracks.firstOrNull()?.album ?: "",
-            artist = albumTracks.firstOrNull()?.artist ?: "",
+            title = albumTracks.firstOrNull()?.album?.let(com.ikko.aura.data.LibraryNormalizer::displayTitle) ?: "",
+            artist = com.ikko.aura.data.LibraryNormalizer.albumArtistOf(albumTracks.map { it.artist }),
             tracks = albumTracks,
             isFavorite = albumId in favoriteIds,
         )
@@ -128,7 +132,13 @@ class AlbumViewModel @Inject constructor(
                 emit(updated)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPageCache.get(albumId))
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            AlbumPageCache.get(albumId) ?: uiState.value.tracks.firstOrNull()?.let {
+                AlbumPage(AlbumTheme.Neutral, FileTags(null, it.year))
+            } ?: AlbumPage(AlbumTheme.Neutral, FileTags()),
+        )
 
     fun toggleFavorite() = favoritesStore.toggle(albumId)
 }

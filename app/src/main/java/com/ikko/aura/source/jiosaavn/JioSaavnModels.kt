@@ -51,5 +51,6 @@ data class RawSearchResponse(
 
 data class SaavnStream(
     val url: String,
-    val kbps: Int?
+    val kbps: Int?,
+    val fallbackUrl: String? = null,
 )

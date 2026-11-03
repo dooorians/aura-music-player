@@ -72,7 +72,11 @@ fun WavyProgressBar(
         label = "progress-height",
     )
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen },
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -113,8 +117,7 @@ fun WavyProgressBar(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = edgeInset)
-                    .height(height)
-                    .graphicsLayer(),
+                    .height(height),
             ) {
                 val value = dragFraction ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
                 val radius = CornerRadius(size.height / 2f)

@@ -32,6 +32,16 @@ class RecoPreferences @Inject constructor(@param:ApplicationContext private val 
     val seedArtists: Flow<List<String>> = context.settingsDataStore.data
         .map { it[seedsKey].orEmpty().split('\u0000').filter(String::isNotBlank) }.distinctUntilChanged()
 
+    private val pickedKey = stringPreferencesKey("reco_picked_artists")
+
+    /** Artists chosen in the taste picker: a stronger statement than a name typed in, and kept as long as they stay in the list. */
+    val pickedArtists: Flow<List<String>> = context.settingsDataStore.data
+        .map { it[pickedKey].orEmpty().split('\u0000').filter(String::isNotBlank) }.distinctUntilChanged()
+
+    suspend fun setPickedArtists(names: List<String>) {
+        context.settingsDataStore.edit { it[pickedKey] = names.map { n -> n.trim() }.filter(String::isNotEmpty).distinct().joinToString("\u0000") }
+    }
+
     private val versionKey = intPreferencesKey("reco_algorithm_version")
 
     /** The version of the selection rules the stored playlists were made with; 0 when none was. */

@@ -12,6 +12,14 @@ class ArtistNamesTest {
         assertEquals("rina sawayama", ArtistNames.key("Rina Sawayama - Topic"))
     }
 
+    @Test fun `stylized dollar signs in names match standard spelling`() {
+        assertEquals("kesha", ArtistNames.key("Ke\$ha"))
+        assertEquals(ArtistNames.key("Kesha"), ArtistNames.key("Ke\$ha"))
+        assertEquals(listOf("kesha"), ArtistNames.split("Ke\$ha"))
+        assertTrue(ArtistNames.anyCompatible(ArtistNames.split("Kesha"), ArtistNames.split("Ke\$ha")))
+        assertEquals("asap rocky", ArtistNames.key("A\$AP Rocky"))
+    }
+
     @Test fun `a credit line is split into its artists`() {
         assertEquals(listOf("grimes", "poppy", "kid cudi"), ArtistNames.split("Grimes, Poppy & Kid Cudi"))
         assertEquals(listOf("ac/dc"), ArtistNames.split("AC/DC"))
@@ -42,5 +50,26 @@ class ArtistNamesTest {
         assertTrue(ArtistNames.involves(ArtistNames.split("Tyler, The Creator & Kali Uchis"), "Tyler, The Creator & Kali Uchis", blocked))
         // But a single-word name is not matched inside another artist's name.
         assertFalse(ArtistNames.involves(ArtistNames.split("Steve Lacy"), "Steve Lacy", setOf("eve")))
+    }
+
+    @Test fun `the primary artist is the first one of the line`() {
+        assertEquals("Grimes", ArtistNames.primary("Grimes, Poppy"))
+        assertEquals("A", ArtistNames.primary("A feat. B"))
+        assertEquals("A", ArtistNames.primary("A Ft B"))
+        assertEquals("A", ArtistNames.primary("A Featuring B"))
+        // A name that merely starts with those letters is not a credit.
+        assertEquals("Mr Featherstone", ArtistNames.primary("Mr Featherstone"))
+        assertEquals("Simon & Garfunkel", ArtistNames.primary("Simon & Garfunkel"))
+        assertEquals("Simon", ArtistNames.primary("Simon & Garfunkel", beforeAmpersand = true))
+        assertEquals(ArtistNames.key("Beyoncé"), ArtistNames.primaryKey("Beyoncé - Topic feat. Jay-Z"))
+    }
+
+    @Test fun `a name in its own script with a Latin alias is asked about by the alias`() {
+        assertEquals("Reol", ArtistNames.askName("れをる (Reol)"))
+        assertEquals("Reol", ArtistNames.askName("れをる（Reol）"))
+        assertEquals("Radiohead", ArtistNames.askName("Radiohead"))
+        // A Latin name with a note in brackets is the artist's own name, not an alias of another script.
+        assertEquals("Beyoncé (Live)", ArtistNames.askName("Beyoncé (Live)"))
+        assertEquals("Mone (もね)", ArtistNames.askName("Mone (もね)"))
     }
 }

@@ -25,6 +25,7 @@ object SourceModule {
     fun provideTrackResolver(
         local: MediaStoreSource,
         ytm: YtmSource,
+        ytmClient: com.ikko.aura.source.ytm.YtmClient,
         bindings: CatalogBindings,
         remote: RemoteSources,
         downloads: YtmDownloads,
@@ -42,11 +43,17 @@ object SourceModule {
                 else -> null
             }
         }, { it }, { title, artist ->
-            // Fallback dynamically: query JioSaavn!
-            val results = runCatching { jioSaavnClient.searchSongs("$title $artist") }.getOrNull() ?: emptyList()
-            results.mapNotNull { res -> 
-                jioSaavnSource.playable(res.id)
-            }
+            val query = "$title $artist".trim()
+            val saavn = runCatching { jioSaavnClient.searchSongs(query) }.getOrNull().orEmpty()
+                .take(3)
+                .mapNotNull { res -> jioSaavnSource.playable(res.id) }
+            val ytmHits = if (ytmClient.isEnabled()) {
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ytmClient.search(query).songs } }
+                    .getOrNull().orEmpty()
+                    .take(3)
+                    .mapNotNull { s -> ytm.playable(s.videoId) }
+            } else emptyList()
+            saavn + ytmHits
         })
     }
 }

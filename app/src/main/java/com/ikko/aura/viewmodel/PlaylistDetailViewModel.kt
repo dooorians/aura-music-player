@@ -34,6 +34,9 @@ class PlaylistDetailViewModel @Inject constructor(
     val detail: StateFlow<PlaylistDetail?> = playlistRepository.playlistDetail(playlistId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val customArtwork: StateFlow<String?> = playlistRepository.playlistCustomArtwork(playlistId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     /** The Home card this playlist came from, when it is one of the weekly ones: its colours are the page's. */
     val autoKey: StateFlow<String?> = kotlinx.coroutines.flow.flow { emit(playlistRepository.autoKeyOf(playlistId)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -82,5 +85,9 @@ class PlaylistDetailViewModel @Inject constructor(
 
     fun delete() {
         viewModelScope.launch { playlistRepository.deletePlaylist(playlistId) }
+    }
+
+    fun setCustomArtwork(uri: String?) {
+        viewModelScope.launch { playlistRepository.setPlaylistCustomArtwork(playlistId, uri) }
     }
 }
