@@ -112,4 +112,11 @@ class HomeSectionsTest {
         assertEquals(2, row.spare.size)
         assertTrue(row.spare.none { s -> row.albums.any { it.key == s.key } })
     }
+
+    @Test fun effectiveCoverPrefersAlbumCoverOverSongThumbnail() {
+        val withAlbum = SectionAlbum("T", "A", ref = "ref", artworkUrl = "http://song-thumb", albumCoverUrl = "http://album-cover")
+        assertEquals("http://album-cover", withAlbum.effectiveCover())
+        val withoutAlbum = SectionAlbum("T", "A", artworkUrl = "http://song-thumb")
+        assertEquals("http://song-thumb", withoutAlbum.effectiveCover())
+    }
 }

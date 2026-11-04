@@ -161,7 +161,7 @@ fun HomeScreen(
             }
             state.sections.take(2).forEach { section ->
                 section.albums.forEach { item ->
-                    val uri = item.album?.artworkUri ?: item.artworkUrl.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse)
+                    val uri = item.album?.artworkUri ?: item.effectiveCover()?.let(android.net.Uri::parse)
                     val key = item.album?.id?.toString() ?: "sec:${item.key}"
                     if (uri != null) {
                         launch {
@@ -484,7 +484,7 @@ private fun HomeSectionBlock(
                             )
                         } else {
                             AlbumArt(
-                                uri = local?.artworkUri ?: item.artworkUrl.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
+                                uri = local?.artworkUri ?: item.effectiveCover()?.let(android.net.Uri::parse),
                                 contentDescription = item.title, shape = coverShape, modifier = Modifier.fillMaxSize(),
                                 targetSizeDp = u * 316f, cacheKey = local?.id?.toString() ?: "sec:${item.key}",
                             )

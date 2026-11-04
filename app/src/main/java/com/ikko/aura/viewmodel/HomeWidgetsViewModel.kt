@@ -615,9 +615,32 @@ class HomeWidgetsViewModel @Inject constructor(
             val seed = rotationSeed.value
             sectionsSettled.first { it }
             val live = uiState.first { it.loaded && it.sectionsSeed == seed && it.sections.isNotEmpty() }
-            sectionsHeld.value = live.sections
+            sectionsHeld.value = enrichSectionCovers(live.sections)
         }
     }
+
+    /**
+     * External tiles show the album's own cover once it is known, not the thumbnail of the song they were made from
+     * (a video frame, a single's art): what the tile promises is the album, so it wears the album's cover. Resolved in
+     * the background, a few at a time, and tolerant of failure — without it the tile keeps the song's artwork.
+     */
+    private suspend fun enrichSectionCovers(sections: List<com.ikko.aura.data.home.HomeSection>): List<com.ikko.aura.data.home.HomeSection> =
+        withContext(Dispatchers.IO) {
+            val gate = kotlinx.coroutines.sync.Semaphore(4)
+            sections.map { section ->
+                section.copy(albums = section.albums.map { item ->
+                    val ref = item.ref
+                    // Only an external album with a YouTube Music reference and no cover yet: local albums already
+                    // carry their own, an artist tile shows a photo, and a remote source's own art is already the album's.
+                    if (item.album != null || item.isArtist || item.playsItems || ref.isNullOrBlank() || ref.contains(':') || item.albumCoverUrl != null) {
+                        item
+                    } else {
+                        val cover = gate.withPermit { runCatching { ytmClient.album(ref).ref.thumbnailUrl }.getOrNull() }
+                        if (cover.isNullOrBlank()) item else item.copy(albumCoverUrl = cover)
+                    }
+                })
+            }
+        }
 
     init { freezeSectionsWhenReady() }
 

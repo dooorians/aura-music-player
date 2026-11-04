@@ -14,6 +14,8 @@ data class SectionAlbum(
     val artist: String,
     val ref: String? = null,
     val artworkUrl: String = "",
+    /** The album's own cover (resolved from its reference), when known; else the song's artwork is used. */
+    val albumCoverUrl: String? = null,
     val album: Album? = null,
     /** The songs of an external album that has no page of its own to open (they are played instead). */
     val items: List<RecoItem> = emptyList(),
@@ -27,6 +29,9 @@ data class SectionAlbum(
     // An album with neither a page reference nor songs (a chart's) is told apart by its name and its artist's.
     val key: String get() = album?.let { "local:${it.id}" } ?: ref?.let { "ref:$it" } ?: "songs:${items.firstOrNull()?.trackId ?: sameAs}"
     val sameAs: String get() = title.trim().lowercase() + "\u0000" + artist.trim().lowercase()
+
+    /** The album's own cover when known; else the song's artwork the tile was built from. */
+    fun effectiveCover(): String? = albumCoverUrl ?: artworkUrl.takeIf { it.isNotBlank() }
 }
 
 /**
