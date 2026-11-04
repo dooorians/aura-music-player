@@ -1069,8 +1069,8 @@ fun Modifier.heroTarget(
 
 /**
  * What a page brings with it (the line under the title, the actions, the rows): when it comes with a trip it rises
- * 28 design px and appears, 420 ms, [index] steps of 50 ms after 240 ms; it leaves in 140 ms, 16 px down, on the way
- * back. Outside a trip it is simply there.
+ * 28 design px and appears, 280 ms for the header and 300 ms for the rows, [index] steps of 18/12 ms from 90/170 ms; it
+ * leaves in 140 ms, 16 px down, on the way back. Outside a trip it is simply there.
  */
 @Composable
 fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current, rows: Boolean = false): Modifier {
@@ -1088,9 +1088,11 @@ fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current, rows: Boo
     if (fromTrip) {
         LaunchedEffect(Unit) {
             val elapsed = (System.nanoTime() - hero.tripStartNanos) / 1_000_000L
-            val wait = if (rows) 300L + index.coerceIn(0, 7) * 26L else 180L + index.coerceIn(0, 9) * 40L
+            // Tight, so the page reads as arriving in one gesture: the words, the actions and the rows are still a beat
+            // apart (the wave), but no group waits its turn visibly.
+            val wait = if (rows) 170L + index.coerceIn(0, 7) * 12L else 90L + index.coerceIn(0, 9) * 18L
             delay((wait - elapsed).coerceAtLeast(0L))
-            p.animateTo(1f, tween(if (rows) 420 else 360, easing = if (rows) FastOutSlowInEasing else EaseOut))
+            p.animateTo(1f, tween(if (rows) 300 else 280, easing = if (rows) FastOutSlowInEasing else EaseOut))
         }
     }
     val unitPx = with(LocalDensity.current) { designUnit().toPx() }
