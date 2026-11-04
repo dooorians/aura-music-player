@@ -11,7 +11,7 @@ import javax.inject.Singleton
  * session's rhythm ([SessionContext.coherencePenalty]). A song with no usable analysis answers nothing, and is not asked again.
  */
 @Singleton
-class AcousticBridge @Inject constructor(private val reader: AnalysisReader) {
+class AcousticBridge @Inject constructor(private val reader: AnalysisReader, private val meta: TrackMetaDao) {
     /** Song id → what it sounds like; [NONE] for a song looked up and found without an analysis. */
     private val known = ConcurrentHashMap<String, Acoustic>()
 
@@ -21,7 +21,9 @@ class AcousticBridge @Inject constructor(private val reader: AnalysisReader) {
         val missing = ids.filter { !known.containsKey(it) }
         if (missing.isNotEmpty()) {
             val found = reader.analysesFor(missing)
-            missing.forEach { id -> known[id] = found[id]?.let(::summarize) ?: NONE }
+            // A file with no analysis yet may still carry its tempo in its tags.
+            val tagged = runCatching { meta.allTags() }.getOrDefault(emptyList()).filter { it.bpm > 0.0 }.associate { it.trackId to it.bpm }
+            missing.forEach { id -> known[id] = found[id]?.let(::summarize) ?: tagged[id]?.let { Acoustic(it, 0.0) } ?: NONE }
         }
         return ids.mapNotNull { id -> known[id]?.takeIf { it !== NONE }?.let { id to it } }.toMap()
     }

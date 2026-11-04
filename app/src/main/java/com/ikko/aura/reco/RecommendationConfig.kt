@@ -16,6 +16,8 @@ object RecommendationConfig {
     const val INSTANT_SKIP = -2.5
     /** Share of a song's change that reaches its artist. */
     const val ARTIST_ECHO = 0.3
+    /** What was loved fades when it is not played: a score loses half of itself after this many days without a listen. */
+    const val AFFINITY_HALF_LIFE_DAYS = 150.0
 
     const val COMPLETED_FRACTION = 0.8
     const val PARTIAL_FRACTION = 0.3

@@ -39,6 +39,8 @@ data class TrackStatsEntity(
     val artistKey: String = "",
     val albumKey: String = "",
     val genres: String = "",
+    /** [TrackIdentity.canonicalKey] of the song: the same recording under another id (a file, a stream) shares it. */
+    val canonicalKey: String = "",
 )
 
 /** What is known of an artist: the listener's affinity, and what Last.fm says of the sound (kept for 30 days). */
@@ -51,6 +53,8 @@ data class ArtistMetaEntity(
     /** The tags, cleaned, as a JSON array of strings. */
     val genresJson: String = "[]",
     val lastFmFetchedTimestamp: Long = 0L,
+    /** When [affinityScore] was last fed, for its fading; 0 for a score kept from before. */
+    val affinityUpdatedAt: Long = 0L,
 )
 
 /** The graph of artists Last.fm lists as close, restricted to those of the library: a row is "target is close to source". */

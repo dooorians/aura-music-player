@@ -37,6 +37,7 @@ class LocalMusicRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val catalog: CatalogDao,
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
+    private val tagScanner: com.ikko.aura.reco.TrackTagScanner,
 ) : MusicRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -129,6 +130,8 @@ class LocalMusicRepository @Inject constructor(
             hasScanned = true
             // The covers found missing are looked for again: a file may have been given one since.
             com.ikko.aura.util.AbsentCovers.clear()
+            // The files' own tags (identifiers, ReplayGain, every genre, tempo), read once in the background.
+            tagScanner.scan(initial)
             enrichAudioProperties(initial, scan.stamps, cached)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

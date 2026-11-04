@@ -96,8 +96,10 @@ interface PlaylistDao {
         com.ikko.aura.reco.ArtistMetaEntity::class,
         com.ikko.aura.reco.ArtistSimilarityEntity::class,
         com.ikko.aura.reco.VerifiedDiscographyEntity::class,
+        com.ikko.aura.reco.TrackTagsEntity::class,
+        com.ikko.aura.reco.ArtistIdentityEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -110,6 +112,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun recoDao(): com.ikko.aura.reco.RecoDao
     abstract fun smartDao(): com.ikko.aura.reco.SmartDao
     abstract fun verifiedDiscographyDao(): com.ikko.aura.reco.VerifiedDiscographyDao
+    abstract fun trackMetaDao(): com.ikko.aura.reco.TrackMetaDao
 }
 
 /**

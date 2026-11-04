@@ -30,9 +30,11 @@ class SmartTracker @Inject constructor(
         addedTimestamp = if (track.addedAtSec > 0) track.addedAtSec * 1000 else now,
         artistKey = ArtistNames.primaryKey(track.artist),
         albumKey = track.albumId.toString(),
+        canonicalKey = TrackIdentity.canonicalKey(track.artist, track.title),
     )
 
-    private suspend fun statsOf(track: Track, now: Long) = dao.stats(track.id) ?: fresh(track, now)
+    private suspend fun statsOf(track: Track, now: Long) =
+        (dao.stats(track.id) ?: fresh(track, now)).let { if (it.canonicalKey.isEmpty()) it.copy(canonicalKey = TrackIdentity.canonicalKey(track.artist, track.title)) else it }
 
     private suspend fun genresOf(artistKey: String): Set<String> =
         dao.artist(artistKey)?.genresJson?.let { runCatching { JSONArray(it) }.getOrNull() }
@@ -42,7 +44,9 @@ class SmartTracker @Inject constructor(
     private suspend fun echo(track: Track, artistKey: String, delta: Double, blocked: Boolean? = null) {
         if (artistKey.isEmpty()) return
         val meta = dao.artist(artistKey) ?: ArtistMetaEntity(artistKey, ArtistNames.primary(track.artist))
-        dao.putArtist(meta.copy(affinityScore = meta.affinityScore + delta * RecommendationConfig.ARTIST_ECHO, isBlocked = blocked ?: meta.isBlocked))
+        val now = System.currentTimeMillis()
+        val kept = AffinityDecay.of(meta.affinityScore, meta.affinityUpdatedAt, now)
+        dao.putArtist(meta.copy(affinityScore = kept + delta * RecommendationConfig.ARTIST_ECHO, affinityUpdatedAt = now, isBlocked = blocked ?: meta.isBlocked))
     }
 
     /**
@@ -96,7 +100,7 @@ class SmartTracker @Inject constructor(
                 mutex.withLock {
                     val key = ArtistNames.key(name)
                     val meta = dao.artist(key) ?: ArtistMetaEntity(key, name)
-                    dao.putArtist(meta.copy(affinityScore = maxOf(meta.affinityScore, PICKED_AFFINITY), isBlocked = false))
+                    dao.putArtist(meta.copy(affinityScore = maxOf(meta.affinityScore, PICKED_AFFINITY), affinityUpdatedAt = System.currentTimeMillis(), isBlocked = false))
                 }
                 enricher.get().listened(name)
             }
@@ -110,7 +114,8 @@ class SmartTracker @Inject constructor(
                 mutex.withLock {
                     val key = ArtistNames.key(name)
                     val meta = dao.artist(key) ?: ArtistMetaEntity(key, name)
-                    dao.putArtist(meta.copy(affinityScore = maxOf(meta.affinityScore, 0.0) + RecommendationConfig.LIKE, isBlocked = false))
+                    val now = System.currentTimeMillis()
+                    dao.putArtist(meta.copy(affinityScore = maxOf(AffinityDecay.of(meta.affinityScore, meta.affinityUpdatedAt, now), 0.0) + RecommendationConfig.LIKE, affinityUpdatedAt = now, isBlocked = false))
                 }
                 enricher.get().listened(name)
             }

@@ -82,6 +82,10 @@ object SmartRanker {
         return (here + k * prior) / (total + k) - prior
     }
 
+    /** A song's score as it stands today: what it earned, faded by the time since it was last played. */
+    fun effectiveAffinity(s: TrackStatsEntity?, nowMs: Long): Double =
+        if (s == null) 0.0 else AffinityDecay.of(s.affinityScore, s.lastPlayedTimestamp, nowMs)
+
     // --- phase 2 ---
 
     private fun jaccard(a: Set<String>, b: Set<String>): Double {
@@ -102,14 +106,14 @@ object SmartRanker {
 
     fun score(entries: List<SmartEntry>, ctx: SmartContext): List<Scored> {
         val maxCooc = ctx.cooccurrence.values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
-        val albumAffinity = entries.groupBy { it.albumKey }.mapValues { (_, g) -> g.map { it.stats?.affinityScore ?: 0.0 }.average() }
+        val albumAffinity = entries.groupBy { it.albumKey }.mapValues { (_, g) -> g.map { effectiveAffinity(it.stats, ctx.nowMs) }.average() }
         val c = RecommendationConfig
         return entries.map { e ->
             val s = e.stats
             val playCount = s?.playCount ?: 0
             val completion = smoothedCompletion(s)
             val like = if (s?.isLiked == true) c.LIKE_BONUS else 0.0
-            val trackPart = (((s?.affinityScore ?: 0.0) + like) * (0.5 + completion)) * c.W_TRACK
+            val trackPart = ((effectiveAffinity(s, ctx.nowMs) + like) * (0.5 + completion)) * c.W_TRACK
             val artistPart = ((ctx.artistAffinity[e.artistKey] ?: 0.0) * c.ARTIST_PART + (albumAffinity[e.albumKey] ?: 0.0) * c.ALBUM_PART) * c.W_ARTIST_ALBUM
             // Affinity is what the listener loves for good; availability is how long it has been since they heard it. A favourite
             // just heard keeps only part of its score until the hours bring it back, so the same few never loop.

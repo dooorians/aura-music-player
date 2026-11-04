@@ -2,6 +2,7 @@ package com.ikko.aura.reco
 
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.math.pow
 
 /** What happened to a song when it was left. */
 data class ListenEvent(
@@ -26,6 +27,19 @@ enum class DayPart { MORNING, AFTERNOON, EVENING, NIGHT;
     }
 }
 
+/** How a score fades with the time since it was last fed. */
+object AffinityDecay {
+    private const val DAY_MS = 86_400_000.0
+
+    /** 1.0 when never fed (nothing to fade) or fed just now; 0.5 after one half-life. */
+    fun factor(sinceMs: Long, nowMs: Long): Double {
+        if (sinceMs <= 0L || nowMs <= sinceMs) return 1.0
+        return 0.5.pow((nowMs - sinceMs) / DAY_MS / RecommendationConfig.AFFINITY_HALF_LIFE_DAYS)
+    }
+
+    fun of(score: Double, sinceMs: Long, nowMs: Long): Double = score * factor(sinceMs, nowMs)
+}
+
 /** The scale of [RecommendationConfig] applied to one listen. Pure. */
 object AffinityScorer {
 
@@ -34,7 +48,8 @@ object AffinityScorer {
     fun apply(before: TrackStatsEntity, e: ListenEvent, zone: ZoneId = ZoneId.systemDefault()): Result {
         val fraction = if (e.durationMs > 0) (e.playedMs.toDouble() / e.durationMs).coerceIn(0.0, 1.0) else 0.0
         val skipped = e.transition == Transition.USER_SKIP || e.transition == Transition.UNKNOWN
-        var s = before
+        // What was earned long ago has faded by now: the new listen adds to what is left of it.
+        var s = before.copy(affinityScore = AffinityDecay.of(before.affinityScore, before.lastPlayedTimestamp, e.atMs))
         var delta = 0.0
         var counted = true
         when {

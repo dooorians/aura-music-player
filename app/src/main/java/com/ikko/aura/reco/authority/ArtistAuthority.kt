@@ -30,6 +30,8 @@ class ArtistAuthority(
     private val lastFmTopTracksProvider: (suspend (String) -> List<String>)? = null,
     /** The identities settled when the listener chose their artists: asked first, before anything is guessed by name. */
     private val identities: ArtistIdentityStore? = null,
+    /** What the catalogues said before, kept on the device between launches. */
+    private val persisted: ArtistResolutionStore? = null,
 ) {
     @Inject
     constructor(
@@ -37,6 +39,7 @@ class ArtistAuthority(
         deezerClient: DeezerClient,
         lastFm: com.ikko.aura.lastfm.LastFm,
         identities: ArtistIdentityPrefs,
+        persisted: ArtistResolutionRoom,
     ) : this(
         mbClient = mbClient,
         deezerClient = deezerClient,
@@ -44,6 +47,7 @@ class ArtistAuthority(
         lastFmMbidProvider = { lastFm.mbid(it) },
         lastFmTopTracksProvider = { lastFm.topTracks(it).orEmpty() },
         identities = identities,
+        persisted = persisted,
     )
     private val cache = ConcurrentHashMap<String, DisambiguatedArtist>()
 
@@ -59,6 +63,8 @@ class ArtistAuthority(
         cache[key]?.let { return it }
         // The artist the listener chose, settled then: not guessed again.
         identities?.get(key)?.let { cache[key] = it; return it }
+        // Resolved before, in a previous launch: no need to ask MusicBrainz again.
+        persisted?.let { store -> runCatching { store.get(key, System.currentTimeMillis()) }.getOrNull() }?.let { cache[key] = it; return it }
 
         // 1. Gather external signals: Last.fm MBID and top tags
         val lastFmMbid = runCatching { lastFmMbidProvider?.invoke(clean) }.getOrNull()
@@ -96,6 +102,7 @@ class ArtistAuthority(
         )
 
         cache[key] = resolved
+        persisted?.let { store -> runCatching { store.put(key, resolved, System.currentTimeMillis()) } }
         return resolved
     }
 
