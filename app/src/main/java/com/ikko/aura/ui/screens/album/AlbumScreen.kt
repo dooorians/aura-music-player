@@ -4,6 +4,7 @@ import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.suppressEdgeBackRipple
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -674,6 +675,7 @@ private fun AlbumHeader(
                 Box(Modifier.height(u * 48f), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.45f).height(u * 30f)) }
                 Box(Modifier.height(u * 40f), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.3f).height(u * 24f)) }
               } else {
+                val titleWidth = remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 Text(
                     text = uiState.title.trim(),
                     // The very TextStyle the hero's copy uses. Built from loose parameters, the text is merged with the
@@ -684,11 +686,11 @@ private fun AlbumHeader(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        // The title owns its whole line, not only the width its glyphs happen to cover: the hero lays a
-                        // copy out in the bounds it is given, and on the drawn width alone it kept "Spéciale)" on the
-                        // first line while the page wraps it onto a second - the last word jumping as the copy landed.
-                        .fillMaxWidth()
-                        .heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
+                        // The column the words are laid out in, handed to the copy. The bounds the title paints are only
+                        // its widest line, a hair narrower than that column, and a copy laid out on that hair broke its
+                        // last word onto another line than the page's - the jump seen on the way in and on the way back.
+                        .onGloballyPositioned { titleWidth.intValue = it.size.width }
+                        .heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2, widthPx = titleWidth.intValue)),
                 )
                 Text(
                     text = uiState.artist.trim(),

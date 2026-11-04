@@ -169,8 +169,14 @@ class HeroText(
     val maxLines: Int = 1,
     val align: TextAlign = TextAlign.Start,
     val clip: Rect = OPEN_CLIP,
+    /**
+     * The width the element lays its text out in (its constraint), when that differs from the bounds it draws: a title
+     * that wraps owns its whole column but only paints the widest of its lines, and a copy laid out on the painted width
+     * would keep on one line the words the page wraps onto a second.
+     */
+    val widthPx: Int = 0,
 ) {
-    fun at(r: Rect, c: Rect = clip) = HeroText(text, r, style, color, maxLines, align, c)
+    fun at(r: Rect, c: Rect = clip) = HeroText(text, r, style, color, maxLines, align, c, widthPx)
 }
 
 /** A place the hero can start from, kept up to date by [heroAnchor]. */
@@ -1542,7 +1548,8 @@ private data class TextPlacement(val x: Float, val y: Float, val scaleX: Float, 
  * that rounds down; one pixel over keeps the copy on the same lines as the element, no more (more would let it wrap
  * differently and jump when the real one takes over).
  */
-private fun textWidth(t: HeroText): Int = kotlin.math.ceil(t.rect.width).toInt().coerceAtLeast(1) + 1
+private fun textWidth(t: HeroText): Int =
+    if (t.widthPx > 0) t.widthPx else kotlin.math.ceil(t.rect.width).toInt().coerceAtLeast(1) + 1
 
 @Composable
 private fun HeroTextLayer(
