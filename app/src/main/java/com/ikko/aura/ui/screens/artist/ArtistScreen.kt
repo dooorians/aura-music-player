@@ -208,7 +208,16 @@ fun ArtistPageContent(
                                     heroKey ?: "",
                                     text = com.ikko.aura.ui.components.HeroText(
                                         uiState.name, androidx.compose.ui.geometry.Rect.Zero,
-                                        MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold), AuraColors.TextPrimary,
+                                        // The very style of the title below: the copy must measure exactly like it, or
+                                        // the last letters move during the trip and snap back when the real one lands.
+                                        androidx.compose.ui.text.TextStyle(
+                                            fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = com.ikko.aura.ui.components.designSp(66f),
+                                            lineHeight = com.ikko.aura.ui.components.designSp(76f),
+                                            letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f),
+                                        ),
+                                        AuraColors.TextPrimary,
                                         maxLines = 2,
                                     ),
                                 ),
