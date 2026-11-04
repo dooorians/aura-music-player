@@ -235,4 +235,22 @@ class DeezerClientTest {
         assertEquals(listOf("Nevermind"), albums.map { it.title })
         assertEquals("Nirvana", albums.single().artist)
     }
+
+    @Test
+    fun readsTheTrackBpm() = runBlocking {
+        val client = DeezerClient(httpGet = { url ->
+            assertTrue(url.contains("album/1/tracks"))
+            """
+            {
+              "data": [
+                { "id": 1, "title": "Upbeat", "title_short": "Upbeat", "duration": 180, "bpm": 128, "artist": { "id": 157, "name": "Lady Gaga" } }
+              ]
+            }
+            """.trimIndent()
+        })
+
+        val tracks = client.getAlbumTracks(1)
+        assertEquals(1, tracks.size)
+        assertEquals(128, tracks[0].bpm)
+    }
 }

@@ -44,6 +44,8 @@ data class DeezerTrackInfo(
     val albumId: Long? = null,
     val albumTitle: String? = null,
     val durationSec: Int = 0,
+    /** The tempo Deezer states, when it does; 0 means none was given. */
+    val bpm: Int = 0,
 )
 
 @Singleton
@@ -297,6 +299,7 @@ class DeezerClient(
                     albumId = albumObj?.optLong("id"),
                     albumTitle = albumObj?.optString("title"),
                     durationSec = item.optInt("duration", 0),
+                    bpm = item.optInt("bpm", 0),
                 )
             }
             result.also { topTracksCache[artistId] = it }
@@ -330,6 +333,7 @@ class DeezerClient(
                     artistName = artistObj?.optString("name").orEmpty(),
                     albumId = albumId,
                     durationSec = item.optInt("duration", 0),
+                    bpm = item.optInt("bpm", 0),
                 )
             }
             result.also { albumTracksCache[albumId] = it }
