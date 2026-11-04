@@ -97,7 +97,7 @@ interface PlaylistDao {
         com.ikko.aura.reco.ArtistSimilarityEntity::class,
         com.ikko.aura.reco.VerifiedDiscographyEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {

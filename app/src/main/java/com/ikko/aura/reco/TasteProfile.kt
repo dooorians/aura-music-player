@@ -24,6 +24,8 @@ data class ListenRecord(
     val context: String?,
     /** Credits a source lists apart from the artist field. */
     val extraCredits: List<String> = emptyList(),
+    /** Who chose it: the listener, a queue they started, or the automix / a radio. */
+    val origin: PlayOrigin = PlayOrigin.QUEUE,
 )
 
 /** A song the listener put somewhere on purpose (a heart, a playlist). */
@@ -148,6 +150,10 @@ object TasteProfileBuilder {
     // Weights of a signal, in "one full listen" units.
     private const val W_COMPLETED = 1.0
     private const val W_REPLAY = 0.3
+    /** A song the app queued by itself and the listener let play: they did not choose it, so it is a weak vote (otherwise the automix feeds on itself). */
+    private const val W_COMPLETED_AUTOPLAY = 0.35
+    /** A song the listener went and chose, heard to the end. */
+    private const val W_CHOSEN = 0.5
     private const val W_FAVORITE = 2.0
     private const val W_PLAYLIST = 1.2
     private const val W_LIKE = 3.0
@@ -229,7 +235,8 @@ object TasteProfileBuilder {
             when (l.outcome) {
                 Outcome.COMPLETED -> {
                     val n = completionsByTrack.merge(l.trackId, 1, Int::plus)!!
-                    val w = W_COMPLETED + if (n > 1) W_REPLAY else 0.0
+                    val base = when (l.origin) { PlayOrigin.AUTOPLAY -> W_COMPLETED_AUTOPLAY; PlayOrigin.MANUAL -> W_COMPLETED + W_CHOSEN; PlayOrigin.QUEUE -> W_COMPLETED }
+                    val w = base + if (n > 1) W_REPLAY else 0.0
                     credit(l.artist, l.extraCredits, l.title, w, age)
                     evidence += w
                     seedWeights.merge(l.trackId, SeedTrack(l.title, l.artist, w, l.trackId)) { a, b -> SeedTrack(a.title, a.artist, a.weight + b.weight, a.trackId) }

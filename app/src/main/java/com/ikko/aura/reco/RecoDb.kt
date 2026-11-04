@@ -1,5 +1,6 @@
 package com.ikko.aura.reco
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
@@ -26,6 +27,8 @@ data class ListenEntity(
     val context: String?,
     /** Credits a source listed apart from the artist field, joined by NUL. */
     val extra: String,
+    /** Who chose the song: a [PlayOrigin] name. A listen the automix queued says little of the listener's taste. */
+    @ColumnInfo(defaultValue = "QUEUE") val origin: String = PlayOrigin.QUEUE.name,
 )
 
 /** An explicit answer: [kind] is a [FeedbackKind], [subject] a track id or, for a block, the artist's name. */
@@ -224,6 +227,13 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
             "CREATE TABLE IF NOT EXISTS verified_discography (artistKey TEXT NOT NULL PRIMARY KEY, " +
                 "tracksJson TEXT NOT NULL, albumsJson TEXT NOT NULL, fetchedAtMs INTEGER NOT NULL)",
         )
+    }
+}
+
+/** Who chose each listen, kept beside it; the listens of the past are read as the queue's. */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE reco_listens ADD COLUMN origin TEXT NOT NULL DEFAULT 'QUEUE'")
     }
 }
 

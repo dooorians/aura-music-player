@@ -47,7 +47,7 @@ object SmartRanker {
     fun hardFilter(all: List<SmartEntry>, ctx: SmartContext): List<SmartEntry> {
         val never = all.filter { e ->
             val s = e.stats
-            !(s?.isDisliked == true) && !((s?.consecutiveSkips ?: 0) >= RecommendationConfig.MAX_CONSECUTIVE_SKIPS) && e.artistKey !in ctx.blockedArtists
+            !(s?.isDisliked == true) && !exiled(s, ctx.nowMs) && e.artistKey !in ctx.blockedArtists
         }
         val recentIds = ctx.session.recentTrackIds()
         val lastArtists = ctx.session.lastArtists()
@@ -62,6 +62,24 @@ object SmartRanker {
         val noDayRule = never.filter { it.trackId != ctx.current?.trackId && rested(it) && it.trackId !in recentIds }
         if (noDayRule.isNotEmpty()) return noDayRule
         return never.filter { it.trackId != ctx.current?.trackId }
+    }
+
+    /** Skipped for good, but only for a while: after [RecommendationConfig.SKIP_EXILE_MS] without hearing it, the song gets another chance. */
+    private fun exiled(s: TrackStatsEntity?, nowMs: Long): Boolean =
+        s != null && s.consecutiveSkips >= RecommendationConfig.MAX_CONSECUTIVE_SKIPS &&
+            (s.lastPlayedTimestamp == 0L || nowMs - s.lastPlayedTimestamp < RecommendationConfig.SKIP_EXILE_MS)
+
+    /** Completed share of the plays, pulled toward a typical listener's with a few imaginary plays: 1 of 1 is not 100 %. */
+    fun smoothedCompletion(s: TrackStatsEntity?): Double {
+        val c = RecommendationConfig
+        return ((s?.completedCount ?: 0) + c.COMPLETION_PRIOR * c.COMPLETION_PRIOR_PLAYS) / ((s?.playCount ?: 0) + c.COMPLETION_PRIOR_PLAYS)
+    }
+
+    /** How far a habit is above (or below) chance: [here] of [total] against the share [prior] expected, shrunk by [RecommendationConfig.SMOOTHING_PLAYS]. */
+    fun habitLift(here: Int, total: Int, prior: Double): Double {
+        if (total == 0) return 0.0
+        val k = RecommendationConfig.SMOOTHING_PLAYS
+        return (here + k * prior) / (total + k) - prior
     }
 
     // --- phase 2 ---
@@ -89,7 +107,7 @@ object SmartRanker {
         return entries.map { e ->
             val s = e.stats
             val playCount = s?.playCount ?: 0
-            val completion = (s?.completedCount ?: 0).toDouble() / maxOf(1, playCount)
+            val completion = smoothedCompletion(s)
             val like = if (s?.isLiked == true) c.LIKE_BONUS else 0.0
             val trackPart = (((s?.affinityScore ?: 0.0) + like) * (0.5 + completion)) * c.W_TRACK
             val artistPart = ((ctx.artistAffinity[e.artistKey] ?: 0.0) * c.ARTIST_PART + (albumAffinity[e.albumKey] ?: 0.0) * c.ALBUM_PART) * c.W_ARTIST_ALBUM
@@ -112,13 +130,13 @@ object SmartRanker {
                 DayPart.MORNING -> s?.playsMorning; DayPart.AFTERNOON -> s?.playsAfternoon
                 DayPart.EVENING -> s?.playsEvening; DayPart.NIGHT -> s?.playsNight
             } ?: 0
-            val hourPart = if (total == 0) 0.0 else here.toDouble() / total * c.W_HOUR
+            val hourPart = habitLift(here, total, 0.25) * c.W_HOUR
 
             val weekdayPlays = s?.playsWeekday ?: 0
             val weekendPlays = s?.playsWeekend ?: 0
             val weekTotal = weekdayPlays + weekendPlays
             val weekHere = if (ctx.weekend) weekendPlays else weekdayPlays
-            val weekPart = if (weekTotal == 0) 0.0 else weekHere.toDouble() / weekTotal * c.W_WEEK
+            val weekPart = habitLift(weekHere, weekTotal, if (ctx.weekend) 1.0 - c.WEEKDAY_SHARE else c.WEEKDAY_SHARE) * c.W_WEEK
 
             val lastPlayed = s?.lastPlayedTimestamp ?: 0L
             var bonus = 0.0
@@ -153,7 +171,8 @@ object SmartRanker {
         // Close to what is playing (by Last.fm or by the playlists: the top fifth of those that are close at all), yet little played.
         val closeness = scored.map { maxOf(it.similarity, it.cooc) }.filter { it > 0.0 }.sortedDescending()
         val threshold = closeness.getOrNull(((closeness.size * c.EXPLORE_TOP_SHARE).toInt() - 1).coerceAtLeast(0))
-        val explore = if (threshold == null) emptyList() else sorted.filter {
+        // No graph to say what is close (no Last.fm data, no playlists yet): the exploration still happens, among what is little played.
+        val explore = if (threshold == null) sorted.filter { (it.entry.stats?.playCount ?: 0) < c.EXPLORE_MAX_PLAYS }.take(c.POOL_SIZE) else sorted.filter {
             maxOf(it.similarity, it.cooc) >= threshold && (it.entry.stats?.playCount ?: 0) < c.EXPLORE_MAX_PLAYS
         }.take(c.POOL_SIZE)
         val gems = sorted.filter {

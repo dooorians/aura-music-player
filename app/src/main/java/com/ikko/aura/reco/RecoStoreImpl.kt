@@ -61,6 +61,7 @@ class RecoStoreImpl @Inject constructor(
                     outcome = runCatching { Outcome.valueOf(e.outcome) }.getOrDefault(Outcome.INTERRUPTED),
                     atMs = e.endedAtMs, context = e.context,
                     extraCredits = e.extra.split('\u0000').filter { it.isNotEmpty() },
+                    origin = runCatching { PlayOrigin.valueOf(e.origin) }.getOrDefault(PlayOrigin.QUEUE),
                 )
             },
             favorites = marked(playlists.favoriteEntries()),

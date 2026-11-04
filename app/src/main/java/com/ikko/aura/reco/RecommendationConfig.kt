@@ -23,6 +23,8 @@ object RecommendationConfig {
     const val QUICK_SKIP_MS = 15_000L
     /** This many skips in a row, without a complete listen, take a song out. */
     const val MAX_CONSECUTIVE_SKIPS = 5
+    /** The exile of [MAX_CONSECUTIVE_SKIPS] lasts this long from the last time the song was left: a mood passes, the song comes back. */
+    const val SKIP_EXILE_MS = 60L * 86_400_000L
 
     // --- session ---
     const val SESSION_TRACKS = 50
@@ -62,6 +64,11 @@ object RecommendationConfig {
     const val W_HOUR = 10.0
     /** Weekday vs weekend is a weaker habit signal than the hour of day. */
     const val W_WEEK = 5.0
+    /** Habits (hour, weekday) and completion are shrunk toward what is expected by chance with this many imaginary plays: one listen proves nothing. */
+    const val SMOOTHING_PLAYS = 4.0
+    const val COMPLETION_PRIOR = 0.7
+    const val COMPLETION_PRIOR_PLAYS = 3.0
+    const val WEEKDAY_SHARE = 5.0 / 7.0
     const val CTX_LASTFM = 0.45
     const val CTX_PLAYLIST = 0.35
     const val CTX_GENRE = 0.20

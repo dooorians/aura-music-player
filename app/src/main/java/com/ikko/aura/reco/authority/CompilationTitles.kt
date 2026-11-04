@@ -59,6 +59,8 @@ object CompilationTitles {
     fun matches(title: String, requested: String): Boolean {
         val t = title.lowercase().trim()
         if (t.isEmpty()) return false
-        return KEYWORDS.any { t.contains(it) } || (blacklisted(t) - blacklisted(requested)).isNotEmpty()
+        val asked = requested.lowercase()
+        // Asking for "Greatest Hits" is asking for an album called that: only what the request does not itself carry is held against the result.
+        return KEYWORDS.any { t.contains(it) && !asked.contains(it) } || (blacklisted(t) - blacklisted(requested)).isNotEmpty()
     }
 }

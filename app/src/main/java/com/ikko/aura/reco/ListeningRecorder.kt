@@ -37,6 +37,7 @@ class ListeningRecorder @Inject constructor(
                         trackId = track.id, title = track.title, artist = track.artist, album = track.album, year = track.year,
                         durationMs = if (durationMs > 0) durationMs else track.durationMs, playedMs = playedMs,
                         outcome = outcome.name, endedAtMs = System.currentTimeMillis(), context = context, extra = "",
+                        origin = PlayOrigin.of(manualStart, autoplay).name,
                     ),
                 )
                 if (written.incrementAndGet() % PRUNE_EVERY == 0) dao.pruneListens(KEEP)

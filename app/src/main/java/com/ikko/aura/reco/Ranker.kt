@@ -32,16 +32,31 @@ object Eligibility {
     private val JUNK_TITLE = Regex(
         "\\b(?:karaoke|karaoké|8[- ]?bit|16[- ]?bit|tribute|ringtone|sonnerie|nightcore|made famous by|originally performed|" +
             "in the style of|backing track|midi version|lullaby (?:version|rendition)|music box|full album|\\d+ hours?|hours? of|" +
-            "clip officiel|clip|vid[ée]o ?clip|video oficial|video musical|official (?:music )?video|music video|m/?v|teaser|dance practice|performance video|making of|short film|routine|skincare|podcast|interview|episode|reaction|tutorial|vlog|unboxing|explained|breakdown|rip off)\\b|" +
-            "[(\\[]\\s*(?:official\\s+)?(?:lyrics?|lyric video|music video|video|visuali[sz]er|live)\\s*[)\\]]|\\blyrics?\\b",
+            "clip officiel|vid[ée]o ?clip|video oficial|video musical|official (?:music )?video|music video|m/?v|teaser|dance practice|performance video|making of|short film)\\b|" +
+            "[(\\[]\\s*(?:official\\s+)?(?:lyrics?|lyric video|music video|video|visuali[sz]er|live)\\s*[)\\]]|" +
+            // "Song - Lyrics", "Song lyrics video": a lyric video, not a song called "Lyrics" or a title that mentions them.
+            "(?:[-–|]\\s*|\\s)lyrics?(?:\\s+video)?\\s*$",
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * Words of videos, talks and tutorials that are also titles of songs ("Breakdown", "Routine", "Reaction"): held against a title only
+     * when it has three words or more, as a video's title has and a song's rarely does.
+     */
+    private val JUNK_TITLE_VIDEO = Regex(
+        "\\b(?:clip|routine|skincare|podcast|interview|episode|reaction|tutorial|vlog|unboxing|explained|breakdown|rip off)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun videoLike(title: String): Boolean = JUNK_TITLE_VIDEO.containsMatchIn(title) && title.trim().split(Regex("\\s+")).size >= 3
+
     /** Channels that publish playlists-in-disguise: cover bands, "workout" and "lofi" compilations, sleep music. */
     private val JUNK_ARTIST = Regex(
-        "\\b(?:karaoke|8[- ]?bit arcade|tribute|cover band|backing tracks?|piano tribute|lullaby renditions?|workout|running music|" +
-            "lo-?fi|sleep|relax(?:ing|ation)?|meditation|reiki|spa music|nature sounds?|study|dance hits|hits \\d{4}|\\d{4} hits|" +
-            "music academy|music collective|music experience|sound series|beats|chill(?:out)?|lyrics?|playlist|tiefenentspannung)\\b",
+        "\\b(?:karaoke|8[- ]?bit arcade|tribute|cover band|backing tracks?|piano tribute|lullaby renditions?|running music|" +
+            "lo-?fi|meditation|reiki|spa music|nature sounds?|dance hits|hits \\d{4}|\\d{4} hits|" +
+            "music academy|music collective|music experience|sound series|lyrics?|playlist|tiefenentspannung)\\b|" +
+            // A generic word alone is a band's name ("Sleep Token", "Beats Antique", "The Study"); it is a channel's when it describes its content.
+            "\\b(?:sleep|study|relax(?:ing|ation)?|chill(?:out)?|focus|workout|yoga|spa|lo-?fi)\\s+(?:music|sounds?|beats|playlists?|sessions?|vibes|hits|tunes|radio|channel)\\b",
         RegexOption.IGNORE_CASE,
     )
 
@@ -56,7 +71,7 @@ object Eligibility {
         // An album the listener refused: none of its songs, however the source numbers them.
         if (ctx.hidden.isNotEmpty() && AlbumKeys.of(c.albumRef, c.album, c.artist).any { it in ctx.hidden }) return Exclusion.HIDDEN
         if (c.durationMs in 1 until MIN_DURATION_MS || c.durationMs > MAX_DURATION_MS ||
-            JUNK_TITLE.containsMatchIn(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album) ||
+            JUNK_TITLE.containsMatchIn(c.title) || videoLike(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album) ||
             com.ikko.aura.reco.authority.CompilationTitles.matches(c.title) || com.ikko.aura.reco.authority.CompilationTitles.matches(c.album)
         ) return Exclusion.JUNK
         if (c.identity in ctx.profile.knownTracks) return Exclusion.KNOWN
