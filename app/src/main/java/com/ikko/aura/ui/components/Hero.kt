@@ -904,7 +904,7 @@ class HeroState {
 
     companion object {
         /** Whether the cover of a card flies to its page (as on an album's) or not (as on a playlist's): see [begin]. */
-        const val COVERS_FLY = true
+        const val COVERS_FLY = false
 
         const val ROLE_COVER = 0
         const val ROLE_TITLE = 1

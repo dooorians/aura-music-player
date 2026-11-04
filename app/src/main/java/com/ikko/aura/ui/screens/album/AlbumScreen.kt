@@ -663,6 +663,9 @@ private fun AlbumHeader(
                 shape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover,
                 modifier = Modifier
                     .heroTarget(heroKey, radiusPx = with(heroDensity) { 8.dp.toPx() })
+                    // The cover comes in with the page's words: it does not fly (see COVERS_FLY), but it must not be set
+                    // in place before the rest either - it rises and appears with the title and the actions around it.
+                    .heroRise(0)
                     .size(u * 240f),
                 targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
