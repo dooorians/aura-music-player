@@ -66,6 +66,14 @@ data class ProfileInputs(
 /** A song that says what the listener likes: a seed for "similar to" lookups. */
 data class SeedTrack(val title: String, val artist: String, val weight: Double, val trackId: String?)
 
+/** What "Ton profil" shows: what the algorithm learned, most-loved first. */
+data class TasteSummary(
+    val topArtists: List<Pair<String, Double>>,
+    val genres: List<Pair<String, Double>>,
+    val decades: List<Pair<Int, Double>>,
+    val evidence: Double,
+)
+
 /**
  * What is known of the listener's taste: how much each artist is liked (0..1), what is mildly disliked, which genres
  * and decades the library leans to, and how much evidence there is — little evidence is a cold start, handled
@@ -114,6 +122,14 @@ class TasteProfile(
         artists.entries.filter { it.key !in excluding && it.value > 0.0 }.sortedByDescending { it.value }.take(n).map { it.key }
 
     fun nameOf(key: String): String = names[key] ?: key
+
+    /** What "Ton profil" shows: what the algorithm learned, most-loved first. */
+    fun summary(): TasteSummary = TasteSummary(
+        topArtists = artists.entries.sortedByDescending { it.value }.take(20).map { nameOf(it.key) to it.value },
+        genres = genres.entries.sortedByDescending { it.value }.map { it.key to it.value },
+        decades = decades.entries.sortedByDescending { it.value }.map { it.key to it.value },
+        evidence = evidence,
+    )
 
     companion object {
         /** Below this much positive evidence the profile leans on the library and the typed seeds. */

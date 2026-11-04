@@ -22,6 +22,11 @@ class RecoSettingsViewModel @Inject constructor(
     val seeds: StateFlow<List<String>> = engine.seedArtists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val refreshing: StateFlow<Boolean> = engine.refreshing
 
+    /** What "Ton profil" shows: the profile the recommendations are drawn from. */
+    val profileSummary: StateFlow<com.ikko.aura.reco.TasteSummary?> =
+        kotlinx.coroutines.flow.flow { emit(engine.profileSummary()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     fun setConsent(on: Boolean) { viewModelScope.launch { engine.setConsent(on) } }
     fun unblock(key: String) { viewModelScope.launch { engine.unblockArtist(key) } }
     fun block(name: String) { viewModelScope.launch { engine.blockArtist(name) } }

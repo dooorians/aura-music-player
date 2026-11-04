@@ -164,6 +164,9 @@ class RecommendationEngine @Inject constructor(
     /** Every listen since [sinceMs], the device's and the sources' alike, newest first. */
     suspend fun listensSince(sinceMs: Long): List<ListenEntity> = dao.listensSince(sinceMs, 6_000)
 
+    /** What "Ton profil" shows: the profile the recommendations are drawn from, most-loved first. */
+    suspend fun profileSummary(): TasteSummary = TasteProfileBuilder.build(store.profileInputs(System.currentTimeMillis())).summary()
+
     /** A renewal that goes on in the background (a screen does not wait for it); the settings show it is running. */
     fun refreshInBackground() { scope.launch { runCatching { refreshNow() } } }
 

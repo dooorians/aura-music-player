@@ -88,4 +88,14 @@ class TasteProfileTest {
         assertTrue(picked.affinity("magdalena bay") > typed.affinity("magdalena bay") + 0.2)
         assertTrue(picked.affinity("magdalena bay") > 0.6)
     }
+
+    @Test fun `summary lists what the algorithm learned, most-loved first`() {
+        val p = profileOf(
+            listen("A1", "Artist A"), listen("A2", "Artist A"),
+            listen("B1", "Artist B"),
+        )
+        val s = p.summary()
+        assertEquals("Artist A", s.topArtists.first().first)
+        assertTrue(s.topArtists.first().second > s.topArtists.last().second)
+    }
 }

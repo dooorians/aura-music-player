@@ -19,6 +19,9 @@ sealed class AuraDestination(val route: String) {
     /** The grid of artist bubbles that calibrates the recommendations. */
     data object TastePicker : AuraDestination("taste_picker")
 
+    /** What the algorithm learned and why: the transparency screen. */
+    data object TasteProfile : AuraDestination("taste_profile")
+
     /** The artists the listener likes, and the ones they blocked: a page each, with their photos and a way to remove them. */
     data object LikedArtists : AuraDestination("liked_artists")
     data object BlockedArtists : AuraDestination("blocked_artists")

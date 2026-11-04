@@ -508,6 +508,12 @@ private fun RecommendationsPage(navController: NavHostController) {
             else "${blocked.size} artiste${if (blocked.size > 1) "s" else ""}, exclus des sept playlists",
             onClick = { navController.navigate(AuraDestination.BlockedArtists.route) }, trailing = { ChevronTrailing() },
         )
+        SettingsDivider()
+        SettingsRow(
+            title = "Ton profil",
+            summary = "Ce que l'app a appris de tes goûts, et pourquoi elle propose ce qu'elle propose",
+            onClick = { navController.navigate(AuraDestination.TasteProfile.route) }, trailing = { ChevronTrailing() },
+        )
     }
     SettingsGroup(title = "Repartir de zéro") {
         SettingsRow(

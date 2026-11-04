@@ -529,7 +529,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                 .matchParentSize()
                 .drawBehind {
                     val d = if (isUnderPlayerEntry) dim() else 0f
-                    if (d > 0.001f) drawRect(Color.Black, alpha = d)
+                    // Voile noir supprimé sous le player
                 },
         )
     }
@@ -1258,6 +1258,7 @@ fun MainLayout() {
                 composable(AuraDestination.LikedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.LikedArtistsScreen(navController) } }
                 composable(AuraDestination.BlockedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.BlockedArtistsScreen(navController) } }
                 composable(AuraDestination.TastePicker.route) { UnderSheet { com.ikko.aura.ui.screens.taste.TastePickerScreen(navController) } }
+                composable(AuraDestination.TasteProfile.route) { UnderSheet { com.ikko.aura.ui.screens.settings.TasteProfileScreen(navController) } }
                 composable(AuraDestination.NowPlaying.route) {
                     LaunchedEffect(Unit) {
                         navController.popBackStack()
@@ -1377,7 +1378,7 @@ fun MainLayout() {
             // One single app-level scrim across the entire app so it never superposes, blinks, or pops during page transitions.
             val isTabs = currentRoute == AuraDestination.Tabs.route
             val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
-            val rootTopAlpha = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            val rootTopAlpha = 0f
             com.ikko.aura.ui.screens.album.ProgressiveTopScrim(
                 strength = rootTopAlpha,
                 modifier = Modifier.align(Alignment.TopCenter),
