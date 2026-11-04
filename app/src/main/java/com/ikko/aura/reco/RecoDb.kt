@@ -183,3 +183,36 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         )
     }
 }
+
+/** The official discography of one artist, kept on disk so it is fetched once and survives relaunches. */
+@Entity(tableName = "verified_discography")
+data class VerifiedDiscographyEntity(
+    @androidx.room.PrimaryKey val artistKey: String,
+    /** Official track titles, as [TrackIdentity] keys, joined by NUL. */
+    val tracksJson: String,
+    /** Official album titles, as [TrackIdentity] keys, joined by NUL. */
+    val albumsJson: String,
+    val fetchedAtMs: Long,
+)
+
+@Dao
+interface VerifiedDiscographyDao {
+    @Query("SELECT * FROM verified_discography WHERE artistKey = :key")
+    suspend fun get(key: String): VerifiedDiscographyEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entity: VerifiedDiscographyEntity)
+
+    @Query("SELECT * FROM verified_discography")
+    suspend fun all(): List<VerifiedDiscographyEntity>
+}
+
+/** The verified-discography table; additive only. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS verified_discography (artistKey TEXT NOT NULL PRIMARY KEY, " +
+                "tracksJson TEXT NOT NULL, albumsJson TEXT NOT NULL, fetchedAtMs INTEGER NOT NULL)",
+        )
+    }
+}
