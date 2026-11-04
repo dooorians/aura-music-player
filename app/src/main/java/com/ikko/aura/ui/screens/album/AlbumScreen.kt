@@ -676,22 +676,18 @@ private fun AlbumHeader(
               } else {
                 Text(
                     text = uiState.title.trim(),
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = com.ikko.aura.ui.components.designSp(66f),
-                    lineHeight = com.ikko.aura.ui.components.designSp(76f),
-                    letterSpacing = com.ikko.aura.ui.components.designSp(66f * -0.02f),
-                    color = Color.White,
+                    // The very TextStyle the hero's copy uses. Built from loose parameters, the text is merged with the
+                    // theme's defaults while the copy is not, and the two measure a hair apart: the gap accumulates over
+                    // the words and the last letters slide during the trip (the bug seen from Home and the library). One
+                    // style for both, and the copy lands exactly on the text.
+                    style = heroTitleStyle.copy(color = Color.White),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
                 )
                 Text(
                     text = uiState.artist.trim(),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = com.ikko.aura.ui.components.designSp(40f),
-                    lineHeight = com.ikko.aura.ui.components.designSp(48f),
-                    // The mock's artist is the cover's colour pushed toward white (#d7d3ff over a violet cover).
-                    color = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f),
+                    style = heroSubStyle.copy(color = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f)),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
