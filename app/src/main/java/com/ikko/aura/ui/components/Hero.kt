@@ -1113,6 +1113,25 @@ fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current, rows: Boo
 }
 
 /**
+ * A cover's own arrival: it fades in and rises over 280 ms on its first composition, whatever the hero's trip is doing.
+ * A page's header is composed when its list lays itself out, sometimes after the trip has ended, and [heroRise] would
+ * then find it already arrived and place the cover without a movement - it looked fixed while the words faded beside it.
+ */
+@Composable
+fun Modifier.coverArrival(): Modifier {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        delay(90L)
+        p.animateTo(1f, tween(280, easing = EaseOut))
+    }
+    val unitPx = with(LocalDensity.current) { designUnit().toPx() }
+    return this.graphicsLayer {
+        alpha = p.value
+        translationY = 28f * unitPx * (1f - p.value)
+    }
+}
+
+/**
  * The body of a page a trip ends on (its list): on the way back it leaves as a whole in 140 ms, wherever it was scrolled
  * to.
  */

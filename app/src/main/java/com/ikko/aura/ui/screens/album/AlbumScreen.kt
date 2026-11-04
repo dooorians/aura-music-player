@@ -2,6 +2,7 @@ package com.ikko.aura.ui.screens.album
 
 import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.coverArrival
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.suppressEdgeBackRipple
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -663,9 +664,9 @@ private fun AlbumHeader(
                 shape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover,
                 modifier = Modifier
                     .heroTarget(heroKey, radiusPx = with(heroDensity) { 8.dp.toPx() })
-                    // The cover comes in with the page's words: it does not fly (see COVERS_FLY), but it must not be set
-                    // in place before the rest either - it rises and appears with the title and the actions around it.
-                    .heroRise(0)
+                    // The cover does not fly (see COVERS_FLY), but it must not be set in place before the rest either:
+                    // its own arrival fades and rises it with the words, on its first composition (see coverArrival).
+                    .coverArrival()
                     .size(u * 240f),
                 targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
