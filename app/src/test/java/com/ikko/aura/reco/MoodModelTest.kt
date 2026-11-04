@@ -29,4 +29,12 @@ class MoodModelTest {
         val long = candidate("Neutral", "A", durationMs = 480_000)
         assertEquals(null, MoodModel.verdict(long, Mood.NIGHT))
     }
+
+    @Test fun `a tempo decides over the words`() {
+        // A fast song whose title says "chill" is not chill: the music contradicts the words.
+        assertEquals(null, MoodModel.verdict(candidate("Chill Vibes", "A").copy(bpm = 128.0), Mood.CHILL))
+        // A slow song with no cue word is night; a fast one is energy.
+        assertTrue(MoodModel.verdict(candidate("Neutral Title", "A").copy(bpm = 70.0), Mood.NIGHT)!! >= MoodModel.THRESHOLD)
+        assertTrue(MoodModel.verdict(candidate("Neutral Title", "A").copy(bpm = 128.0), Mood.ENERGY)!! >= MoodModel.THRESHOLD)
+    }
 }

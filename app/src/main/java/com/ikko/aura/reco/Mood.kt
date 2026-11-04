@@ -67,6 +67,18 @@ object MoodModel {
      * Returns null — no verdict — when nothing in the song's metadata speaks for the mood.
      */
     fun verdict(c: Candidate, mood: Mood): Double? {
+        // A measured tempo speaks louder than a title's words: it is the music, not a guess about it. Only when no tempo
+        // is known do the words and the source's query decide.
+        val tempo = c.bpm?.let { bpm ->
+            when (mood) {
+                Mood.ENERGY -> when { bpm >= 120.0 -> true; bpm <= 95.0 -> false; else -> null }
+                Mood.CHILL -> when { bpm in 60.0..100.0 -> true; bpm >= 120.0 -> false; else -> null }
+                Mood.NIGHT -> when { bpm in 60.0..95.0 -> true; bpm >= 120.0 -> false; else -> null }
+            }
+        }
+        if (tempo == true) return 0.9
+        if (tempo == false) return null
+
         val f = fit(c.title, c.album, c.durationMs, c.tags)
         val byQuery = c.provenance.any { it.kind == ProvKind.MOOD_QUERY && it.mood == mood }
         val cue = when (mood) {

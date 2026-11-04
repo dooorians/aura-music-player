@@ -83,6 +83,8 @@ data class Candidate(
      * channel. A "related" list mixes in clips and talks; those are false until the song's own page says otherwise.
      */
     val confirmedSong: Boolean = true,
+    /** The tempo a catalogue states, when one does; null means none was given. */
+    val bpm: Double? = null,
 ) {
     val credits: List<String> by lazy { ArtistNames.creditsOf(artist, title, extraCredits) }
     val identity: String by lazy { TrackIdentity.key(title, artist) }
