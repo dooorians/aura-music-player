@@ -64,4 +64,19 @@ class AffinityScorerTest {
         assertEquals(50, s.recentTrackIds().size)
         assertEquals(setOf("a58", "a59", "a60"), s.lastArtists())
     }
+
+    @Test fun `a weekend play counts as a weekend play`() {
+        // 1970-01-03 was a Saturday.
+        val saturday = 2L * 86_400_000L
+        val r = AffinityScorer.apply(stats(), ev(190_000, tr = Transition.AUTO, at = saturday), zone)
+        assertEquals(1, r.stats.playsWeekend)
+        assertEquals(0, r.stats.playsWeekday)
+    }
+
+    @Test fun `a weekday play counts as a weekday play`() {
+        // 1970-01-01 was a Thursday (the epoch).
+        val r = AffinityScorer.apply(stats(), ev(190_000, tr = Transition.AUTO, at = noon), zone)
+        assertEquals(1, r.stats.playsWeekday)
+        assertEquals(0, r.stats.playsWeekend)
+    }
 }

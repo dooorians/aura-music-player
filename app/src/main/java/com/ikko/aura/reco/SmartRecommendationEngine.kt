@@ -115,6 +115,9 @@ class SmartRecommendationEngine @Inject constructor(
             cooccurrence = snap.cooc.associate { it.trackId to (it.shared + it.adjacent).toDouble() },
             session = tracker.session,
             blockedNeighbors = snap.nearBlocked,
+            weekend = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).dayOfWeek.let {
+                it == java.time.DayOfWeek.SATURDAY || it == java.time.DayOfWeek.SUNDAY
+            },
         )
         val byId = tracks.associateBy { it.id }
         return SmartRanker.next(entries, ctx, count, rng).mapNotNull { byId[it.trackId] }

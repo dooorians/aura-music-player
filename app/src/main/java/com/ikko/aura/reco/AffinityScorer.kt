@@ -70,6 +70,9 @@ object AffinityScorer {
                 DayPart.EVENING -> s.copy(playsEvening = s.playsEvening + 1)
                 DayPart.NIGHT -> s.copy(playsNight = s.playsNight + 1)
             }
+            val day = java.time.Instant.ofEpochMilli(e.atMs).atZone(zone).dayOfWeek
+            val weekend = day == java.time.DayOfWeek.SATURDAY || day == java.time.DayOfWeek.SUNDAY
+            s = if (weekend) s.copy(playsWeekend = s.playsWeekend + 1) else s.copy(playsWeekday = s.playsWeekday + 1)
         }
         return Result(s.copy(affinityScore = s.affinityScore + delta), delta)
     }

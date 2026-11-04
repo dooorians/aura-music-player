@@ -32,6 +32,9 @@ data class TrackStatsEntity(
     val playsAfternoon: Int = 0,
     val playsEvening: Int = 0,
     val playsNight: Int = 0,
+    /** Plays on weekdays (Mon-Fri) and weekends (Sat-Sun). */
+    val playsWeekday: Int = 0,
+    val playsWeekend: Int = 0,
     /** The artist's key (see [ArtistNames.key]) and the song's genres, so a candidate is scored without joining. */
     val artistKey: String = "",
     val albumKey: String = "",
@@ -142,5 +145,13 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_artist_similarity_sourceArtistKey ON artist_similarity(sourceArtistKey)")
         // The index of the playlists' own table that the co-occurrence join runs on.
         db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_trackId ON playlist_tracks(trackId)")
+    }
+}
+
+/** The weekday/weekend play counts; additive only. */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE track_stats ADD COLUMN playsWeekday INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE track_stats ADD COLUMN playsWeekend INTEGER NOT NULL DEFAULT 0")
     }
 }

@@ -36,6 +36,8 @@ object RecommendationConfig {
     const val W_ARTIST_ALBUM = 0.15
     const val W_CONTEXT = 30.0
     const val W_HOUR = 10.0
+    /** Weekday vs weekend is a weaker habit signal than the hour of day. */
+    const val W_WEEK = 5.0
     const val CTX_LASTFM = 0.45
     const val CTX_PLAYLIST = 0.35
     const val CTX_GENRE = 0.20

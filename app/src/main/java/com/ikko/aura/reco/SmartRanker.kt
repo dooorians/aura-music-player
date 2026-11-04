@@ -28,6 +28,8 @@ class SmartContext(
     /** Keys of the artists close to a blocked one (the graph of the library's artists). */
     val blockedNeighbors: Set<String> = emptySet(),
     val config: RecommendationConfig = RecommendationConfig,
+    /** Whether "now" is a Saturday or a Sunday. */
+    val weekend: Boolean = false,
 )
 
 /** The four phases of the choice of the next song. Pure and deterministic for the same [Random]. */
@@ -97,6 +99,12 @@ object SmartRanker {
             } ?: 0
             val hourPart = if (total == 0) 0.0 else here.toDouble() / total * c.W_HOUR
 
+            val weekdayPlays = s?.playsWeekday ?: 0
+            val weekendPlays = s?.playsWeekend ?: 0
+            val weekTotal = weekdayPlays + weekendPlays
+            val weekHere = if (ctx.weekend) weekendPlays else weekdayPlays
+            val weekPart = if (weekTotal == 0) 0.0 else weekHere.toDouble() / weekTotal * c.W_WEEK
+
             val lastPlayed = s?.lastPlayedTimestamp ?: 0L
             var bonus = 0.0
             if ((s?.isLiked == true || completion > c.REDISCOVERY_COMPLETION) && lastPlayed > 0 && ctx.nowMs - lastPlayed > c.REDISCOVERY_AFTER_MS) bonus += c.REDISCOVERY_BONUS
@@ -111,7 +119,7 @@ object SmartRanker {
             if (e.genres.any { it.lowercase() in ctx.session.penalizedGenres() }) penalty += c.SESSION_GENRE_PENALTY
             if (e.artistKey in ctx.blockedNeighbors) penalty += c.BLOCKED_NEIGHBOR_PENALTY
 
-            Scored(e, trackPart + artistPart + contextPart + hourPart + bonus - penalty, sim, cooc)
+            Scored(e, trackPart + artistPart + contextPart + hourPart + weekPart + bonus - penalty, sim, cooc)
         }
     }
 
