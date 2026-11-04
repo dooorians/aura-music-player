@@ -44,6 +44,7 @@ class MusicBrainzClient(
 
     private val searchCache = ConcurrentHashMap<String, List<MusicBrainzArtist>>()
     private val releaseGroupsCache = ConcurrentHashMap<String, List<MusicBrainzReleaseGroup>>()
+    private val recordingsCache = ConcurrentHashMap<String, List<String>>()
 
     private suspend fun fetch(urlString: String): String {
         httpGet?.let { return it(urlString) }
@@ -156,10 +157,34 @@ class MusicBrainzClient(
         }.getOrDefault(emptyList())
     }
 
+    /** The titles of an artist's recordings, browsed by pages of 100: what a long discography actually contains. */
+    suspend fun getArtistRecordings(mbid: String, limit: Int = MAX_RECORDINGS): List<String> {
+        val cleanMbid = mbid.trim()
+        if (cleanMbid.isEmpty()) return emptyList()
+        recordingsCache[cleanMbid]?.let { return it }
+
+        return runCatching {
+            val result = ArrayList<String>()
+            var offset = 0
+            while (offset < limit) {
+                val json = JSONObject(fetch("$BASE_URL/recording?artist=$cleanMbid&limit=100&offset=$offset&fmt=json"))
+                val arr = json.optJSONArray("recordings") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    arr.getJSONObject(i).optString("title").takeIf { it.isNotBlank() }?.let(result::add)
+                }
+                val total = json.optInt("recording-count", 0)
+                offset += 100
+                if (arr.length() < 100 || offset >= total || offset >= limit) break
+            }
+            result.distinct().also { recordingsCache[cleanMbid] = it }
+        }.getOrDefault(emptyList())
+    }
+
     private companion object {
         const val BASE_URL = "https://musicbrainz.org/ws/2"
         const val USER_AGENT = "AuraMusicPlayer/1.0.0 ( dooorians15@gmail.com )"
         const val MIN_INTERVAL_MS = 1000L // MusicBrainz limit: 1 request/second
         const val MAX_RELEASE_GROUPS = 500
+        const val MAX_RECORDINGS = 500
     }
 }

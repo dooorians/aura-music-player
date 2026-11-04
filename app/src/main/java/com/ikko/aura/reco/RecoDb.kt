@@ -207,6 +207,14 @@ interface VerifiedDiscographyDao {
     suspend fun all(): List<VerifiedDiscographyEntity>
 }
 
+/** An in-memory [VerifiedDiscographyDao] for JVM tests and callers without Room: nothing survives a process. */
+class InMemoryDiscographyStore : VerifiedDiscographyDao {
+    private val entries = HashMap<String, VerifiedDiscographyEntity>()
+    override suspend fun get(key: String): VerifiedDiscographyEntity? = entries[key]
+    override suspend fun put(entity: VerifiedDiscographyEntity) { entries[entity.artistKey] = entity }
+    override suspend fun all(): List<VerifiedDiscographyEntity> = entries.values.toList()
+}
+
 /** The verified-discography table; additive only. */
 val MIGRATION_11_12 = object : Migration(11, 12) {
     override fun migrate(db: SupportSQLiteDatabase) {

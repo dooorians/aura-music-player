@@ -9,97 +9,95 @@ import javax.inject.Singleton
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 @Singleton
 class DiscographyVerifier @Inject constructor(
     private val deezerClient: DeezerClient,
     private val mbClient: MusicBrainzClient,
+    private val store: com.ikko.aura.reco.VerifiedDiscographyDao,
 ) {
+    /** For callers without a Room store (tests): an in-memory store, forgotten when the process ends. */
+    constructor(deezerClient: DeezerClient, mbClient: MusicBrainzClient) :
+        this(deezerClient, mbClient, com.ikko.aura.reco.InMemoryDiscographyStore())
+
+    /** Fast path within a session; the durable source is [store], these avoid reading Room on every check. */
     private val verifiedTracksCache = ConcurrentHashMap<String, Set<String>>()
     private val verifiedAlbumsCache = ConcurrentHashMap<String, Set<String>>()
 
-    suspend fun getVerifiedTrackTitles(artist: DisambiguatedArtist): Set<String> {
+    /** Loads the discography once per artist: from the store when fresh, else rebuilt and stored. */
+    private suspend fun ensureLoaded(artist: DisambiguatedArtist) {
         val key = artist.canonicalKey
-        if (key.isEmpty()) return emptySet()
-        verifiedTracksCache[key]?.let { return it }
+        if (key.isEmpty() || verifiedTracksCache.containsKey(key)) return
+        val stored = store.get(key)
+        if (stored != null && System.currentTimeMillis() - stored.fetchedAtMs < TTL_MS) {
+            verifiedTracksCache[key] = decode(stored.tracksJson)
+            verifiedAlbumsCache[key] = decode(stored.albumsJson)
+            return
+        }
+        val (tracks, albums) = fetch(artist)
+        verifiedTracksCache[key] = tracks
+        verifiedAlbumsCache[key] = albums
+        if (tracks.isNotEmpty() || albums.isNotEmpty()) {
+            store.put(com.ikko.aura.reco.VerifiedDiscographyEntity(key, encode(tracks), encode(albums), System.currentTimeMillis()))
+        }
+    }
 
-        val titles = LinkedHashSet<String>()
+    /**
+     * The official titles: Deezer's top tracks and the tracks of every official release up to a generous cap (the old
+     * cap of 20 albums missed the tail of a long discography), plus MusicBrainz's own recordings and release groups.
+     * Bounded but far more complete than before, and written to the store so it survives relaunches.
+     */
+    private suspend fun fetch(artist: DisambiguatedArtist): Pair<Set<String>, Set<String>> {
+        val tracks = LinkedHashSet<String>()
+        val albums = LinkedHashSet<String>()
 
-        // 1. Fetch from Deezer (top tracks + official albums & tracks)
         val dId = artist.deezerId
         if (dId != null && dId > 0) {
             val topTracks = runCatching { deezerClient.getArtistTopTracks(dId, limit = 100) }.getOrDefault(emptyList())
             for (t in topTracks) {
-                addTitle(titles, t.title)
-                addTitle(titles, t.titleShort)
+                addTitle(tracks, t.title)
+                addTitle(tracks, t.titleShort)
             }
 
-            val albums = runCatching { deezerClient.getArtistAlbums(dId, limit = 60) }.getOrDefault(emptyList())
-            val officialReleases = albums.filter {
-                it.recordType in OFFICIAL_RECORD_TYPES
-            }
+            val releases = runCatching { deezerClient.getArtistAlbums(dId, limit = 100) }.getOrDefault(emptyList())
+            val official = releases.filter { it.recordType in OFFICIAL_RECORD_TYPES }
+            for (alb in official) addTitle(albums, alb.title)
 
-            for (alb in officialReleases) {
-                addTitle(titles, alb.title)
-            }
-
-            // Fetch tracks for the most significant releases in parallel (max 20 releases)
             coroutineScope {
-                officialReleases.take(MAX_ALBUMS_FETCHED).map { album ->
+                val gate = Semaphore(6)
+                official.take(MAX_ALBUM_TRACKS_FETCHED).map { album ->
                     async {
-                        runCatching { deezerClient.getAlbumTracks(album.id) }.getOrDefault(emptyList())
+                        gate.withPermit { runCatching { deezerClient.getAlbumTracks(album.id) }.getOrDefault(emptyList()) }
                     }
                 }.awaitAll().flatten().forEach { t ->
-                    addTitle(titles, t.title)
-                    addTitle(titles, t.titleShort)
+                    addTitle(tracks, t.title)
+                    addTitle(tracks, t.titleShort)
                 }
             }
         }
 
-        // 2. Fetch from MusicBrainz (release groups)
         val mbid = artist.mbid
         if (!mbid.isNullOrBlank()) {
+            val recordings = runCatching { mbClient.getArtistRecordings(mbid) }.getOrDefault(emptyList())
+            recordings.forEach { addTitle(tracks, it) }
             val rgs = runCatching { mbClient.getArtistReleaseGroups(mbid) }.getOrDefault(emptyList())
             for (rg in rgs) {
-                if (rg.primaryType in OFFICIAL_MB_TYPES || rg.primaryType == null) {
-                    addTitle(titles, rg.title)
-                }
+                if (rg.primaryType in OFFICIAL_MB_TYPES || rg.primaryType == null) addTitle(albums, rg.title)
             }
         }
+        return tracks to albums
+    }
 
-        return titles.also { verifiedTracksCache[key] = it }
+    suspend fun getVerifiedTrackTitles(artist: DisambiguatedArtist): Set<String> {
+        ensureLoaded(artist)
+        return verifiedTracksCache[artist.canonicalKey].orEmpty()
     }
 
     suspend fun getVerifiedAlbumTitles(artist: DisambiguatedArtist): Set<String> {
-        val key = artist.canonicalKey
-        if (key.isEmpty()) return emptySet()
-        verifiedAlbumsCache[key]?.let { return it }
-
-        val albumTitles = LinkedHashSet<String>()
-
-        // 1. Fetch from Deezer (artist albums)
-        val dId = artist.deezerId
-        if (dId != null && dId > 0) {
-            val albums = runCatching { deezerClient.getArtistAlbums(dId, limit = 100) }.getOrDefault(emptyList())
-            for (alb in albums) {
-                if (alb.recordType in OFFICIAL_RECORD_TYPES) {
-                    addTitle(albumTitles, alb.title)
-                }
-            }
-        }
-
-        // 2. Fetch from MusicBrainz (release groups)
-        val mbid = artist.mbid
-        if (!mbid.isNullOrBlank()) {
-            val rgs = runCatching { mbClient.getArtistReleaseGroups(mbid) }.getOrDefault(emptyList())
-            for (rg in rgs) {
-                if (rg.primaryType in OFFICIAL_MB_TYPES || rg.primaryType == null) {
-                    addTitle(albumTitles, rg.title)
-                }
-            }
-        }
-
-        return albumTitles.also { verifiedAlbumsCache[key] = it }
+        ensureLoaded(artist)
+        return verifiedAlbumsCache[artist.canonicalKey].orEmpty()
     }
 
     suspend fun isOfficialTrack(artist: DisambiguatedArtist, trackTitle: String): Boolean {
@@ -107,10 +105,8 @@ class DiscographyVerifier @Inject constructor(
         if (clean.isEmpty()) return false
         val verified = getVerifiedTrackTitles(artist)
         if (verified.isEmpty()) return false
-
         val titleKey = TrackIdentity.titleKey(clean)
         val baseKey = TrackIdentity.baseKey(clean)
-
         return titleKey in verified || baseKey in verified
     }
 
@@ -120,10 +116,8 @@ class DiscographyVerifier @Inject constructor(
         if (isKnownCompilationOrPlaylist(clean)) return false
         val verified = getVerifiedAlbumTitles(artist)
         if (verified.isEmpty()) return false
-
         val titleKey = TrackIdentity.titleKey(clean)
         val baseKey = TrackIdentity.baseKey(clean)
-
         return titleKey in verified || baseKey in verified
     }
 
@@ -146,7 +140,6 @@ class DiscographyVerifier @Inject constructor(
     suspend fun filterOfficialTracks(artist: DisambiguatedArtist, candidates: List<String>): List<String> {
         val verified = getVerifiedTrackTitles(artist)
         if (verified.isEmpty()) return emptyList()
-
         return candidates.filter { title ->
             val titleKey = TrackIdentity.titleKey(title)
             val baseKey = TrackIdentity.baseKey(title)
@@ -154,14 +147,9 @@ class DiscographyVerifier @Inject constructor(
         }
     }
 
-    fun isKnownCompilationOrPlaylist(title: String): Boolean {
-        return CompilationTitles.matches(title)
-    }
+    fun isKnownCompilationOrPlaylist(title: String): Boolean = CompilationTitles.matches(title)
 
-    fun isGenericAlbum(title: String): Boolean {
-        val t = title.lowercase().trim()
-        return t in GENERIC_ALBUM_NAMES
-    }
+    fun isGenericAlbum(title: String): Boolean = title.lowercase().trim() in GENERIC_ALBUM_NAMES
 
     private fun addTitle(into: MutableSet<String>, rawTitle: String) {
         val clean = rawTitle.trim()
@@ -172,11 +160,14 @@ class DiscographyVerifier @Inject constructor(
         if (bKey.isNotEmpty()) into += bKey
     }
 
+    private fun encode(set: Set<String>): String = set.joinToString("\u0000")
+    private fun decode(json: String): Set<String> = json.split('\u0000').filter { it.isNotEmpty() }.toSet()
+
     private companion object {
+        const val TTL_MS = 30L * 24 * 60 * 60 * 1000
         val OFFICIAL_RECORD_TYPES = setOf("album", "single", "ep", "compile")
         val OFFICIAL_MB_TYPES = setOf("Album", "Single", "EP")
-        const val MAX_ALBUMS_FETCHED = 20
-
+        const val MAX_ALBUM_TRACKS_FETCHED = 50
         val GENERIC_ALBUM_NAMES = setOf(
             "single",
             "singles",

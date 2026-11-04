@@ -1,10 +1,8 @@
 package com.ikko.aura.reco.authority
 
-import com.ikko.aura.data.deezer.DeezerAlbumInfo
 import com.ikko.aura.data.deezer.DeezerClient
-import com.ikko.aura.data.deezer.DeezerTrackInfo
 import com.ikko.aura.data.musicbrainz.MusicBrainzClient
-import com.ikko.aura.data.musicbrainz.MusicBrainzReleaseGroup
+import com.ikko.aura.reco.InMemoryDiscographyStore
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,31 +18,6 @@ class DiscographyVerifierTest {
         deezerId = 157L,
         country = "US",
         primaryTags = setOf("pop", "dance-pop"),
-    )
-
-    private val officialDeezerTopTracks = listOf(
-        DeezerTrackInfo(id = 1, title = "Bad Romance", titleShort = "Bad Romance", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 2, title = "Poker Face", titleShort = "Poker Face", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 3, title = "Rain On Me (with Ariana Grande)", titleShort = "Rain On Me", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 4, title = "Just Dance", titleShort = "Just Dance", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 5, title = "Born This Way", titleShort = "Born This Way", artistId = 157L, artistName = "Lady Gaga"),
-    )
-
-    private val officialDeezerAlbums = listOf(
-        DeezerAlbumInfo(id = 101, title = "The Fame", recordType = "album", releaseDate = "2008-08-19"),
-        DeezerAlbumInfo(id = 102, title = "Chromatica", recordType = "album", releaseDate = "2020-05-29"),
-        DeezerAlbumInfo(id = 103, title = "Hold My Hand", recordType = "single", releaseDate = "2022-05-03"),
-    )
-
-    private val officialChromaticaTracks = listOf(
-        DeezerTrackInfo(id = 10, title = "Chromatica I", titleShort = "Chromatica I", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 11, title = "Alice", titleShort = "Alice", artistId = 157L, artistName = "Lady Gaga"),
-        DeezerTrackInfo(id = 12, title = "Stupid Love", titleShort = "Stupid Love", artistId = 157L, artistName = "Lady Gaga"),
-    )
-
-    private val officialMbReleaseGroups = listOf(
-        MusicBrainzReleaseGroup(id = "rg1", title = "The Fame", primaryType = "Album", firstReleaseDate = "2008"),
-        MusicBrainzReleaseGroup(id = "rg2", title = "Hold My Hand", primaryType = "Single", firstReleaseDate = "2022"),
     )
 
     @Test
@@ -76,6 +49,13 @@ class DiscographyVerifierTest {
                   ]
                 }
                 """.trimIndent()
+                url.contains("album/103/tracks") -> """
+                {
+                  "data": [
+                    { "id": 13, "title": "Hold My Hand", "title_short": "Hold My Hand", "duration": 234, "artist": { "id": 157, "name": "Lady Gaga" } }
+                  ]
+                }
+                """.trimIndent()
                 else -> """{ "data": [] }"""
             }
         })
@@ -92,7 +72,7 @@ class DiscographyVerifierTest {
             """.trimIndent()
         })
 
-        val verifier = DiscographyVerifier(deezerClient, mbClient)
+        val verifier = DiscographyVerifier(deezerClient, mbClient, InMemoryDiscographyStore())
 
         // Official tracks MUST be accepted
         assertTrue(verifier.isOfficialTrack(ladyGaga, "Bad Romance"))
@@ -136,5 +116,55 @@ class DiscographyVerifierTest {
         )
         val filtered = verifier.filterOfficialTracks(ladyGaga, candidateTitles)
         assertEquals(listOf("Bad Romance", "Rain On Me", "Alice"), filtered)
+    }
+
+    @Test
+    fun testKnowsTracksOnAlbumsBeyondTheOldCap() = runBlocking {
+        val deezerClient = DeezerClient(httpGet = { url ->
+            when {
+                url.contains("artist/157/albums") -> {
+                    val data = (201..225).joinToString(",") { id ->
+                        """{ "id": $id, "title": "Album $id", "record_type": "album", "release_date": "2020-01-01" }"""
+                    }
+                    """{ "data": [$data] }"""
+                }
+                url.contains("album/225/tracks") -> """
+                {
+                  "data": [
+                    { "id": 900, "title": "OnlyOnLateAlbum", "title_short": "OnlyOnLateAlbum", "duration": 180, "artist": { "id": 157, "name": "Lady Gaga" } }
+                  ]
+                }
+                """.trimIndent()
+                else -> """{ "data": [] }"""
+            }
+        })
+        val mbClient = MusicBrainzClient(httpGet = { """{ "id": "x", "release-groups": [], "recordings": [] }""" })
+
+        val verifier = DiscographyVerifier(deezerClient, mbClient, InMemoryDiscographyStore())
+
+        // The 25th album's track is known: the discography no longer stops at the first 20 albums.
+        assertTrue(verifier.isOfficialTrack(ladyGaga, "OnlyOnLateAlbum"))
+    }
+
+    @Test
+    fun testPersistsAcrossInstances() = runBlocking {
+        val deezerClient = DeezerClient(httpGet = { url ->
+            if (url.contains("artist/157/top")) """
+            {
+              "data": [ { "id": 1, "title": "Bad Romance", "title_short": "Bad Romance", "duration": 294, "artist": { "id": 157, "name": "Lady Gaga" } } ]
+            }
+            """.trimIndent()
+            else """{ "data": [] }"""
+        })
+        val mbClient = MusicBrainzClient(httpGet = { """{ "id": "x", "release-groups": [], "recordings": [] }""" })
+        val store = InMemoryDiscographyStore()
+
+        val first = DiscographyVerifier(deezerClient, mbClient, store)
+        assertTrue(first.isOfficialTrack(ladyGaga, "Bad Romance"))
+
+        // A second verifier, built with the same store but a now-deaf source, still knows the title: it read the store.
+        val deafDeezer = DeezerClient(httpGet = { """{ "data": [] }""" })
+        val second = DiscographyVerifier(deafDeezer, mbClient, store)
+        assertTrue(second.isOfficialTrack(ladyGaga, "Bad Romance"))
     }
 }
