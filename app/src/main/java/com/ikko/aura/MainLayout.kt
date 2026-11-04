@@ -529,7 +529,7 @@ private fun UnderSheet(content: @Composable () -> Unit) {
                 .matchParentSize()
                 .drawBehind {
                     val d = if (isUnderPlayerEntry) dim() else 0f
-                    // Voile noir supprimé sous le player
+                    if (d > 0.001f) drawRect(Color.Black, alpha = d)
                 },
         )
     }
@@ -1378,7 +1378,7 @@ fun MainLayout() {
             // One single app-level scrim across the entire app so it never superposes, blinks, or pops during page transitions.
             val isTabs = currentRoute == AuraDestination.Tabs.route
             val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
-            val rootTopAlpha = 0f
+            val rootTopAlpha = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
             com.ikko.aura.ui.screens.album.ProgressiveTopScrim(
                 strength = rootTopAlpha,
                 modifier = Modifier.align(Alignment.TopCenter),
