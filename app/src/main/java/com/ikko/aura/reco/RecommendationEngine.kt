@@ -307,7 +307,7 @@ class RecommendationEngine @Inject constructor(
 
     private companion object {
         /** Bumped when the rules that choose songs change in a way that makes earlier playlists wrong. */
-        const val RULES_VERSION = 13
+        const val RULES_VERSION = 14
         /** What a source puts in the artist field when an album has none: nobody to block. */
         val NOT_AN_ARTIST = Regex("^(?:various(?: artists)?|va|v a|divers|artistes? divers|youtube music|jiosaavn|unknown|unknown artist|artiste inconnu)$")
     }

@@ -278,7 +278,15 @@ class RecoPipeline(
             val primaryArtist = ArtistNames.primary(c.artist, beforeAmpersand = true)
             if (primaryArtist.isNotEmpty()) {
                 val resolved = authority.resolve(primaryArtist, ctx.profile.genres.keys)
-                if (resolved != null && (resolved.deezerId != null || !resolved.mbid.isNullOrBlank())) {
+                val identified = resolved != null && (resolved.deezerId != null || !resolved.mbid.isNullOrBlank())
+                // A candidate tied to one of the listener's own artists is trusted by name; a stranger whose identity no
+                // catalogue vouches for may be a namesake, and is rejected rather than offered.
+                val tiedToKnownArtist = c.provenance.any { it.kind == ProvKind.ARTIST || it.kind == ProvKind.COLLAB }
+                if (!identified && !tiedToKnownArtist) {
+                    log("Excluded unidentified-artist candidate: ${c.artist} - ${c.title}")
+                    return false
+                }
+                if (resolved != null && identified) {
                     val isOfficial = verifier.isOfficialTrackAndRelease(resolved, c.title, c.album)
                     if (!isOfficial) {
                         log("Excluded non-official candidate: ${c.artist} - ${c.title} on [${c.album}]")

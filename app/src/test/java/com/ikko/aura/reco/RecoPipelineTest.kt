@@ -410,4 +410,38 @@ class RecoPipelineTest {
         assertFalse("OG Bichotas must be rejected", "ytm:gaga-fake-bichotas" in allPicks)
         assertFalse("Girlboss energy must be rejected", "ytm:gaga-fake-girlboss" in allPicks)
     }
+
+    @Test fun `a discovery whose artist cannot be identified is rejected`() = runBlocking {
+        val s = store()
+        // Authority + verifier that resolve nothing: every artist is a stranger to every catalogue.
+        val mbClient = com.ikko.aura.data.musicbrainz.MusicBrainzClient(httpGet = { """{ "count": 0, "artists": [] }""" })
+        val deezerClient = com.ikko.aura.data.deezer.DeezerClient(httpGet = { """{ "data": [] }""" })
+        val authority = com.ikko.aura.reco.authority.ArtistAuthority(mbClient, deezerClient)
+        val verifier = com.ikko.aura.reco.authority.DiscographyVerifier(deezerClient, mbClient)
+
+        // ByArtist queries return the listener's own songs (ARTIST provenance, kept even when unresolvable); the
+        // "similar to" queries return a stranger whose identity nothing vouches for.
+        val source = FakeSource(
+            "ytm",
+            catalogue = { q ->
+                if (q.startsWith("related:")) listOf(candidate("Mystery Song", "Stranger Artist", id = "ytm:stranger"))
+                else (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") }
+            },
+            verdict = { Verification(true, isSong = true) },
+        )
+        val pipe = RecoPipeline(
+            store = s,
+            sources = { listOf(source) },
+            clock = { NOW },
+            zone = ZONE,
+            authority = authority,
+            verifier = verifier,
+            deezerClient = deezerClient,
+        )
+        pipe.refresh(force = true)
+
+        val ids = s.playlists.values.flatten().map { it.candidate.id }
+        assertFalse("a stranger no catalogue identifies is not proposed", "ytm:stranger" in ids)
+        assertTrue("the listener's own artists still fill the playlists", ids.isNotEmpty())
+    }
 }
