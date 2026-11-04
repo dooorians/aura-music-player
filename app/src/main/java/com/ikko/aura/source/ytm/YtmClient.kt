@@ -321,8 +321,11 @@ class YtmClient @Inject constructor(
             val parts = item.name.split(" - ", limit = 2)
             val dashed = parts.size == 2
             // A Topic channel's name IS the artist. A regular channel's name is a channel, not an artist: when the title
-            // reads "Artist - Song", the part before the dash names the artist (and what follows is the song).
-            val artistFromTitle = if (!topic && dashed && parts[0].trim().isNotEmpty()) parts[0].trim() else null
+            // reads "Artist - Song", the part before the dash names the artist (and what follows is the song). A credit
+            // that starts with "feat." is a guest, not the artist: it must not stand in for one.
+            val titleArtist = parts.getOrNull(0)?.trim().orEmpty()
+            val featuringOnly = Regex("^(?:feat|ft|featuring)\\b", RegexOption.IGNORE_CASE).containsMatchIn(titleArtist)
+            val artistFromTitle = if (!topic && dashed && titleArtist.isNotEmpty() && !featuringOnly) titleArtist else null
             val artist = artistFromTitle ?: cleanedUploader
             if (artist.isEmpty()) return@mapNotNull null
             // "Artist - Song" from the artist's own channel: the song's own name is what follows the dash.
