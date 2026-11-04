@@ -66,6 +66,8 @@ data class ForYouUiState(
     val cards: List<ForYouCard> = emptyList(),
     /** The albums played lately, most recent first. */
     val recent: List<Album> = emptyList(),
+    /** What the rows were drawn from: asked again for what takes the place of a refused album when a row's reserve has run out. */
+    val rotation: com.ikko.aura.data.home.RotationContext? = null,
     /** Onglet "Reprendre": derniers albums/titres écoutés. */
     val resumeAlbums: List<Album> = emptyList(),
     /** When each album was last played (epoch ms), for the "Il y a 2 h" line of the recents. */
@@ -474,6 +476,7 @@ class HomeWidgetsViewModel @Inject constructor(
             .distinctBy { it.id }
             .take(MAX_RECENT)
 
+        var rotationOut: com.ikko.aura.data.home.RotationContext? = null
         ForYouUiState(
             loaded = true,
             cards = built.filter { it.id !in hidden },
@@ -564,8 +567,7 @@ class HomeWidgetsViewModel @Inject constructor(
                     val arr = runCatching { org.json.JSONArray(meta.genresJson) }.getOrNull() ?: continue
                     for (i in 0 until arr.length()) tasteTags.merge(arr.getString(i).lowercase(), meta.affinityScore, Double::plus)
                 }
-                com.ikko.aura.data.home.HomeRotation.arrange(
-                    com.ikko.aura.data.home.RotationContext(
+                val rotation = com.ikko.aura.data.home.RotationContext(
                         base = base, loop = loop, listens = everything,
                         // What the engine found, and the albums of the artists chosen (their discographies): the pool the rows are drawn from.
                         external = (
@@ -591,9 +593,11 @@ class HomeWidgetsViewModel @Inject constructor(
                         },
                         // The library's artists and the ones chosen: the rows "Plus de…" are made for them.
                         knownArtists = (allAlbums.map { it.artist } + chosenArtists).flatMap { name -> com.ikko.aura.reco.ArtistNames.split(name) + com.ikko.aura.reco.ArtistNames.primaryKey(name) }.filter { it.isNotEmpty() }.toSet(),
-                    ),
                 )
+                rotationOut = rotation
+                com.ikko.aura.data.home.HomeRotation.arrange(rotation)
             },
+            rotation = rotationOut,
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ForYouUiState())
 
@@ -658,7 +662,10 @@ class HomeWidgetsViewModel @Inject constructor(
     ) { live, held, rows, blocked, refused ->
         // The rows are the ones held, never the live ones: nothing moves in them because of what is played or found meanwhile.
         // Not drawn before they have settled, rather than drawn and then drawn again.
-        val sections = rows?.let { com.ikko.aura.data.home.SectionHold.reconcile(it, live.sections, blocked.mapTo(HashSet()) { b -> b.key }, refused) }
+        val sections = rows?.let { com.ikko.aura.data.home.SectionHold.reconcile(
+            it, live.sections, blocked.mapTo(HashSet()) { b -> b.key }, refused,
+            poolOf = { id -> live.rotation?.let { ctx -> com.ikko.aura.data.home.HomeRotation.pool(id, ctx) }.orEmpty() },
+        ) }
             ?: emptyList()
         // Nothing held until there is something to hold: a library still being read must not freeze empty carousels.
         if (held == null || (held.resumeAlbums.isEmpty() && held.favoriteAlbums.isEmpty() && held.newAlbums.isEmpty() && held.discoveryAlbums.isEmpty())) live.copy(sections = sections)

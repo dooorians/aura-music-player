@@ -107,6 +107,21 @@ object HomeRotation {
 
     // ------------------------------------------------------------------------------------------------------------------
 
+    /**
+     * Everything that fits the row [rowId] in the arrangement of [c], not only what it showed or kept in reserve: its theme asked again from the
+     * whole pool, with nothing yet shown elsewhere set aside. What takes the place of an album that is refused or of an artist that is blocked
+     * is drawn from here when the reserve has run out. Empty for a row that has no theme to ask again (the head, "En boucle").
+     */
+    fun pool(rowId: String, c: RotationContext): List<SectionAlbum> {
+        val candidates = candidates(c)
+        val wanted = when {
+            rowId.startsWith("artist:") && !rowId.startsWith("artist:ext:") -> listOf(rowId, "artist:ext:" + rowId.removePrefix("artist:"))
+            else -> listOf(rowId)
+        }
+        val section = candidates.firstOrNull { it.id in wanted }?.build?.invoke(emptySet()) ?: return emptyList()
+        return (section.albums + section.spare).distinctBy { it.key }
+    }
+
     private fun hash(seed: Long, key: String): Long = ((seed * 31 + key.hashCode()) * 0x9E3779B97F4A7C15uL.toLong()).let { (it xor (it ushr 29)) and Long.MAX_VALUE }
 
     private const val MARK = "\u0001a:"
@@ -158,7 +173,8 @@ object HomeRotation {
     private fun section(id: String, title: String, albums: List<SectionAlbum>, kicker: String? = null, subtitle: String? = null, spare: List<SectionAlbum> = emptyList()): HomeSection? =
         if (albums.size >= ROW) HomeSection(id, kicker, title, albums.take(ROW), subtitle, spare) else null
 
-    private const val SPARE = 6
+    /** What a row keeps in reserve: enough that refusing a few albums (or blocking their artists) still leaves what takes their place. */
+    private const val SPARE = 12
 
     /** What fits the row as well as what it shows, one per artist: what takes the place of an album that is refused or of an artist that is blocked. */
     private fun spareFor(source: List<SectionAlbum>, used: Set<String>, picked: List<SectionAlbum>, sameArtist: Boolean): List<SectionAlbum> {

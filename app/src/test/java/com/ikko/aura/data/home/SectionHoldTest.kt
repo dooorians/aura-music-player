@@ -91,4 +91,31 @@ class SectionHoldTest {
         assertEquals(listOf("Album 1", "Album 3", "Album 20"), out.single().albums.map { it.title })
         assertEquals(listOf("Album 21"), out.single().spare.map { it.title })
     }
+
+    @Test fun `when the reserve has run out the row's theme is asked again from the whole pool`() {
+        val bare = HomeSection("rock", null, "rock", listOf(album(1, "Same"), album(2, "Other"), album(3, "Third")))
+        val pool = listOf(album(30, "P1"), album(31, "P2"), album(32, "P3"), album(33, "Same"))
+        val asked = ArrayList<String>()
+        val out = SectionHold.reconcile(listOf(bare), emptyList(), setOf(ArtistNames.key("Same")), emptySet()) { id -> asked += id; pool }
+        // Album 1 went with its artist; the pool gives the row back its line, and not an album of the blocked artist.
+        assertEquals(listOf("Album 2", "Album 3", "Album 30"), out.single().albums.map { it.title })
+        assertEquals(listOf("rock"), asked)
+    }
+
+    @Test fun `the pool is not asked when the reserve is enough`() {
+        val withSpare = HomeSection("rock", null, "rock", listOf(album(1), album(2), album(3)), spare = listOf(album(20)))
+        var asked = false
+        val out = SectionHold.reconcile(listOf(withSpare), emptyList(), emptySet(), setOf(AlbumKeys.ofRef("r2"))) { asked = true; emptyList() }
+        assertEquals(3, out.single().albums.size)
+        assertEquals(false, asked)
+    }
+
+    @Test fun `what shows in another row is not drawn from the pool again`() {
+        val rows = listOf(
+            HomeSection("a", null, "a", listOf(album(1, "Same"), album(2), album(3))),
+            HomeSection("b", null, "b", listOf(album(30), album(5), album(6))),
+        )
+        val out = SectionHold.reconcile(rows, emptyList(), setOf(ArtistNames.key("Same")), emptySet()) { listOf(album(30), album(31)) }
+        assertEquals(listOf("Album 2", "Album 3", "Album 31"), out.first { it.id == "a" }.albums.map { it.title })
+    }
 }

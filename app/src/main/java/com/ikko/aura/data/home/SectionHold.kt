@@ -33,7 +33,14 @@ object SectionHold {
      * what went (a row short of one line is better than a row, and its title, vanishing for one refused album). It goes only when it is
      * about the artist that was blocked, or when nothing of it is left.
      */
-    fun reconcile(held: List<HomeSection>, live: List<HomeSection>, blocked: Set<String>, refused: Set<String>): List<HomeSection> {
+    fun reconcile(
+        held: List<HomeSection>,
+        live: List<HomeSection>,
+        blocked: Set<String>,
+        refused: Set<String>,
+        /** Everything that fits a row (by its id), asked only for a row that lost an album and has no reserve left. */
+        poolOf: (String) -> List<SectionAlbum> = { emptyList() },
+    ): List<HomeSection> {
         if (blocked.isEmpty() && refused.isEmpty()) return held
         val taken = HashSet<String>()
         held.forEach { s -> s.albums.forEach { if (!gone(it, blocked, refused)) taken += it.key } }
@@ -42,9 +49,11 @@ object SectionHold {
             if (aboutBlockedArtist(s, blocked)) return@mapNotNull null
             val kept = s.albums.filterNot { gone(it, blocked, refused) }
             // What takes its place: the same row in the arrangement of the moment, an album not yet shown anywhere.
-            val more = (live.firstOrNull { it.id == s.id }?.let { it.albums + it.spare }.orEmpty() + s.spare)
-                .distinctBy { it.key }
+            fun candidates(from: List<SectionAlbum>) = from.distinctBy { it.key }
                 .filter { !gone(it, blocked, refused) && it.key !in taken && kept.none { k -> k.key == it.key } }
+            var more = candidates(live.firstOrNull { it.id == s.id }?.let { it.albums + it.spare }.orEmpty() + s.spare)
+            // The reserve has not enough: the row's theme is asked again from the whole pool.
+            if (kept.size + more.size < HomeSections.PER_ROW) more = candidates(more + poolOf(s.id))
             val row = (kept + more).take(HomeSections.PER_ROW)
             if (row.isEmpty()) null
             else s.copy(albums = row, spare = s.spare.filter { sp -> row.none { it.key == sp.key } }).also { r -> r.albums.forEach { taken += it.key } }
