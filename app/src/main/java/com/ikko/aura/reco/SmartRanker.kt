@@ -167,7 +167,20 @@ object SmartRanker {
             // Not the same artist twice in a row either: what was just picked leaves the list with its artist if others remain.
             val rest = candidates.filter { it.trackId != pick.trackId }
             candidates = rest.filter { it.artistKey != pick.artistKey }.ifEmpty { rest }
+            // One genre must not take the queue over: once it exceeds its share, it is set aside for the rest of the draw.
+            candidates = capGenre(candidates, out)
         }
         return out
     }
+}
+
+/** Removes the most-played genre of [out] from [candidates] once it exceeds its allowed share; nothing when it would empty the pool. */
+private fun capGenre(candidates: List<SmartEntry>, out: List<SmartEntry>): List<SmartEntry> {
+    if (out.size < 3) return candidates
+    val counts = HashMap<String, Int>()
+    for (e in out) for (g in e.genres) if (g.isNotBlank()) counts.merge(g.lowercase(), 1, Int::plus)
+    val dominant = counts.maxByOrNull { it.value } ?: return candidates
+    if (dominant.value.toDouble() / out.size <= RecommendationConfig.MAX_GENRE_SHARE) return candidates
+    val blocked = dominant.key
+    return candidates.filter { e -> e.genres.none { it.lowercase() == blocked } }.ifEmpty { candidates }
 }

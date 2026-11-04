@@ -57,6 +57,8 @@ object RecommendationConfig {
     // --- phase 3: distribution ---
     const val SHARE_EXPLOIT = 0.70
     const val SHARE_EXPLORE = 0.20
+    /** One genre's ceiling in the queue: once a genre passes this share of what is picked, it is set aside. */
+    const val MAX_GENRE_SHARE = 0.40
     const val POOL_SIZE = 15
     const val EXPLORE_MAX_PLAYS = 5
     const val EXPLORE_TOP_SHARE = 0.20

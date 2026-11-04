@@ -81,4 +81,13 @@ class SmartRankerTest {
         val s = SmartRanker.score(listOf(a, b), ctx).associate { it.entry.trackId to it.score }
         assertEquals(30.0, s.getValue("b") - s.getValue("a"), 1e-9)
     }
+
+    @Test fun `one genre does not take the queue over`() {
+        // Ninety percent of the library is one genre: a draw of ten must still leave room for the rest.
+        val pop = (1..30).map { e("p$it", "pa$it", genres = setOf("pop")) }
+        val other = (1..10).map { e("o$it", "oa$it", genres = setOf("jazz")) }
+        val out = SmartRanker.next(pop + other, ctx(), 10, Random(3))
+        val popCount = out.count { it.genres.contains("pop") }
+        assertTrue("pop took $popCount of ${out.size}", popCount < 9)
+    }
 }
