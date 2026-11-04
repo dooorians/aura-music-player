@@ -11,7 +11,11 @@ data class ListenEvent(
     /** The listener started it (a tap), as opposed to the queue reaching it. */
     val manualStart: Boolean,
     val atMs: Long,
-)
+    /** The queue reached it by itself (the automix, a radio): a complete listen then says little of the listener's taste. */
+    val autoplay: Boolean = false,
+) {
+    val origin: PlayOrigin get() = PlayOrigin.of(manualStart, autoplay)
+}
 
 /** The bands of the day plays are counted in. */
 enum class DayPart { MORNING, AFTERNOON, EVENING, NIGHT;
@@ -40,7 +44,8 @@ object AffinityScorer {
                 s = s.copy(replayCount = s.replayCount + 1, completedCount = s.completedCount + 1, consecutiveSkips = 0)
             }
             fraction >= RecommendationConfig.COMPLETED_FRACTION -> {
-                delta += RecommendationConfig.COMPLETED
+                delta += if (e.origin == PlayOrigin.AUTOPLAY) RecommendationConfig.COMPLETED_AUTOPLAY else RecommendationConfig.COMPLETED
+                if (e.origin == PlayOrigin.MANUAL) delta += RecommendationConfig.MANUAL_COMPLETED
                 s = s.copy(completedCount = s.completedCount + 1, consecutiveSkips = 0)
             }
             e.transition == Transition.QUEUE_REPLACED -> {

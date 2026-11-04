@@ -16,7 +16,11 @@ import org.json.JSONArray
  * write is off the main thread and one at a time, and a failed write is dropped: the player never waits on it.
  */
 @Singleton
-class SmartTracker @Inject constructor(private val dao: SmartDao, private val enricher: dagger.Lazy<LastFmEnricher>) {
+class SmartTracker @Inject constructor(
+    private val dao: SmartDao,
+    private val enricher: dagger.Lazy<LastFmEnricher>,
+    private val acoustics: AcousticBridge,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     val session = SessionContext()
@@ -41,19 +45,28 @@ class SmartTracker @Inject constructor(private val dao: SmartDao, private val en
         dao.putArtist(meta.copy(affinityScore = meta.affinityScore + delta * RecommendationConfig.ARTIST_ECHO, isBlocked = blocked ?: meta.isBlocked))
     }
 
-    /** [track] was left: how much of it was heard, how it was left, and whether the listener had started it. */
-    fun listenEnded(track: Track, playedMs: Long, durationMs: Long, transition: Transition, manualStart: Boolean) {
+    /**
+     * [track] was left: how much of it was heard, how it was left, whether the listener had started it and whether the queue only
+     * reached it by itself ([autoplay]: the automix, a radio).
+     */
+    fun listenEnded(track: Track, playedMs: Long, durationMs: Long, transition: Transition, manualStart: Boolean, autoplay: Boolean = false) {
         val now = System.currentTimeMillis()
         scope.launch {
             runCatching {
                 mutex.withLock {
-                    val result = AffinityScorer.apply(statsOf(track, now), ListenEvent(playedMs, if (durationMs > 0) durationMs else track.durationMs, transition, manualStart, now))
+                    val result = AffinityScorer.apply(statsOf(track, now), ListenEvent(playedMs, if (durationMs > 0) durationMs else track.durationMs, transition, manualStart, now, autoplay))
                     dao.putStats(result.stats)
                     echo(track, result.stats.artistKey, result.delta)
                     session.recordPlay(track.id, result.stats.artistKey)
                     // What Last.fm says of this artist is fetched in the background, when it is old.
                     enricher.get().listened(track.artist)
-                    if (result.delta <= RecommendationConfig.QUICK_SKIP) session.recordQuickSkip(genresOf(result.stats.artistKey))
+                    if (result.delta <= RecommendationConfig.QUICK_SKIP) {
+                        session.recordQuickSkip(genresOf(result.stats.artistKey))
+                        // Left within seconds: this song and, a little, its artist rest for a while.
+                        session.recordFastSkip(track.id, result.stats.artistKey, now)
+                    }
+                    // A song heard enough to say what the session sounds like.
+                    if (playedMs >= RecommendationConfig.QUICK_SKIP_MS) acoustics.of(track.id)?.let { session.recordAcoustics(it.bpm, it.energy) }
                 }
             }
         }

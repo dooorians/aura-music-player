@@ -10,6 +10,9 @@ data class SmartEntry(
     val albumKey: String,
     val genres: Set<String>,
     val stats: TrackStatsEntity?,
+    /** Tempo and mean energy from the Automix analysis, when the song has been analysed. */
+    val bpm: Double? = null,
+    val energy: Double? = null,
 )
 
 /** Everything a choice depends on, loaded in memory once. */
@@ -50,12 +53,13 @@ object SmartRanker {
         val lastArtists = ctx.session.lastArtists()
         val artistCount = all.map { it.artistKey }.distinct().size
         val useArtistRule = artistCount >= RecommendationConfig.MIN_ARTISTS_FOR_ARTIST_FILTER
+        fun rested(e: SmartEntry) = !ctx.session.isCoolingDown(e.trackId, ctx.nowMs)
         fun notRecentlyPlayed(e: SmartEntry) = (e.stats?.lastPlayedTimestamp ?: 0L).let { it == 0L || ctx.nowMs - it > RecommendationConfig.RECENT_PLAY_MS }
-        val strict = never.filter { it.trackId != ctx.current?.trackId && notRecentlyPlayed(it) && it.trackId !in recentIds && (!useArtistRule || it.artistKey !in lastArtists) }
+        val strict = never.filter { it.trackId != ctx.current?.trackId && rested(it) && notRecentlyPlayed(it) && it.trackId !in recentIds && (!useArtistRule || it.artistKey !in lastArtists) }
         if (strict.isNotEmpty()) return strict
-        val noArtistRule = never.filter { it.trackId != ctx.current?.trackId && notRecentlyPlayed(it) && it.trackId !in recentIds }
+        val noArtistRule = never.filter { it.trackId != ctx.current?.trackId && rested(it) && notRecentlyPlayed(it) && it.trackId !in recentIds }
         if (noArtistRule.isNotEmpty()) return noArtistRule
-        val noDayRule = never.filter { it.trackId != ctx.current?.trackId && it.trackId !in recentIds }
+        val noDayRule = never.filter { it.trackId != ctx.current?.trackId && rested(it) && it.trackId !in recentIds }
         if (noDayRule.isNotEmpty()) return noDayRule
         return never.filter { it.trackId != ctx.current?.trackId }
     }
@@ -67,6 +71,13 @@ object SmartRanker {
         val y = b.filterNot { GenreNormalizer.isGeneric(it) }.map { it.lowercase() }.toSet()
         if (x.isEmpty() || y.isEmpty()) return 0.0
         return x.intersect(y).size.toDouble() / x.union(y).size
+    }
+
+    /** 0..1: how ready a song is to be heard again; a song never heard is fully available. */
+    fun availability(lastPlayedMs: Long, nowMs: Long): Double {
+        if (lastPlayedMs <= 0L) return 1.0
+        val hours = ((nowMs - lastPlayedMs) / 3_600_000.0).coerceAtLeast(0.0)
+        return 1.0 - exp(-hours / RecommendationConfig.AVAILABILITY_HOURS)
     }
 
     class Scored(val entry: SmartEntry, val score: Double, val similarity: Double, val cooc: Double)
@@ -82,6 +93,10 @@ object SmartRanker {
             val like = if (s?.isLiked == true) c.LIKE_BONUS else 0.0
             val trackPart = (((s?.affinityScore ?: 0.0) + like) * (0.5 + completion)) * c.W_TRACK
             val artistPart = ((ctx.artistAffinity[e.artistKey] ?: 0.0) * c.ARTIST_PART + (albumAffinity[e.albumKey] ?: 0.0) * c.ALBUM_PART) * c.W_ARTIST_ALBUM
+            // Affinity is what the listener loves for good; availability is how long it has been since they heard it. A favourite
+            // just heard keeps only part of its score until the hours bring it back, so the same few never loop.
+            val availability = availability(s?.lastPlayedTimestamp ?: 0L, ctx.nowMs)
+            val longTerm = (trackPart + artistPart).let { if (it > 0) it * (c.MIN_AVAILABILITY + (1 - c.MIN_AVAILABILITY) * availability) else it }
 
             val sim = when {
                 ctx.current == null -> 0.0
@@ -118,8 +133,11 @@ object SmartRanker {
             }
             if (e.genres.any { it.lowercase() in ctx.session.penalizedGenres() }) penalty += c.SESSION_GENRE_PENALTY
             if (e.artistKey in ctx.blockedNeighbors) penalty += c.BLOCKED_NEIGHBOR_PENALTY
+            penalty += ctx.session.artistCooldownPenalty(e.artistKey)
+            penalty += ctx.session.fastSkipPenalty(e.artistKey, ctx.nowMs)
+            penalty += ctx.session.coherencePenalty(e.bpm, e.energy)
 
-            Scored(e, trackPart + artistPart + contextPart + hourPart + weekPart + bonus - penalty, sim, cooc)
+            Scored(e, longTerm + contextPart + hourPart + weekPart + bonus - penalty, sim, cooc)
         }
     }
 

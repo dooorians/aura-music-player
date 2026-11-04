@@ -2,6 +2,7 @@ package com.ikko.aura.source
 
 import com.ikko.aura.data.model.Track
 import com.ikko.aura.navigation.streamedAlbumRoute
+import com.ikko.aura.reco.AlbumIdentity
 import com.ikko.aura.reco.ArtistNames
 import com.ikko.aura.reco.TrackIdentity
 import com.ikko.aura.reco.authority.CompilationTitles
@@ -69,7 +70,7 @@ class StreamedAlbumResolver internal constructor(
 
         fun isUnwanted(albumTitle: String): Boolean {
             val low = albumTitle.lowercase()
-            if (CompilationTitles.matches(albumTitle)) return true
+            if (CompilationTitles.matches(albumTitle, track.title + " " + track.album)) return true
             return unwantedWords.any { low.contains(it) && !track.title.lowercase().contains(it) && !track.album.lowercase().contains(it) }
         }
 
@@ -81,13 +82,11 @@ class StreamedAlbumResolver internal constructor(
         }
 
         fun pick(refs: List<com.ikko.aura.source.ytm.YtmAlbumRef>, albumTitle: String): String? {
-            val wanted = TrackIdentity.baseKey(albumTitle)
-            val filtered = refs.filter { ref -> !isUnwanted(ref.title) && artistMatches(ref) }
-            val best = filtered.firstOrNull { ref -> TrackIdentity.baseKey(ref.title) == wanted }
-                ?: filtered.firstOrNull { ref ->
-                    val k = TrackIdentity.baseKey(ref.title)
-                    k.isNotEmpty() && wanted.isNotEmpty() && (k.startsWith(wanted) || wanted.startsWith(k))
-                }
+            // The same record under the same artist, in the edition asked for (2) or, failing that, with extras on it (1): a Live, an
+            // Instrumental, a cover or a tribute is another record, and a title that merely starts like the wanted one is not it either.
+            val best = refs.filter { ref -> !isUnwanted(ref.title) && artistMatches(ref) }
+                .mapNotNull { ref -> AlbumIdentity.fit(albumTitle, ref.title)?.let { ref to it } }
+                .maxByOrNull { it.second }?.first
             return best?.let { streamedAlbumRoute(it.id, online = true) }
         }
 

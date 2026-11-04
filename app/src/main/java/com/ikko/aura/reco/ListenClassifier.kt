@@ -14,12 +14,23 @@ enum class Transition {
     UNKNOWN,
 }
 
+/** Who chose the song: the listener's own tap, a queue they built or started, or the app's automix / radio. */
+enum class PlayOrigin { MANUAL, QUEUE, AUTOPLAY;
+    companion object {
+        fun of(manualStart: Boolean, autoplay: Boolean) = when {
+            manualStart -> MANUAL
+            autoplay -> AUTOPLAY
+            else -> QUEUE
+        }
+    }
+}
+
 /** Tells a rejection from an interruption, and a listen from a glance. */
 object ListenClassifier {
 
     /** A song heard at least this fraction through is a listen, however it was left. */
     const val COMPLETED_FRACTION = 0.85
-    const val EARLY_MS = 10_000L
+    const val EARLY_MS = 15_000L
     const val EARLY_FRACTION = 0.08
     const val SKIP_FRACTION = 0.5
 

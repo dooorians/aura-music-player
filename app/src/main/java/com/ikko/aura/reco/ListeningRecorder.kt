@@ -23,8 +23,8 @@ class ListeningRecorder @Inject constructor(
     private val written = AtomicInteger()
 
     /** [context] is the [RecoKind.key] of the playlist the song was played from, if it was. */
-    fun songLeft(track: Track, playedMs: Long, durationMs: Long, transition: Transition, context: String?, manualStart: Boolean = false) {
-        smart.listenEnded(track, playedMs, durationMs, transition, manualStart)
+    fun songLeft(track: Track, playedMs: Long, durationMs: Long, transition: Transition, context: String?, manualStart: Boolean = false, autoplay: Boolean = false) {
+        smart.listenEnded(track, playedMs, durationMs, transition, manualStart, autoplay)
         // The same moment is a scrobble, when Last.fm is connected and the song was heard enough.
         lastFm.songLeft(track, playedMs, durationMs, System.currentTimeMillis() - playedMs)
         // A glance of a second or two is not a listen nor much of a refusal.

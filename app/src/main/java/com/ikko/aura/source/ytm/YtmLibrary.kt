@@ -134,6 +134,9 @@ class YtmLibrary @Inject constructor(
         dao.pruneOrphanBindings()
     }
 
+    /** Forgets the album pages and JioSaavn matches the looser rules of the past attached to songs nothing keeps; they are found again, strictly. */
+    suspend fun purgeStaleLinks(): Int = dao.purgeStaleLinks()
+
     /** Whether a song's source is on: YouTube Music by its own switch, an added source by its own. */
     private fun offered(key: String, ytmOn: Boolean, others: Set<String>): Boolean =
         if (key.startsWith("${YTM.value}:")) ytmOn

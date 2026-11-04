@@ -48,6 +48,13 @@ object TrackIdentity {
     /** The base key of a song for matching against others' bases: base title and primary artist. */
     fun baseIdentity(title: String, artist: String): String = baseKey(title) + "\u0001" + ArtistNames.split(artist).firstOrNull().orEmpty()
 
+    /**
+     * The one key a song answers to in every source, local or streamed: its primary artist and its title without "(feat. ...)" and the
+     * other decorations that do not change the recording ("- Remastered 2011"). What says it is another recording ("(Live)", "(Remix)")
+     * stays, so the live take and the studio one keep their own affinity.
+     */
+    fun canonicalKey(artist: String, title: String): String = ArtistNames.primaryKey(artist) + "::" + titleKey(title)
+
     /** A song's key for exact matching: title and primary artist. */
     fun key(title: String, artist: String): String = titleKey(title) + "\u0001" + ArtistNames.split(artist).firstOrNull().orEmpty()
 

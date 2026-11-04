@@ -55,6 +55,14 @@ class LocalMusicRepository @Inject constructor(
     init {
         repositoryScope.launch {
             runCatching { ytmLibrary.prune() }
+            // Once: the links made before the album matching was made strict.
+            runCatching {
+                val done = context.getSharedPreferences("aura_maintenance", Context.MODE_PRIVATE)
+                if (!done.getBoolean("stale_links_purged_v1", false)) {
+                    ytmLibrary.purgeStaleLinks()
+                    done.edit().putBoolean("stale_links_purged_v1", true).apply()
+                }
+            }
             ytmLibrary.observeKept().collect { _saved.value = it }
         }
     }

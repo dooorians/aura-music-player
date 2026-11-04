@@ -83,6 +83,25 @@ interface CatalogDao {
     @Query("DELETE FROM track_bindings WHERE sourceId != 'local' AND trackKey NOT IN (SELECT `key` FROM catalog_tracks)")
     suspend fun pruneOrphanBindings()
 
+    /** Album pages attached in the past by looser matching, on songs nothing keeps: forgotten, so the strict resolver finds them again. */
+    @Query(
+        "UPDATE catalog_tracks SET albumRef = '' WHERE albumRef != '' AND inLibrary = 0 AND `key` LIKE '%:%' " +
+            "AND `key` NOT IN (SELECT trackId FROM playlist_tracks)",
+    )
+    suspend fun clearLooseAlbumRefs(): Int
+
+    /** JioSaavn matches made by the old automatic fallback, for songs nothing keeps. */
+    @Query(
+        "DELETE FROM track_bindings WHERE sourceId = 'jiosaavn' AND trackKey IN " +
+            "(SELECT `key` FROM catalog_tracks WHERE inLibrary = 0 AND `key` NOT LIKE 'jiosaavn:%') " +
+            "AND trackKey NOT IN (SELECT trackId FROM playlist_tracks)",
+    )
+    suspend fun deleteFallbackJioSaavnBindings(): Int
+
+    /** Wipes the wrong associations of the past in one transaction; the number of rows touched. */
+    @Transaction
+    suspend fun purgeStaleLinks(): Int = clearLooseAlbumRefs() + deleteFallbackJioSaavnBindings()
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTracks(tracks: List<CatalogTrackEntity>)
 

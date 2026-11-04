@@ -30,7 +30,6 @@ object SourceModule {
         remote: RemoteSources,
         downloads: YtmDownloads,
         jioSaavnSource: com.ikko.aura.source.jiosaavn.JioSaavnSource,
-        jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient,
     ): TrackResolver {
         val remoteProviders = java.util.concurrent.ConcurrentHashMap<SourceId, SourceProvider>()
         return TrackResolver(bindings, { id: SourceId ->
@@ -44,16 +43,14 @@ object SourceModule {
             }
         }, { it }, { title, artist ->
             val query = "$title $artist".trim()
-            val saavn = runCatching { jioSaavnClient.searchSongs(query) }.getOrNull().orEmpty()
-                .take(3)
-                .mapNotNull { res -> jioSaavnSource.playable(res.id) }
             val ytmHits = if (ytmClient.isEnabled()) {
                 runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ytmClient.search(query).songs } }
                     .getOrNull().orEmpty()
                     .take(3)
                     .mapNotNull { s -> ytm.playable(s.videoId) }
             } else emptyList()
-            saavn + ytmHits
+            // Only YouTube Music is tried when a song has no source left: a JioSaavn search by title answers with namesakes.
+            ytmHits
         })
     }
 }

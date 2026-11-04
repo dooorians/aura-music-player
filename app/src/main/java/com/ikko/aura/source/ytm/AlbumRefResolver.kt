@@ -48,7 +48,7 @@ class AlbumRefResolver internal constructor(
 
         fun isUnwanted(albumTitle: String): Boolean {
             val low = albumTitle.lowercase()
-            if (CompilationTitles.matches(albumTitle)) return true
+            if (CompilationTitles.matches(albumTitle, title)) return true
             return unwantedWords.any { low.contains(it) && !wantTitle.contains(it) }
         }
 

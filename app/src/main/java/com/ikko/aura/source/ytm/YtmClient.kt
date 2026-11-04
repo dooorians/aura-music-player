@@ -20,6 +20,7 @@ import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
+import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.StreamInfo
@@ -96,7 +97,8 @@ class YtmClient @Inject constructor(
     @Synchronized
     private fun ensureInit() {
         if (initialised) return
-        NewPipe.init(Http, Localization.DEFAULT)
+        // One catalogue: French, Belgium. The default (en-GB) mixes in the namesakes of every market.
+        NewPipe.init(Http, Localization(LANGUAGE, REGION), ContentCountry(REGION))
         initialised = true
     }
 
@@ -405,6 +407,9 @@ class YtmClient @Inject constructor(
                 ?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
             return Generated(true, album, artists)
         }
+
+        const val LANGUAGE = "fr"
+        const val REGION = "BE"
 
         val EXPIRE = Regex("[?&]expire=(\\d+)")
         val RELEASED_ON = Regex("Released on:\\s*(\\d{4}-\\d{2}-\\d{2})")

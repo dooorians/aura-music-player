@@ -102,6 +102,8 @@ class PlayerViewModel @Inject constructor(
     private var listeningContext: String? = null
     /** The song the listener started from the interface and that has not been left yet: its listen counts as chosen. */
     private var manualTrackId: String? = null
+    /** The songs the app queued by itself (the automix, a radio): reaching one is not the listener's choice. */
+    private val autoplayIds = HashSet<String>()
     private var refilling = false
 
     /**
@@ -121,7 +123,7 @@ class PlayerViewModel @Inject constructor(
                         .getOrDefault(emptyList())
                 }
                 // Not if something else was started meanwhile.
-                if (next.isNotEmpty() && _uiState.value.currentTrack?.id == state.currentTrack.id) addToQueue(next)
+                if (next.isNotEmpty() && _uiState.value.currentTrack?.id == state.currentTrack.id) { autoplayIds += next.map { it.id }; addToQueue(next) }
             } finally { refilling = false }
         }
     }
@@ -196,7 +198,7 @@ class PlayerViewModel @Inject constructor(
             if (more.isEmpty()) return@launch
             withContext(Dispatchers.Main) {
                 // Not if something else was started meanwhile.
-                if (_uiState.value.currentTrack?.id == track.id) addToQueue(more)
+                if (_uiState.value.currentTrack?.id == track.id) { autoplayIds += more.map { it.id }; addToQueue(more) }
             }
         }
     }
@@ -354,7 +356,7 @@ class PlayerViewModel @Inject constructor(
                     Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> com.ikko.aura.reco.Transition.REPEAT
                     else -> com.ikko.aura.reco.Transition.UNKNOWN
                 }
-                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, transition, listeningContext, manualStart = left.id == manualTrackId)
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, transition, listeningContext, manualStart = left.id == manualTrackId, autoplay = left.id in autoplayIds)
                 if (left.id == manualTrackId) manualTrackId = null
             }
             listeningRecorder.songStarted(track)
@@ -466,7 +468,7 @@ class PlayerViewModel @Inject constructor(
         // The change was not announced by the listener's callback (two players during a mix): how the song was left is not known.
         if (track.id != state.currentTrack?.id) {
             state.currentTrack?.let { left ->
-                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.UNKNOWN, listeningContext, manualStart = left.id == manualTrackId)
+                listeningRecorder.songLeft(left, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.UNKNOWN, listeningContext, manualStart = left.id == manualTrackId, autoplay = left.id in autoplayIds)
                 if (left.id == manualTrackId) manualTrackId = null
             }
         }
@@ -633,7 +635,7 @@ class PlayerViewModel @Inject constructor(
         val startTrack = tracks[safeStartIndex]
         val prevTrack = _uiState.value.currentTrack
         if (prevTrack != null && prevTrack.id != startTrack.id) {
-            listeningRecorder.songLeft(prevTrack, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.QUEUE_REPLACED, listeningContext, manualStart = prevTrack.id == manualTrackId)
+            listeningRecorder.songLeft(prevTrack, _positionMs.value, _durationMs.value, com.ikko.aura.reco.Transition.QUEUE_REPLACED, listeningContext, manualStart = prevTrack.id == manualTrackId, autoplay = prevTrack.id in autoplayIds)
         }
         // A queue started from the interface: the song it opens on was chosen by the listener, not reached by the queue.
         manualTrackId = startTrack.id

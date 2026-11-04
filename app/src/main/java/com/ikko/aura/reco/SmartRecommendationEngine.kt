@@ -35,6 +35,7 @@ class SmartRecommendationEngine @Inject constructor(
     private val tracker: SmartTracker,
     private val localGenres: LocalGenres,
     private val recommendations: RecommendationEngine,
+    private val acoustics: AcousticBridge,
 ) {
     /** The library's artist keys, rebuilt only when the library itself changes. */
     private class Indexed(val source: List<Track>, val artistKeys: Map<String, String>)
@@ -99,11 +100,12 @@ class SmartRecommendationEngine @Inject constructor(
         }
         // Whatever the source (YouTube Music, JioSaavn, a server): the library's own files only, the rest comes from [pickStreamed].
         val refusedAlbums = recommendations.refusedAlbumKeys.first()
+        val sound = acoustics.of(tracks.map { it.id })
         val entries = tracks.filter {
             it.id !in exclude && !YtmLibrary.isStreamed(it) && (refusedAlbums.isEmpty() || AlbumKeys.of(it.remoteAlbumId, it.album, it.artist).none { k -> k in refusedAlbums })
         }.map { t ->
             val k = keys[t.id].orEmpty()
-            SmartEntry(t.id, k, t.albumId.toString(), genresOf(t, k), snap.stats[t.id])
+            SmartEntry(t.id, k, t.albumId.toString(), genresOf(t, k), snap.stats[t.id], sound[t.id]?.bpm, sound[t.id]?.energy)
         }
         val currentEntry = current?.let { c -> entries.firstOrNull { it.trackId == c.id } ?: SmartEntry(c.id, currentKey.orEmpty(), c.albumId.toString(), genresOf(c, currentKey.orEmpty()), snap.stats[c.id]) }
         val ctx = SmartContext(

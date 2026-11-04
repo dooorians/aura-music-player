@@ -24,12 +24,12 @@ import kotlinx.coroutines.withContext
 @Singleton
 class ExternalSources @Inject constructor(
     private val ytm: YtmClient,
-    private val jioSaavn: JioSaavnClient,
     private val remote: RemoteSources,
 ) {
     suspend fun all(): List<CandidateSource> {
         val added = remote.active().map { RemoteCandidates(it.config.id, it.config.name, remote) }
-        return listOf(YtmCandidates(ytm), JioSaavnCandidates(jioSaavn)) + added
+        // JioSaavn is left out: its namesakes (Bollywood and pop of India) polluted the recommendations. It stays for the search the listener types.
+        return listOf(YtmCandidates(ytm)) + added
     }
 }
 
@@ -67,7 +67,8 @@ internal class YtmCandidates(private val client: YtmClient) : CandidateSource {
         val wanted = TrackIdentity.titleKey(title)
         val seed = client.search("$artist $title").songs.firstOrNull { TrackIdentity.titleKey(it.title) == wanted }
             ?: return@withContext emptyList()
-        client.related(seed.videoId).map { candidateOf(it, provenance) }
+        // The chart hits at the head of an anonymous "up next" are skipped: the radio is for discovering, not for the top 3 again.
+        DeepCuts.pick(client.related(seed.videoId)).map { candidateOf(it, provenance) }
     }
 
     override suspend fun verify(candidate: Candidate): Verification = withContext(Dispatchers.IO) {

@@ -33,8 +33,8 @@ class AffinityScorerTest {
         assertEquals(0.2, AffinityScorer.apply(stats(), ev(100_000), zone).delta, 1e-9)
     }
 
-    @Test fun `a tap on a song adds three, a repeat two and a half, a like fifteen`() {
-        assertEquals(1.0 + 3.0, AffinityScorer.apply(stats(), ev(190_000, tr = Transition.AUTO, manual = true), zone).delta, 1e-9)
+    @Test fun `a tap on a song adds three, finishing what was chosen two more, a repeat two and a half, a like fifteen`() {
+        assertEquals(1.0 + 3.0 + RecommendationConfig.MANUAL_COMPLETED, AffinityScorer.apply(stats(), ev(190_000, tr = Transition.AUTO, manual = true), zone).delta, 1e-9)
         assertEquals(2.5, AffinityScorer.apply(stats(), ev(200_000, tr = Transition.REPEAT), zone).delta, 1e-9)
         val liked = AffinityScorer.liked(stats().copy(isDisliked = true))
         assertTrue(liked.stats.isLiked); assertFalse(liked.stats.isDisliked)
