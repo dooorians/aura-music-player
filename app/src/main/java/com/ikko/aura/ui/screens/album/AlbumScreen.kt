@@ -563,8 +563,7 @@ fun ProgressiveTopScrim(
     pageColor: Color = Color.Black,
     height: androidx.compose.ui.unit.Dp = BITCHORD_FADE_HEIGHT,
 ) {
-    // No-op: voile noir supprimé
-    return
+    if (strength <= 0.001f) return
     val brush = remember(pageColor) {
         Brush.verticalGradient(
             colorStops = Array(BITCHORD_STOPS) { i ->
@@ -684,10 +683,7 @@ private fun AlbumHeader(
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    // The title is part of the page, not something the hero carries: it is there from the page's first
-                    // frame, laid out by the page itself. Carried in, a copy only appears halfway through the trip (the
-                    // title came late) and its last letters land off, then the real one snaps into place.
-                    modifier = Modifier,
+                    modifier = Modifier.heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
                 )
                 Text(
                     text = uiState.artist.trim(),
@@ -699,7 +695,7 @@ private fun AlbumHeader(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        // As the title above: the artist is part of the page, there from its first frame.
+                        .heroTarget(heroKey, isSub = true, text = com.ikko.aura.ui.components.HeroText(uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f)))
                         .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onArtist),
                 )
                 if (uiState.loading) {
