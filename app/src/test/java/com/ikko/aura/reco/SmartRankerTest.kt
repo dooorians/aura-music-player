@@ -90,4 +90,12 @@ class SmartRankerTest {
         val popCount = out.count { it.genres.contains("pop") }
         assertTrue("pop took $popCount of ${out.size}", popCount < 9)
     }
+
+    @Test fun `a song played but never finished is not exploited`() {
+        val bad = e("bad", "a1", TrackStatsEntity("bad", playCount = 5, completedCount = 0, affinityScore = 20.0))
+        val good = e("good", "a2", TrackStatsEntity("good", playCount = 5, completedCount = 5, affinityScore = 5.0))
+        val pools = SmartRanker.pools(SmartRanker.score(listOf(bad, good), ctx()), ctx())
+        assertTrue(pools.exploit.none { it.entry.trackId == "bad" })
+        assertTrue(pools.exploit.any { it.entry.trackId == "good" })
+    }
 }

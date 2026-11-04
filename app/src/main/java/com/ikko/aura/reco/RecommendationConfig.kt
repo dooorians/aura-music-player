@@ -59,6 +59,9 @@ object RecommendationConfig {
     const val SHARE_EXPLORE = 0.20
     /** One genre's ceiling in the queue: once a genre passes this share of what is picked, it is set aside. */
     const val MAX_GENRE_SHARE = 0.40
+    /** Below this completion rate, with this many plays and no like, a song leaves the exploit pool. */
+    const val LOW_ENGAGEMENT_PLAYS = 3
+    const val LOW_ENGAGEMENT_COMPLETION = 0.40
     const val POOL_SIZE = 15
     const val EXPLORE_MAX_PLAYS = 5
     const val EXPLORE_TOP_SHARE = 0.20

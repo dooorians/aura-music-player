@@ -123,7 +123,7 @@ object SmartRanker {
     fun pools(scored: List<Scored>, ctx: SmartContext): Pools {
         val c = RecommendationConfig
         val sorted = scored.sortedByDescending { it.score }
-        val exploit = sorted.take(c.POOL_SIZE)
+        val exploit = sorted.filter { it.entry.stats?.let(::lowEngagement) != true }.take(c.POOL_SIZE)
         // Close to what is playing (by Last.fm or by the playlists: the top fifth of those that are close at all), yet little played.
         val closeness = scored.map { maxOf(it.similarity, it.cooc) }.filter { it > 0.0 }.sortedDescending()
         val threshold = closeness.getOrNull(((closeness.size * c.EXPLORE_TOP_SHARE).toInt() - 1).coerceAtLeast(0))
@@ -184,3 +184,8 @@ private fun capGenre(candidates: List<SmartEntry>, out: List<SmartEntry>): List<
     val blocked = dominant.key
     return candidates.filter { e -> e.genres.none { it.lowercase() == blocked } }.ifEmpty { candidates }
 }
+
+/** A song played enough to judge but never finished, and not liked: its engagement says it is not what the listener wants. */
+private fun lowEngagement(s: TrackStatsEntity): Boolean =
+    !s.isLiked && s.playCount >= RecommendationConfig.LOW_ENGAGEMENT_PLAYS &&
+        (s.completedCount.toDouble() / maxOf(1, s.playCount)) < RecommendationConfig.LOW_ENGAGEMENT_COMPLETION
