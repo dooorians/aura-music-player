@@ -62,22 +62,10 @@ class AlbumRefResolver internal constructor(
 
         val filtered = found.filter { a -> !isUnwanted(a.title) && artistMatches(a) }
 
-        // 1. Exact match on title
+        // The exact album only: a title that is a prefix of, or contains, the wanted one — "Greatest Hits"
+        // vs "Greatest Hits (Deluxe Edition)", "TiK ToK" vs "TiK ToK - Remixes" — is a different record
+        // (an edition, a remix, a reissue) and must not open in its place.
         val exact = filtered.firstOrNull { a -> norm(a.title) == wantTitle }
-        if (exact != null) {
-            foundRefs[cacheKey] = exact.id
-            return@withContext exact.id
-        }
-
-        // 2. Starts with / contains only if valid length and artist
-        val match = filtered.firstOrNull { a ->
-            val t = norm(a.title)
-            t.startsWith(wantTitle) || wantTitle.startsWith(t)
-        } ?: filtered.firstOrNull { a ->
-            val t = norm(a.title)
-            wantTitle.length >= 4 && (t.contains(wantTitle) || wantTitle.contains(t))
-        }
-
-        match?.id?.also { foundRefs[cacheKey] = it }
+        exact?.id?.also { foundRefs[cacheKey] = it }
     }
 }

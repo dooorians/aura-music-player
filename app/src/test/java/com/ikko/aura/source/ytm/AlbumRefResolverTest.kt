@@ -8,7 +8,7 @@ import org.junit.Test
 class AlbumRefResolverTest {
 
     @Test
-    fun rejectsTributeAndMismatchedArtists() = runBlocking {
+    fun rejectsEditionsTributesAndMismatchedArtists() = runBlocking {
         val resolver = AlbumRefResolver { query ->
             if (query == "tik tok kesha") {
                 listOf(
@@ -20,11 +20,10 @@ class AlbumRefResolverTest {
             } else emptyList()
         }
 
-        // Title TiK ToK with Kesha:
-        // tribute and karaoke should be rejected
-        // remix matches startsWith and artist matches Ke$ha
+        // Nothing here is the exact album: a tribute, a karaoke channel, an expanded edition and a
+        // remix EP are all different records. The exact title "TiK ToK" matches none of them.
         val ref = resolver.find("TiK ToK", "Kesha")
-        assertEquals("remix_id", ref)
+        assertNull(ref)
     }
 
     @Test
@@ -53,5 +52,26 @@ class AlbumRefResolverTest {
 
         val ref = resolver.find("Angel Baby", "Troye Sivan")
         assertEquals("exact_id", ref)
+    }
+
+    @Test
+    fun doesNotResolveEditionSuffixes() = runBlocking {
+        val resolver = AlbumRefResolver { query ->
+            listOf(
+                YtmAlbumRef("deluxe_id", "Thriller (Deluxe Edition)", "Michael Jackson", null),
+                YtmAlbumRef("exact_id", "Thriller", "Michael Jackson", null),
+            )
+        }
+        // "Thriller" ne doit pas ouvrir l'édition Deluxe : l'exact seul compte.
+        assertEquals("exact_id", resolver.find("Thriller", "Michael Jackson"))
+    }
+
+    @Test
+    fun rejectsWhenOnlyAnEditionIsAvailable() = runBlocking {
+        val resolver = AlbumRefResolver { query ->
+            listOf(YtmAlbumRef("remix_id", "TiK ToK - Remixes", "Ke\$ha", null))
+        }
+        // Une édition différente n'est pas l'album : pas de résolution.
+        assertNull(resolver.find("TiK ToK", "Kesha"))
     }
 }
