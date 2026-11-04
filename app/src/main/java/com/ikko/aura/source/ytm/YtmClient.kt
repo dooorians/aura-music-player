@@ -315,16 +315,22 @@ class YtmClient @Inject constructor(
             if (seconds !in 60..900) return@mapNotNull null
             if (VIDEO_LIKE.containsMatchIn(item.name)) return@mapNotNull null
             val uploader = item.uploaderName.orEmpty()
-            val artist = uploader.removeSuffix(" - Topic").replace(Regex("(?i)vevo$"), "").trim()
-            if (artist.isEmpty()) return@mapNotNull null
-            val cover = YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url)
             val topic = uploader.endsWith(" - Topic", ignoreCase = true)
-            // "Artist - Song" from that artist's channel: the song's own name is what follows the dash.
+            val cleanedUploader = uploader.removeSuffix(" - Topic").replace(Regex("(?i)vevo$"), "").trim()
+            val cover = YtmImages.sized(item.thumbnails.maxByOrNull { it.width }?.url ?: item.thumbnails.firstOrNull()?.url)
             val parts = item.name.split(" - ", limit = 2)
-            val dashed = parts.size == 2 && parts[0].trim().equals(artist, ignoreCase = true)
+            val dashed = parts.size == 2
+            // A Topic channel's name IS the artist. A regular channel's name is a channel, not an artist: when the title
+            // reads "Artist - Song", the part before the dash names the artist (and what follows is the song).
+            val artistFromTitle = if (!topic && dashed && parts[0].trim().isNotEmpty()) parts[0].trim() else null
+            val artist = artistFromTitle ?: cleanedUploader
+            if (artist.isEmpty()) return@mapNotNull null
+            // "Artist - Song" from the artist's own channel: the song's own name is what follows the dash.
+            val dashedSameAsArtist = dashed && parts[0].trim().equals(cleanedUploader, ignoreCase = true)
+            val songTitle = if (artistFromTitle != null || dashedSameAsArtist) parts[1].trim() else item.name
             // Whatever the channel, a "up next" entry is only a candidate: the song's page decides whether it is an official
             // release (see [details]), and names its artists; until then it is not vouched for as a song.
-            YtmSong(id, if (dashed) parts[1].trim() else item.name, artist, seconds * 1000, cover, isSong = topic)
+            YtmSong(id, songTitle, artist, seconds * 1000, cover, isSong = topic)
         }
     }
 

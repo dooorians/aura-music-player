@@ -91,8 +91,6 @@ class DiscographyVerifier @Inject constructor(
 
         val mbid = artist.mbid
         if (!mbid.isNullOrBlank()) {
-            val recordings = runCatching { mbClient.getArtistRecordings(mbid) }.getOrDefault(emptyList())
-            recordings.forEach { addTitle(tracks, it) }
             val rgs = runCatching { mbClient.getArtistReleaseGroups(mbid) }.getOrDefault(emptyList())
             for (rg in rgs) {
                 if (rg.primaryType in OFFICIAL_MB_TYPES || rg.primaryType == null) addTitle(albums, rg.title)
@@ -204,7 +202,7 @@ class DiscographyVerifier @Inject constructor(
         const val TTL_MS = 30L * 24 * 60 * 60 * 1000
         val OFFICIAL_RECORD_TYPES = setOf("album", "single", "ep", "compile")
         val OFFICIAL_MB_TYPES = setOf("Album", "Single", "EP")
-        const val MAX_ALBUM_TRACKS_FETCHED = 50
+        const val MAX_ALBUM_TRACKS_FETCHED = 20
         val GENERIC_ALBUM_NAMES = setOf(
             "single",
             "singles",

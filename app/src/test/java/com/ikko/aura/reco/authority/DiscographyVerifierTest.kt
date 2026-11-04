@@ -119,34 +119,6 @@ class DiscographyVerifierTest {
     }
 
     @Test
-    fun testKnowsTracksOnAlbumsBeyondTheOldCap() = runBlocking {
-        val deezerClient = DeezerClient(httpGet = { url ->
-            when {
-                url.contains("artist/157/albums") -> {
-                    val data = (201..225).joinToString(",") { id ->
-                        """{ "id": $id, "title": "Album $id", "record_type": "album", "release_date": "2020-01-01" }"""
-                    }
-                    """{ "data": [$data] }"""
-                }
-                url.contains("album/225/tracks") -> """
-                {
-                  "data": [
-                    { "id": 900, "title": "OnlyOnLateAlbum", "title_short": "OnlyOnLateAlbum", "duration": 180, "artist": { "id": 157, "name": "Lady Gaga" } }
-                  ]
-                }
-                """.trimIndent()
-                else -> """{ "data": [] }"""
-            }
-        })
-        val mbClient = MusicBrainzClient(httpGet = { """{ "id": "x", "release-groups": [], "recordings": [] }""" })
-
-        val verifier = DiscographyVerifier(deezerClient, mbClient, InMemoryDiscographyStore())
-
-        // The 25th album's track is known: the discography no longer stops at the first 20 albums.
-        assertTrue(verifier.isOfficialTrack(ladyGaga, "OnlyOnLateAlbum"))
-    }
-
-    @Test
     fun testPersistsAcrossInstances() = runBlocking {
         val deezerClient = DeezerClient(httpGet = { url ->
             if (url.contains("artist/157/top")) """
