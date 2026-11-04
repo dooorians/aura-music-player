@@ -36,12 +36,46 @@ class SectionHoldTest {
         assertTrue(byName.first { it.id == "jazz" }.albums.none { it.title == "Album 4" })
     }
 
-    @Test fun `a row that cannot be made up is dropped, not left short, and what shows elsewhere is not offered again`() {
+    @Test fun `a row that cannot be made up stays with what it has left, and what shows elsewhere is not offered again`() {
         val live = listOf(row("rock", album(4), album(1)))
         val out = SectionHold.reconcile(held, live, setOf(ArtistNames.key("Artist 1")), emptySet())
-        // The live row has nothing new that is not already shown in "jazz" or gone: "rock" has only two left.
-        assertTrue(out.none { it.id == "rock" })
-        assertEquals(listOf("jazz"), out.map { it.id })
+        // The live row has nothing new that is not already shown in "jazz" or gone: "rock" keeps its two, it does not vanish.
+        assertEquals(listOf("Album 2", "Album 3"), out.first { it.id == "rock" }.albums.map { it.title })
+        assertEquals(listOf("rock", "jazz"), out.map { it.id })
+    }
+
+    @Test fun `refusing one album never takes its row away, however little there is to replace it`() {
+        for (i in 1..3) {
+            val out = SectionHold.reconcile(held, emptyList(), emptySet(), setOf(AlbumKeys.ofRef("r$i")))
+            assertEquals(listOf("rock", "jazz"), out.map { it.id })
+            assertEquals(2, out.first { it.id == "rock" }.albums.size)
+            assertTrue(out.first { it.id == "rock" }.albums.none { it.ref == "r$i" })
+        }
+    }
+
+    @Test fun `the artist that goes with a refused album takes the albums of theirs from every row, the rows stay`() {
+        val mixed = listOf(
+            row("rock", album(1, "Same"), album(2, "Other A"), album(3, "Other B")),
+            row("jazz", album(4, "Same"), album(5, "Same"), album(6, "Other C")),
+        )
+        val out = SectionHold.reconcile(mixed, emptyList(), setOf(ArtistNames.key("Same")), emptySet())
+        assertEquals(listOf("rock", "jazz"), out.map { it.id })
+        assertEquals(listOf("Album 2", "Album 3"), out[0].albums.map { it.title })
+        assertEquals(listOf("Album 6"), out[1].albums.map { it.title })
+    }
+
+    @Test fun `a row about the blocked artist goes with them, a row about another does not`() {
+        val about = HomeSection("artist:Same", "Plus de", "Same", listOf(album(1, "Same"), album(2, "Same"), album(3, "Same")))
+        val similar = HomeSection("similar:Same", "Plus de contenu similaire à", "Same", listOf(album(4, "Same"), album(5, "Someone"), album(6, "Someone Else")))
+        val other = HomeSection("artist:Else", "Plus de", "Else", listOf(album(7, "Else"), album(8, "Else"), album(9, "Same")))
+        val out = SectionHold.reconcile(listOf(about, similar, other), emptyList(), setOf(ArtistNames.key("Same")), emptySet())
+        assertEquals(listOf("artist:Else"), out.map { it.id })
+        assertEquals(2, out.single().albums.size)
+    }
+
+    @Test fun `a row with nothing left of it is dropped`() {
+        val all = HomeSection("rock", null, "rock", listOf(album(1, "Same"), album(2, "Same"), album(3, "Same")))
+        assertTrue(SectionHold.reconcile(listOf(all), emptyList(), setOf(ArtistNames.key("Same")), emptySet()).isEmpty())
     }
 
     @Test fun `a radio or an artist tile of a blocked artist is gone too`() {

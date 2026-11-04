@@ -24,19 +24,29 @@ object SectionHold {
         return false
     }
 
+    /** Whether a row is about an artist that is now blocked ("Plus de X", "similar to X"): it goes with them, whatever else it holds. */
+    private fun aboutBlockedArtist(s: HomeSection, blocked: Set<String>): Boolean =
+        blocked.isNotEmpty() && (s.id.startsWith("artist:") || s.id.startsWith("similar:")) && ArtistNames.key(s.title) in blocked
+
+    /**
+     * A row that loses albums is made up again, and **stays**: it is kept with what it still has even when nothing can take the place of
+     * what went (a row short of one line is better than a row, and its title, vanishing for one refused album). It goes only when it is
+     * about the artist that was blocked, or when nothing of it is left.
+     */
     fun reconcile(held: List<HomeSection>, live: List<HomeSection>, blocked: Set<String>, refused: Set<String>): List<HomeSection> {
         if (blocked.isEmpty() && refused.isEmpty()) return held
         val taken = HashSet<String>()
         held.forEach { s -> s.albums.forEach { if (!gone(it, blocked, refused)) taken += it.key } }
         return held.mapNotNull { s ->
             if (s.albums.none { gone(it, blocked, refused) }) return@mapNotNull s
+            if (aboutBlockedArtist(s, blocked)) return@mapNotNull null
             val kept = s.albums.filterNot { gone(it, blocked, refused) }
             // What takes its place: the same row in the arrangement of the moment, an album not yet shown anywhere.
             val more = (live.firstOrNull { it.id == s.id }?.let { it.albums + it.spare }.orEmpty() + s.spare)
                 .distinctBy { it.key }
                 .filter { !gone(it, blocked, refused) && it.key !in taken && kept.none { k -> k.key == it.key } }
             val row = (kept + more).take(HomeSections.PER_ROW)
-            if (row.size < HomeSections.PER_ROW) null
+            if (row.isEmpty()) null
             else s.copy(albums = row, spare = s.spare.filter { sp -> row.none { it.key == sp.key } }).also { r -> r.albums.forEach { taken += it.key } }
         }
     }
