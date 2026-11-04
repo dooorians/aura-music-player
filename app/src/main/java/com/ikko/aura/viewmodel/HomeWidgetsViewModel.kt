@@ -493,23 +493,15 @@ class HomeWidgetsViewModel @Inject constructor(
                 val listenRows = runCatching { recommendations.listensSince(System.currentTimeMillis() - 365L * MILLIS_PER_DAY) }
                     .getOrDefault(emptyList())
                     .map { com.ikko.aura.data.home.ListenRow(it.trackId, it.title, it.artist, it.album, it.year, it.outcome, it.endedAtMs) }
-                // What the sources offer is made only with the listener's consent (see the recommendations' settings), and only of artists the
-                // listener chose (the taste picker, the ones typed in) or has among the device's files: anything else has nothing to do with them.
-                val closeKeys = HashSet<String>().apply {
-                    fun addArtist(name: String) {
-                        this.addAll(com.ikko.aura.reco.ArtistNames.split(name))
-                        this.add(com.ikko.aura.reco.ArtistNames.primaryKey(name))
-                    }
-                    chosenArtists.forEach { addArtist(it) }
-                    // The device's own files, not what was kept or played from a source: a song a radio played is not an artist chosen.
-                    tracks.filter { !com.ikko.aura.source.ytm.YtmLibrary.isStreamed(it) }.forEach { addArtist(it.artist) }
-                    remove("")
-                }
+                // What the sources offer is made only with the listener's consent (see the recommendations' settings); the
+                // engine has already ranked the candidates for their taste, so a row may carry a discovery, not only the
+                // artists the listener already knows.
                 // A style the listener does not want, whatever the artist: none of its albums, wherever they come from.
                 fun unwanted(artist: String) = com.ikko.aura.data.home.HomeRotation.isUnwantedStyle(sourceTags[com.ikko.aura.reco.ArtistNames.primaryKey(artist)].orEmpty())
-                fun ofCloseArtist(artist: String) = !unwanted(artist) && (
-                    com.ikko.aura.reco.ArtistNames.creditsOf(artist, "").take(2).any { it in closeKeys } ||
-                        com.ikko.aura.reco.ArtistNames.primaryKey(artist) in closeKeys)
+                // The engine has already ranked these for the listener's taste and dropped what has nothing to do with it
+                // (see the taste gate and the discography check); a stranger with a reason is a discovery, which is what
+                // Home is for. Only a style the listener does not want is kept out here.
+                fun ofCloseArtist(artist: String) = !unwanted(artist)
                 // For an artist whose real discography is known, only what belongs to it: a search by name answers with the namesake's records too.
                 val discographyOf: Map<String, Set<String>> = chosenPool
                     .groupBy { com.ikko.aura.reco.ArtistNames.primaryKey(it.artist) }
