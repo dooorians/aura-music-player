@@ -69,4 +69,57 @@ object GenreNormalizer {
     }
 
     fun isGeneric(genre: String): Boolean = genre.lowercase() in GENERIC
+
+    /** The broad family of a genre, by the words of its name; the first that fits (the order is from the most specific to the widest). */
+    private val FAMILIES = listOf(
+        "metal" to listOf("metal", "metalcore", "deathcore"),
+        "punk" to listOf("punk", "emo", "grunge", "hardcore", "ska"),
+        "hip-hop" to listOf("hip-hop", "hip hop", "rap", "trap", "drill", "grime", "boom bap"),
+        "rnb" to listOf("r&b", "soul", "funk", "motown", "neo-soul", "disco"),
+        "electronic" to listOf("electro", "house", "techno", "trance", "dubstep", "drum and bass", "drum & bass", "idm", "ambient", "downtempo", "trip-hop", "edm", "dance", "synthwave", "garage", "breakbeat", "lo-fi"),
+        "jazz" to listOf("jazz", "bossa", "swing", "bebop"),
+        "blues" to listOf("blues", "gospel"),
+        "classical" to listOf("classical", "orchestral", "opera", "baroque", "piano", "symphon"),
+        "folk" to listOf("folk", "country", "bluegrass", "americana", "singer-songwriter", "acoustic"),
+        "reggae" to listOf("reggae", "dub", "dancehall"),
+        "latin" to listOf("latin", "salsa", "reggaeton", "bachata", "cumbia", "flamenco", "samba"),
+        "chanson" to listOf("chanson", "variété", "variete", "french"),
+        "soundtrack" to listOf("soundtrack", "score", "ost"),
+        "pop" to listOf("pop", "k-pop", "j-pop", "c-pop", "dream"),
+        "rock" to listOf("rock", "shoegaze", "britpop", "new wave", "post-", "alternative", "indie", "psychedelic", "garage rock", "grunge"),
+    )
+
+    /** Families that sit next to each other: close enough for a quarter of a match. */
+    private val NEIGHBOURS = setOf(
+        "rock" to "pop", "rock" to "punk", "rock" to "metal", "rock" to "folk", "rock" to "blues", "punk" to "metal",
+        "pop" to "electronic", "pop" to "rnb", "pop" to "chanson", "pop" to "latin", "hip-hop" to "rnb", "electronic" to "hip-hop",
+        "jazz" to "blues", "jazz" to "rnb", "jazz" to "classical", "folk" to "blues", "reggae" to "hip-hop", "soundtrack" to "classical",
+        "electronic" to "soundtrack",
+    )
+
+    fun family(genre: String): String? {
+        val g = genre.lowercase()
+        return FAMILIES.firstOrNull { (_, words) -> words.any { g.contains(it) } }?.first
+    }
+
+    /** How alike two genres are: 1 for the same, 0.5 within a family ("Dream Pop", "Synthpop"), 0.25 between neighbouring families, else 0. */
+    fun similarity(a: String, b: String): Double {
+        if (a.equals(b, ignoreCase = true)) return 1.0
+        val fa = family(a) ?: return 0.0
+        val fb = family(b) ?: return 0.0
+        return when {
+            fa == fb -> 0.5
+            (fa to fb) in NEIGHBOURS || (fb to fa) in NEIGHBOURS -> 0.25
+            else -> 0.0
+        }
+    }
+
+    /** A Jaccard that gives partial credit to genres of the same family: 1 for identical sets, 0 for sets with nothing in common. */
+    fun softJaccard(a: Set<String>, b: Set<String>): Double {
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        val fromA = a.sumOf { x -> b.maxOf { y -> similarity(x, y) } }
+        val fromB = b.sumOf { y -> a.maxOf { x -> similarity(x, y) } }
+        val inter = (fromA + fromB) / 2.0
+        return (inter / (a.size + b.size - inter)).coerceIn(0.0, 1.0)
+    }
 }

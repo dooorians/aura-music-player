@@ -21,6 +21,8 @@ interface ArtistInsight {
 
     /** The artist's MusicBrainz ID as reported by Last.fm (artist.getInfo / artist.getCorrection). */
     suspend fun mbid(name: String): String? = null
+    /** The artist's most played songs, most played first (their titles); null when the catalogue cannot say. */
+    suspend fun topTracks(name: String): List<String>? = null
 }
 
 /**

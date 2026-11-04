@@ -21,6 +21,8 @@ data class RankContext(
     val variation: Long = 0L,
     /** The sources in the listener's order; a duplicate is kept from the earliest. */
     val sourceOrder: List<String> = emptyList(),
+    /** Artist key → the title keys of their most played songs, most played first (Last.fm): what tells a hit from a deep cut. */
+    val hits: Map<String, List<String>> = emptyMap(),
 ) {
     val today: LocalDate get() = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
 }
@@ -224,6 +226,23 @@ object Ranker {
         return when { days < 14 -> 0.4; days < 60 -> 0.18; else -> 0.0 }
     }
 
+    /** How many of an artist's top songs are called hits, and how many must be known before a song missing from them counts as deep. */
+    private const val HIT_RANKS = 3
+    private const val DEEP_AFTER = 15
+    private const val HIT_PENALTY = 0.08
+    private const val DEEP_BONUS = 0.03
+
+    /** A hit of its artist is what an anonymous catalogue offers first: a little against it, and a little for what lies deeper. */
+    internal fun depthAdjust(c: Candidate, ctx: RankContext): Double {
+        val top = c.credits.firstOrNull()?.let { ctx.hits[it] } ?: return 0.0
+        val rank = top.indexOf(TrackIdentity.titleKey(c.title))
+        return when {
+            rank in 0 until HIT_RANKS -> -HIT_PENALTY
+            rank < 0 && top.size >= DEEP_AFTER -> DEEP_BONUS
+            else -> 0.0
+        }
+    }
+
     private fun decadeMatch(c: Candidate, profile: TasteProfile): Double {
         val year = c.release.year.takeIf { it > 0 } ?: return 0.0
         return profile.decades[year / 10 * 10] ?: 0.0
@@ -250,7 +269,8 @@ object Ranker {
         val novelty = if (artistKnown) 0.3 else 1.0
         val dislike = profile.dislike(credits, kind.key)
         // A "related" entry not yet known to be a song is ranked behind the ones that are: it is checked before it is offered.
-        val base = taste - 0.5 * dislike - historyPenalty(c, ctx) + jitter(c, ctx) - if (c.confirmedSong) 0.0 else 0.1
+        val depth = if (kind == RecoKind.DISCOVERY || kind == RecoKind.STYLE || kind == RecoKind.DAILY) depthAdjust(c, ctx) else 0.0
+        val base = taste - 0.5 * dislike - historyPenalty(c, ctx) + jitter(c, ctx) + depth - if (c.confirmedSong) 0.0 else 0.1
         val cluster = prov?.seed?.let(ArtistNames::key)?.ifEmpty { null } ?: credits.firstOrNull().orEmpty()
         val seedName = prov?.seed.orEmpty()
         val artistName = credits.firstOrNull()?.let { profile.nameOf(it) }.orEmpty()

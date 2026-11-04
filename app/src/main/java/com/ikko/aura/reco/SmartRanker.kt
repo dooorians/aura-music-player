@@ -92,7 +92,7 @@ object SmartRanker {
         val x = a.filterNot { GenreNormalizer.isGeneric(it) }.map { it.lowercase() }.toSet()
         val y = b.filterNot { GenreNormalizer.isGeneric(it) }.map { it.lowercase() }.toSet()
         if (x.isEmpty() || y.isEmpty()) return 0.0
-        return x.intersect(y).size.toDouble() / x.union(y).size
+        return GenreNormalizer.softJaccard(x, y)
     }
 
     /** 0..1: how ready a song is to be heard again; a song never heard is fully available. */

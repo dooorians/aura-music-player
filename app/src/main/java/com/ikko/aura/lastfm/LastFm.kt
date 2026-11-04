@@ -133,7 +133,7 @@ class LastFm @Inject constructor(@ApplicationContext context: Context) : com.ikk
     }
 
     /** The artist's most played songs on Last.fm, by their titles (kept 14 days): what a photo's owner is checked against. */
-    suspend fun topTracks(name: String): List<String>? = cached("toptracks", com.ikko.aura.reco.ArtistNames.askName(name)) {
+    override suspend fun topTracks(name: String): List<String>? = cached("toptracks", com.ikko.aura.reco.ArtistNames.askName(name)) {
         val arr = call(savedKey, savedSecret, mapOf("method" to "artist.getTopTracks", "artist" to com.ikko.aura.reco.ArtistNames.askName(name), "limit" to "40", "autocorrect" to "0"))
             .optJSONObject("toptracks")?.optJSONArray("track") ?: JSONArray()
         (0 until arr.length()).map { arr.getJSONObject(it).getString("name") }

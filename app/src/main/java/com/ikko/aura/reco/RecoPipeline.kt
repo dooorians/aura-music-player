@@ -99,6 +99,8 @@ class RecoPipeline(
         log("queries=${queries.size} candidates=${gathered.candidates.size} health=${gathered.health}")
         val sourceOrder = store.sourceOrder()
         val hidden = store.hidden()
+        // What the artists' best-known songs are, so that a discovery is not their hit again.
+        val hits = insight?.let { i -> runCatching { hitsOf(i, gathered.candidates) }.getOrDefault(emptyMap()) }.orEmpty()
         val ctxBase = RankContext(
             profile = profile,
             local = store.localIndex(),
@@ -109,6 +111,7 @@ class RecoPipeline(
             zone = zone,
             variation = variation,
             sourceOrder = sourceOrder,
+            hits = hits,
         )
         val sourcesById = live.associateBy { it.id }
         // What each source said about a song when asked, kept for the whole renewal: a song is looked up once.
@@ -239,6 +242,17 @@ class RecoPipeline(
         verifiedSimilar
     }
 
+    /** The most played songs of the artists the candidates are by (the most represented first), as title keys. */
+    private suspend fun hitsOf(insight: ArtistInsight, candidates: List<Candidate>): Map<String, List<String>> = coroutineScope {
+        val gate = Semaphore(4)
+        candidates.groupBy { it.credits.firstOrNull().orEmpty() }.filterKeys { it.isNotEmpty() }.entries
+            .sortedByDescending { it.value.size }.take(MAX_HIT_LOOKUPS)
+            .map { (key, list) ->
+                async { gate.withPermit { key to withTimeoutOrNull(6_000L) { insight.topTracks(ArtistNames.primary(list.first().artist)) } } }
+            }.awaitAll()
+            .mapNotNull { (key, top) -> top?.takeIf { it.isNotEmpty() }?.let { key to it.map(TrackIdentity::titleKey) } }.toMap()
+    }
+
     /** The candidate as what its source said when asked adds to it: the album its page names, a stated date, a song. */
     private fun applied(c: Candidate, v: Verification?): Candidate {
         if (v == null) return c
@@ -335,5 +349,6 @@ class RecoPipeline(
         const val MAX_DATE_LOOKUPS = 24
         const val MAX_SONG_CHECKS = 60
         const val MAX_SIMILAR_ARTISTS = 14
+        const val MAX_HIT_LOOKUPS = 16
     }
 }
