@@ -861,8 +861,13 @@ private fun AlbumGrid(
                                             cacheKey = album.id.toString(),
                                             cover = coverAnchor,
                                             radiusPx = with(tileDensity) { 8.dp.toPx() },
-                                            title = titleAnchor to com.ikko.aura.ui.components.HeroText(album.title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, LibInk),
-                                            sub = subAnchor to com.ikko.aura.ui.components.HeroText(album.artist, androidx.compose.ui.geometry.Rect.Zero, artistStyle, LibMuted),
+                                            // The cover flies (the trip's signature), but not the tile's text: a grid tile
+                                            // holds its title on one line, ellipsized, while the page lays the same words out
+                                            // over two. A copy carried from one to the other lands with its last letters off,
+                                            // then snaps back when the page's own title takes over (the bug seen from Home and
+                                            // here). The page's title simply appears in place instead.
+                                            title = null,
+                                            sub = null,
                                             sizeDp = targetArtDp,
                                             anyOfKind = album.remoteId != null,
                                         )) navController.navigate(album.route())
