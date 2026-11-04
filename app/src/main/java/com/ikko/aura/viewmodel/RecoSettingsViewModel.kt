@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class RecoSettingsViewModel @Inject constructor(
     private val engine: RecommendationEngine,
+    private val exporter: com.ikko.aura.reco.HistoryExporter,
 ) : ViewModel() {
 
     val consent: StateFlow<Boolean> = engine.consent.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -33,4 +34,7 @@ class RecoSettingsViewModel @Inject constructor(
     fun setSeeds(names: List<String>) { viewModelScope.launch { engine.setSeedArtists(names) } }
     fun refresh() { viewModelScope.launch { engine.refreshNow() } }
     fun reset() { viewModelScope.launch { engine.resetProfile() } }
+
+    /** Writes the listening history and the library to [uri], a file the listener chose; [onDone] gets the number of listens, or null when the write failed. */
+    fun exportHistory(uri: android.net.Uri, onDone: (Int?) -> Unit) { viewModelScope.launch { onDone(exporter.writeTo(uri)) } }
 }

@@ -467,6 +467,17 @@ private fun RecommendationsPage(navController: NavHostController) {
     val seeds by vm.seeds.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     var confirmReset by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        vm.exportHistory(uri) { count ->
+            android.widget.Toast.makeText(
+                context,
+                if (count == null) "L'export a échoué" else "$count écoutes exportées",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
 
     SettingsGroup(title = "Personnalisation") {
         SettingsSwitchRow(
@@ -513,6 +524,15 @@ private fun RecommendationsPage(navController: NavHostController) {
             title = "Ton profil",
             summary = "Ce que l'app a appris de tes goûts, et pourquoi elle propose ce qu'elle propose",
             onClick = { navController.navigate(AuraDestination.TasteProfile.route) }, trailing = { ChevronTrailing() },
+        )
+    }
+    SettingsGroup(title = "Données") {
+        SettingsRow(
+            title = "Exporter l'historique d'écoute",
+            summary = "Un fichier avec tes écoutes et ta bibliothèque, pour juger les recommandations sur tes vraies données",
+            detail = "Écrit dans le fichier que tu choisis tes écoutes (titre, artiste, durée écoutée, comment elles ont fini) et la liste de " +
+                "ta bibliothèque. Rien n'est envoyé : le fichier reste où tu le mets, tu décides à qui le donner.",
+            onClick = { exportLauncher.launch("aura-historique.json") },
         )
     }
     SettingsGroup(title = "Repartir de zéro") {
