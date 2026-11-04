@@ -69,10 +69,6 @@ interface CatalogDao {
     @Query("UPDATE catalog_tracks SET inLibrary = :inLibrary WHERE `key` = :key")
     suspend fun setInLibrary(key: String, inLibrary: Boolean)
 
-    /** Rewrites a row's artist, leaving everything else (its place in the library, its download) as it is. */
-    @Query("UPDATE catalog_tracks SET artist = :artist WHERE `key` = :key")
-    suspend fun setArtist(key: String, artist: String)
-
     /**
      * Streamed songs that are in no library and no playlist and have not been seen for a while: nothing refers to
      * them any more.

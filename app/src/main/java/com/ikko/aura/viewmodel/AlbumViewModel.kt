@@ -15,7 +15,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,29 +60,9 @@ class AlbumViewModel @Inject constructor(
     repository: MusicRepository,
     private val favoritesStore: FavoritesStore,
     @param:ApplicationContext private val context: Context,
-    private val ytmClient: com.ikko.aura.source.ytm.YtmClient,
-    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : ViewModel() {
 
     private val albumId: Long = savedStateHandle.get<String>("albumId")?.toLongOrNull() ?: -1L
-
-    init {
-        // An album downloaded before the artist was read from its songs carries the name of the channel that hosted
-        // them ("le rappeur Damso", "Zaho Officiel"), and its artist link opens an artist that does not exist. Read the
-        // album once from the source and rewrite its rows, so both the page and its link name the real artist; a
-        // failure changes nothing (the rows stay as they are).
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val remote = repository.tracks.value
-                    .filter { it.albumId == albumId }
-                    .firstNotNullOfOrNull { it.remoteAlbumId }
-                if (remote != null && ytmClient.isEnabled()) {
-                    val songs = ytmClient.album(remote).songs.map { com.ikko.aura.source.ytm.YtmLibrary.trackOf(it) }
-                    if (songs.isNotEmpty()) ytmLibrary.refreshArtists(songs)
-                }
-            }
-        }
-    }
 
     private fun stateFor(tracks: List<Track>, favoriteIds: Set<Long>): AlbumUiState {
         val albumTracks = tracks
