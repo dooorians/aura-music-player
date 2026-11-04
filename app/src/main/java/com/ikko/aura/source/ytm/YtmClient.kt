@@ -188,7 +188,16 @@ class YtmClient @Inject constructor(
             ?: YtmImages.sized(pageCover)
         val songs = items.mapNotNull { item ->
             val id = videoIdOf(item.url) ?: return@mapNotNull null
-            YtmSong(id, item.name, item.uploaderName.orEmpty().removeSuffix(" - Topic"), item.duration.coerceAtLeast(0) * 1000, cover, albumId, title)
+            // A track's own artist is what the album page's artist link opens: it must be the album's artist, not the
+            // channel, or the link opens a page that asks for an artist which does not exist. A " - Topic" channel
+            // already carries the artist's name.
+            val songUploader = item.uploaderName.orEmpty().trim()
+            val songArtist = if (songUploader.endsWith(" - Topic", ignoreCase = true)) {
+                songUploader.removeSuffix(" - Topic")
+            } else {
+                artist
+            }
+            YtmSong(id, item.name, songArtist, item.duration.coerceAtLeast(0) * 1000, cover, albumId, title)
         }
         return albumPageMemo.put(albumId, YtmAlbum(YtmAlbumRef(albumId, title, artist, cover), songs))
     }
