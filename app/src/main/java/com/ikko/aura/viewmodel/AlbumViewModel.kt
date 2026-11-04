@@ -79,7 +79,7 @@ class AlbumViewModel @Inject constructor(
                     .firstNotNullOfOrNull { it.remoteAlbumId }
                 if (remote != null && ytmClient.isEnabled()) {
                     val songs = ytmClient.album(remote).songs.map { com.ikko.aura.source.ytm.YtmLibrary.trackOf(it) }
-                    if (songs.isNotEmpty()) ytmLibrary.remember(songs)
+                    if (songs.isNotEmpty()) ytmLibrary.refreshArtists(songs)
                 }
             }
         }

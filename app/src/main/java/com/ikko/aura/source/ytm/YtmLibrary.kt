@@ -52,6 +52,15 @@ class YtmLibrary @Inject constructor(
         streamed.filter { it.remoteAlbumId != null }.forEach { dao.attachAlbum(it.id, it.album, it.remoteAlbumId.orEmpty()) }
     }
 
+    /**
+     * Rewrites the artist of rows the app already knows, keeping their place in the library and their downloads. A song
+     * downloaded before the artist was read from its album still carries the name of the channel that hosted it; this
+     * sets it right without un-keeping it or forgetting its download.
+     */
+    suspend fun refreshArtists(tracks: List<Track>) {
+        tracks.filter(::isStreamed).forEach { dao.setArtist(it.id, it.artist) }
+    }
+
     /** Puts these songs in the library. */
     suspend fun keep(tracks: List<Track>) {
         tracks.filter(::isStreamed).forEach { dao.saveItem(entity(it, inLibrary = true), binding(it)) }
