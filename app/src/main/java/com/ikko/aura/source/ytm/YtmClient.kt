@@ -170,7 +170,17 @@ class YtmClient @Inject constructor(
             items += page.items
             pages++
         }
-        val artist = items.firstOrNull()?.uploaderName.orEmpty().removeSuffix(" - Topic")
+        // Who the album is by, not the channel that hosts it. A " - Topic" channel already carries the artist's name; any
+        // other channel does not (a channel called "le rappeur Damso" would make the artist "le rappeur Damso", and its
+        // page then asks for an artist that does not exist), so the first song's own page is asked who it is by.
+        val firstUploader = items.firstOrNull()?.uploaderName.orEmpty().trim()
+        val artist = if (firstUploader.endsWith(" - Topic", ignoreCase = true)) {
+            firstUploader.removeSuffix(" - Topic")
+        } else {
+            val firstSongId = items.firstOrNull()?.let { videoIdOf(it.url) }
+            val named = firstSongId?.let { runCatching { details(it).artists.firstOrNull() }.getOrNull() }
+            named?.trim()?.takeIf { it.isNotEmpty() } ?: firstUploader.removeSuffix(" - Topic")
+        }
         // The album's own page only carries a small widescreen picture; the search lists the square cover, which can
         // be asked for at any size. Found by the album's id, so a namesake cannot stand in for it.
         val cover = runCatching { coverAhead.get(4, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
