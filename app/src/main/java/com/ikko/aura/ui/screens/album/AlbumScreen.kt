@@ -666,7 +666,7 @@ private fun AlbumHeader(
                     .heroTarget(heroKey, radiusPx = with(heroDensity) { 8.dp.toPx() })
                     // The cover does not fly (see COVERS_FLY), but it must not be set in place before the rest either:
                     // its own arrival fades and rises it with the words, on its first composition (see coverArrival).
-                    .coverArrival()
+                    .coverArrival(heroKey)
                     .size(u * 240f),
                 targetSizeDp = u * 240f,
                 cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
