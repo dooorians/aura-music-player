@@ -578,9 +578,7 @@ private fun RecentAlbumRect(
                             cacheKey = album.id.toString(),
                             cover = coverAnchor,
                             radiusPx = with(density) { (u * 22f).toPx() },
-                            // Only the cover flies: a tile's text is laid out at its own size, not the page's, and a copy
-                            // carried between the two lands with its last letters off before the page's title takes over.
-                            title = null,
+                            title = titleAnchor to HeroText(album.title, Rect.Zero, titleStyle, ink, maxLines = 2),
                             sub = null,
                             sizeDp = u * 130f,
                             visibleFromY = with(density) { (u * 236f).toPx() },
@@ -666,10 +664,8 @@ private fun MixBanner(card: ForYouCard, modifier: Modifier, onOpen: () -> Unit, 
                         cacheKey = null,
                         cover = coverAnchor,
                         radiusPx = with(density) { (u * 24f).toPx() },
-                        // The cover flies; the banner's own lines (one line each, at the banner's size) do not: a copy
-                        // carried to the page lands off, then the page's own text takes over (see the library's grid).
-                        title = null,
-                        sub = null,
+                        title = titleAnchor to HeroText(card.heading, Rect.Zero, titleStyle, Color.White.copy(alpha = 0.7f), maxLines = 1),
+                        sub = subAnchor to HeroText(line, Rect.Zero, subStyle, Color.White.copy(alpha = 0.78f), maxLines = 1),
                         drawCover = false,
                         visibleFromY = with(density) { (u * 236f).toPx() },
                     )
