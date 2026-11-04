@@ -444,4 +444,50 @@ class RecoPipelineTest {
         assertFalse("a stranger no catalogue identifies is not proposed", "ytm:stranger" in ids)
         assertTrue("the listener's own artists still fill the playlists", ids.isNotEmpty())
     }
+
+    @Test fun `a slow song is put in the night playlist, not the energetic one`() = runBlocking {
+        val s = store()
+        // Authority resolves "Slow Artist" to Deezer 157; its only track is 70 BPM.
+        val mbClient = com.ikko.aura.data.musicbrainz.MusicBrainzClient(httpGet = { url ->
+            if (url.contains("Slow", ignoreCase = true)) """{ "count": 1, "artists": [ { "id": "slow-mbid", "name": "Slow Artist", "score": 100 } ] }"""
+            else """{ "count": 0, "artists": [] }"""
+        })
+        val deezerClient = com.ikko.aura.data.deezer.DeezerClient(httpGet = { url ->
+            when {
+                url.contains("search/artist") && url.contains("Slow", ignoreCase = true) ->
+                    """{ "data": [ { "id": 157, "name": "Slow Artist", "nb_fan": 1000 } ] }"""
+                url.contains("artist/157/top") -> """
+                { "data": [ { "id": 1, "title": "Slow Song", "title_short": "Slow Song", "duration": 240, "bpm": 70, "artist": { "id": 157, "name": "Slow Artist" } } ] }
+                """.trimIndent()
+                else -> """{ "data": [] }"""
+            }
+        })
+        val authority = com.ikko.aura.reco.authority.ArtistAuthority(mbClient, deezerClient)
+        val verifier = com.ikko.aura.reco.authority.DiscographyVerifier(deezerClient, mbClient)
+
+        // The "similar to" query returns a stranger whose measured tempo is 70 BPM; nothing in its title says a mood.
+        val source = FakeSource(
+            "ytm",
+            catalogue = { q ->
+                if (q.startsWith("related:")) listOf(candidate("Slow Song", "Slow Artist", id = "ytm:slow"))
+                else (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it") }
+            },
+            verdict = { Verification(true, isSong = true) },
+        )
+        val pipe = RecoPipeline(
+            store = s,
+            sources = { listOf(source) },
+            clock = { NOW },
+            zone = ZONE,
+            authority = authority,
+            verifier = verifier,
+            deezerClient = deezerClient,
+        )
+        pipe.refresh(force = true)
+
+        val energy = s.playlists[RecoKind.ENERGY].orEmpty().map { it.candidate.id }
+        val night = s.playlists[RecoKind.NIGHT].orEmpty().map { it.candidate.id }
+        assertFalse("a 70-BPM song is not energetic", "ytm:slow" in energy)
+        assertTrue("a 70-BPM song is nocturnal", "ytm:slow" in night)
+    }
 }

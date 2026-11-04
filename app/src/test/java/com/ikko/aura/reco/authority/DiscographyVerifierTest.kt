@@ -167,4 +167,18 @@ class DiscographyVerifierTest {
         val second = DiscographyVerifier(deafDeezer, mbClient, store)
         assertTrue(second.isOfficialTrack(ladyGaga, "Bad Romance"))
     }
+
+    @Test
+    fun testReadsTheTrackBpm() = runBlocking {
+        val deezerClient = DeezerClient(httpGet = { url ->
+            if (url.contains("artist/157/top")) """
+            {
+              "data": [ { "id": 1, "title": "Bad Romance", "title_short": "Bad Romance", "duration": 294, "bpm": 119, "artist": { "id": 157, "name": "Lady Gaga" } } ]
+            }
+            """.trimIndent() else """{ "data": [] }"""
+        })
+        val mbClient = MusicBrainzClient(httpGet = { """{ "id": "x", "release-groups": [], "recordings": [] }""" })
+        val verifier = DiscographyVerifier(deezerClient, mbClient, InMemoryDiscographyStore())
+        assertEquals(119.0, verifier.bpmOf(ladyGaga, "Bad Romance")!!, 1e-9)
+    }
 }

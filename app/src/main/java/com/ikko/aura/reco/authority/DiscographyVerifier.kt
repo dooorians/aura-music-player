@@ -1,6 +1,7 @@
 package com.ikko.aura.reco.authority
 
 import com.ikko.aura.data.deezer.DeezerClient
+import com.ikko.aura.data.deezer.DeezerTrackInfo
 import com.ikko.aura.data.musicbrainz.MusicBrainzClient
 import com.ikko.aura.reco.TrackIdentity
 import java.util.concurrent.ConcurrentHashMap
@@ -25,6 +26,8 @@ class DiscographyVerifier @Inject constructor(
     /** Fast path within a session; the durable source is [store], these avoid reading Room on every check. */
     private val verifiedTracksCache = ConcurrentHashMap<String, Set<String>>()
     private val verifiedAlbumsCache = ConcurrentHashMap<String, Set<String>>()
+    /** Artist key → (track title key → bpm), from Deezer; kept so [bpmOf] answers without the network. */
+    private val bpmCache = ConcurrentHashMap<String, Map<String, Double>>()
 
     /** Loads the discography once per artist: from the store when fresh, else rebuilt and stored. */
     private suspend fun ensureLoaded(artist: DisambiguatedArtist) {
@@ -34,24 +37,30 @@ class DiscographyVerifier @Inject constructor(
         if (stored != null && System.currentTimeMillis() - stored.fetchedAtMs < TTL_MS) {
             verifiedTracksCache[key] = decode(stored.tracksJson)
             verifiedAlbumsCache[key] = decode(stored.albumsJson)
+            if (stored.bpmJson.isNotBlank()) bpmCache[key] = decodeBpm(stored.bpmJson)
             return
         }
-        val (tracks, albums) = fetch(artist)
+        val (tracks, albums, bpm) = fetch(artist)
         verifiedTracksCache[key] = tracks
         verifiedAlbumsCache[key] = albums
+        if (bpm.isNotEmpty()) bpmCache[key] = bpm
         if (tracks.isNotEmpty() || albums.isNotEmpty()) {
-            store.put(com.ikko.aura.reco.VerifiedDiscographyEntity(key, encode(tracks), encode(albums), System.currentTimeMillis()))
+            store.put(
+                com.ikko.aura.reco.VerifiedDiscographyEntity(key, encode(tracks), encode(albums), encodeBpm(bpm), System.currentTimeMillis()),
+            )
         }
     }
 
     /**
      * The official titles: Deezer's top tracks and the tracks of every official release up to a generous cap (the old
      * cap of 20 albums missed the tail of a long discography), plus MusicBrainz's own recordings and release groups.
-     * Bounded but far more complete than before, and written to the store so it survives relaunches.
+     * Bounded but far more complete than before, and written to the store so it survives relaunches. The tempo Deezer
+     * states is kept alongside, so a candidate's mood can be judged on its music, not its title.
      */
-    private suspend fun fetch(artist: DisambiguatedArtist): Pair<Set<String>, Set<String>> {
+    private suspend fun fetch(artist: DisambiguatedArtist): Triple<Set<String>, Set<String>, Map<String, Double>> {
         val tracks = LinkedHashSet<String>()
         val albums = LinkedHashSet<String>()
+        val bpmByTitle = HashMap<String, Double>()
 
         val dId = artist.deezerId
         if (dId != null && dId > 0) {
@@ -59,6 +68,7 @@ class DiscographyVerifier @Inject constructor(
             for (t in topTracks) {
                 addTitle(tracks, t.title)
                 addTitle(tracks, t.titleShort)
+                collectBpm(bpmByTitle, t)
             }
 
             val releases = runCatching { deezerClient.getArtistAlbums(dId, limit = 100) }.getOrDefault(emptyList())
@@ -74,6 +84,7 @@ class DiscographyVerifier @Inject constructor(
                 }.awaitAll().flatten().forEach { t ->
                     addTitle(tracks, t.title)
                     addTitle(tracks, t.titleShort)
+                    collectBpm(bpmByTitle, t)
                 }
             }
         }
@@ -87,7 +98,7 @@ class DiscographyVerifier @Inject constructor(
                 if (rg.primaryType in OFFICIAL_MB_TYPES || rg.primaryType == null) addTitle(albums, rg.title)
             }
         }
-        return tracks to albums
+        return Triple(tracks, albums, bpmByTitle)
     }
 
     suspend fun getVerifiedTrackTitles(artist: DisambiguatedArtist): Set<String> {
@@ -98,6 +109,13 @@ class DiscographyVerifier @Inject constructor(
     suspend fun getVerifiedAlbumTitles(artist: DisambiguatedArtist): Set<String> {
         ensureLoaded(artist)
         return verifiedAlbumsCache[artist.canonicalKey].orEmpty()
+    }
+
+    /** The tempo a catalogue states for [title], when one does; null means none. */
+    suspend fun bpmOf(artist: DisambiguatedArtist, title: String): Double? {
+        ensureLoaded(artist)
+        val map = bpmCache[artist.canonicalKey] ?: return null
+        return map[TrackIdentity.titleKey(title)] ?: map[TrackIdentity.baseKey(title)]
     }
 
     suspend fun isOfficialTrack(artist: DisambiguatedArtist, trackTitle: String): Boolean {
@@ -160,8 +178,27 @@ class DiscographyVerifier @Inject constructor(
         if (bKey.isNotEmpty()) into += bKey
     }
 
+    private fun collectBpm(into: MutableMap<String, Double>, t: DeezerTrackInfo) {
+        if (t.bpm <= 0) return
+        listOf(t.title, t.titleShort).forEach { title ->
+            TrackIdentity.titleKey(title).takeIf { it.isNotEmpty() }?.let { into[it] = t.bpm.toDouble() }
+            TrackIdentity.baseKey(title).takeIf { it.isNotEmpty() }?.let { into[it] = t.bpm.toDouble() }
+        }
+    }
+
     private fun encode(set: Set<String>): String = set.joinToString("\u0000")
     private fun decode(json: String): Set<String> = json.split('\u0000').filter { it.isNotEmpty() }.toSet()
+
+    private fun encodeBpm(map: Map<String, Double>): String =
+        map.entries.joinToString("\u0000") { "${it.key}=${it.value}" }
+
+    private fun decodeBpm(json: String): Map<String, Double> =
+        json.split('\u0000').mapNotNull { part ->
+            val i = part.lastIndexOf('=')
+            val key = if (i > 0) part.substring(0, i) else return@mapNotNull null
+            val value = part.substring(i + 1).toDoubleOrNull() ?: return@mapNotNull null
+            if (key.isEmpty()) null else key to value
+        }.toMap()
 
     private companion object {
         const val TTL_MS = 30L * 24 * 60 * 60 * 1000

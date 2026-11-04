@@ -137,6 +137,11 @@ class RecoPipeline(
             sourcesById, checked,
         )
 
+        // Attach the measured tempo (Deezer) before ranking: a tempo decides the mood, not a title's words.
+        if (RecoKind.ENERGY in kinds || RecoKind.CHILL in kinds || RecoKind.NIGHT in kinds) {
+            pool = enrichBpm(pool, ctxBase)
+        }
+
         val used = HashSet<String>()
         // Songs a source refused, that are not songs, or that the listener has (found out by asking): out of every playlist.
         val rejected = HashSet<String>()
@@ -331,6 +336,24 @@ class RecoPipeline(
         if (extra.isEmpty()) c else {
             val best = extra.maxBy { profile.affinity(it) }
             c.copy(provenance = c.provenance + Provenance(ProvKind.COLLAB, profile.nameOf(best), profile.affinity(best)))
+        }
+    }
+
+    /** Attaches the measured tempo (Deezer) to each candidate, before ranking: the mood playlists read it. */
+    private suspend fun enrichBpm(pool: List<Candidate>, ctx: RankContext): List<Candidate> {
+        val auth = authority ?: return pool
+        val verif = verifier ?: return pool
+        val gate = Semaphore(5)
+        return coroutineScope {
+            pool.map { c ->
+                async {
+                    val primaryArtist = ArtistNames.primary(c.artist, beforeAmpersand = true)
+                    if (primaryArtist.isEmpty()) return@async c
+                    val resolved = auth.resolve(primaryArtist, ctx.profile.genres.keys) ?: return@async c
+                    val bpm = verif.bpmOf(resolved, c.title) ?: return@async c
+                    if (bpm == c.bpm) c else c.copy(bpm = bpm)
+                }
+            }.awaitAll()
         }
     }
 

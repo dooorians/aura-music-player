@@ -192,6 +192,8 @@ data class VerifiedDiscographyEntity(
     val tracksJson: String,
     /** Official album titles, as [TrackIdentity] keys, joined by NUL. */
     val albumsJson: String,
+    /** Track title key → tempo (BPM), as `key=bpm` pairs joined by NUL; empty when none was known. */
+    val bpmJson: String = "",
     val fetchedAtMs: Long,
 )
 
@@ -222,5 +224,12 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
             "CREATE TABLE IF NOT EXISTS verified_discography (artistKey TEXT NOT NULL PRIMARY KEY, " +
                 "tracksJson TEXT NOT NULL, albumsJson TEXT NOT NULL, fetchedAtMs INTEGER NOT NULL)",
         )
+    }
+}
+
+/** The tempo map persisted with the discography; additive only. */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE verified_discography ADD COLUMN bpmJson TEXT NOT NULL DEFAULT ''")
     }
 }
