@@ -82,8 +82,8 @@ private const val RAMP_STOPS = 16
 /** How far below the status bar the blur reaches, in dp: just the status bar and a margin. */
 private const val BAND_DP = 12f
 
-/** A little dark at the very top, so the clock and the battery stay readable over soft content. */
-private const val SCRIM_ALPHA = 0.10f
+/** The dark at the very top is off (0): the page shows to the edge. Raise it to make the clock and the battery stand out over soft content. */
+private const val SCRIM_ALPHA = 0f
 
 private data class TopBlurElement(val topInset: Dp, val strength: Density.() -> Float) : ModifierNodeElement<TopBlurNode>() {
     override fun create() = TopBlurNode(topInset, strength)

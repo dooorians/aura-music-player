@@ -1378,7 +1378,9 @@ fun MainLayout() {
             // One single app-level scrim across the entire app so it never superposes, blinks, or pops during page transitions.
             val isTabs = currentRoute == AuraDestination.Tabs.route
             val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
-            val rootTopAlpha = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            // The root scrim is off: no dark veil over the top of the app. The formula is kept in case it comes back.
+            @Suppress("UNUSED_VARIABLE") val scrimStrength = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            val rootTopAlpha = 0f
             com.ikko.aura.ui.screens.album.ProgressiveTopScrim(
                 strength = rootTopAlpha,
                 modifier = Modifier.align(Alignment.TopCenter),
