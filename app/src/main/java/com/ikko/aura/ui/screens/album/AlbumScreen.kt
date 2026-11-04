@@ -683,7 +683,12 @@ private fun AlbumHeader(
                     style = heroTitleStyle.copy(color = Color.White),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
+                    modifier = Modifier
+                        // The title owns its whole line, not only the width its glyphs happen to cover: the hero lays a
+                        // copy out in the bounds it is given, and on the drawn width alone it kept "Spéciale)" on the
+                        // first line while the page wraps it onto a second - the last word jumping as the copy landed.
+                        .fillMaxWidth()
+                        .heroTarget(heroKey, text = com.ikko.aura.ui.components.HeroText(uiState.title.trim(), androidx.compose.ui.geometry.Rect.Zero, heroTitleStyle, Color.White, maxLines = 2)),
                 )
                 Text(
                     text = uiState.artist.trim(),
