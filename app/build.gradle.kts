@@ -92,6 +92,8 @@ android {
     // the part we can drop without losing debuggability, and it is pure overhead on device.
     composeCompiler {
         includeSourceInformation = false
+        // Read-only collections and Uri treated as stable: see the file for why.
+        stabilityConfigurationFiles.add(project.layout.projectDirectory.file("compose-stability.conf"))
     }
 
     buildFeatures {

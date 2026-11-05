@@ -9,6 +9,7 @@ import com.ikko.aura.reco.RecoItem
  * An album offered on Home: one of the library ([album]) or one of an external source ([ref] is its page's reference, a
  * YouTube Music playlist id or `<source>:<id>`, and [artworkUrl] its cover).
  */
+@androidx.compose.runtime.Immutable
 data class SectionAlbum(
     val title: String,
     val artist: String,
@@ -38,6 +39,7 @@ data class SectionAlbum(
  * A row of Home under "Mixes pour toi": [kicker] ("Plus de", "Plus de contenu similaire à") over [title], and its albums.
  * The first album's cover stands at the head of the row.
  */
+@androidx.compose.runtime.Immutable
 data class HomeSection(
     val id: String,
     val kicker: String?,

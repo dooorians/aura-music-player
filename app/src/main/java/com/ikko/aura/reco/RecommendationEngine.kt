@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** A song of a generated playlist with the reason it is there. */
+@androidx.compose.runtime.Immutable
 data class RecoItem(
     val trackId: String,
     val title: String,

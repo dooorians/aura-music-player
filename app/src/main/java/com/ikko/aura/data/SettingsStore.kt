@@ -1,9 +1,11 @@
 package com.ikko.aura.data
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,7 +18,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /** Shared with [FavoritesStore]: one store for everything small the app has to remember. */
-internal val Context.settingsDataStore by preferencesDataStore(name = "aura_settings")
+// A corrupted file is replaced by empty settings (every one at its default) instead of failing every read.
+internal val Context.settingsDataStore by preferencesDataStore(
+    name = "aura_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 data class EqualizerSettings(
     val enabled: Boolean = false,
@@ -57,7 +63,7 @@ class SettingsStore @Inject constructor(
      * without this each write woke every collector: the queue writer (which then wrote again, a loop for as long as
      * music played), the library re-sort, the Home widgets.
      */
-    private fun <T> setting(read: (Preferences) -> T): Flow<T> = context.settingsDataStore.data.map(read).distinctUntilChanged()
+    private fun <T> setting(read: (Preferences) -> T): Flow<T> = context.settingsDataStore.data.orEmptyOnReadError().map(read).distinctUntilChanged()
 
     val profileImageUri = setting { prefs -> prefs[profileImageUriKey] }
     val profileFirstName = setting { prefs -> prefs[profileFirstNameKey].orEmpty() }

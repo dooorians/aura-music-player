@@ -68,7 +68,7 @@ fun HomeOrganizer(
             }
             Spacer(Modifier.height(8.dp))
             LazyColumn(Modifier.fillMaxWidth().height((slots.size * 64).coerceAtMost(420).dp)) {
-                items(slots, key = { it.id }) { slot ->
+                items(slots, key = { it.id }, contentType = { "slot" }) { slot ->
                     val index = slots.indexOf(slot)
                     Row(
                         modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp),

@@ -46,6 +46,10 @@ object LastFmRules {
  */
 @Singleton
 class LastFm @Inject constructor(@param:ApplicationContext private val context: Context) : com.ikko.aura.reco.ArtistInsight {
+class LastFm @Inject constructor(
+    @ApplicationContext context: Context,
+    remoteCache: com.ikko.aura.data.cache.RemoteCacheDao,
+) : com.ikko.aura.reco.ArtistInsight {
     private val prefs = context.getSharedPreferences("lastfm", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sending = Mutex()
@@ -66,7 +70,7 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
     /** The address to open in the browser, where the account is approved: a token from Last.fm, in its page. Null with a reason on failure. */
     suspend fun startWebLogin(apiKey: String, secret: String): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
         runCatching {
-            val token = call(apiKey, secret, mapOf("method" to "auth.getToken")).getString("token")
+            val token = call(apiKey, secret, mapOf("method" to "auth.getToken"), interactive = true).getString("token")
             token to "https://www.last.fm/api/auth/?api_key=${URLEncoder.encode(apiKey, "UTF-8")}&token=$token"
         }.recoverCatching { throw Exception(if (it is LastFmError) it.message else "Pas de réseau") }
     }
@@ -75,7 +79,7 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
     suspend fun finishWebLogin(apiKey: String, secret: String, token: String): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
             try {
-                val session = call(apiKey, secret, mapOf("method" to "auth.getSession", "token" to token)).getJSONObject("session")
+                val session = call(apiKey, secret, mapOf("method" to "auth.getSession", "token" to token), interactive = true).getJSONObject("session")
                 prefs.edit().putString("apiKey", apiKey).putString("secret", secret)
                     .putString("sk", session.getString("key")).putString("user", session.getString("name")).apply()
                 _user.value = session.getString("name")
@@ -88,22 +92,40 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
         }
     }
 
-    private val insightPrefs = context.getSharedPreferences("lastfm_insight", Context.MODE_PRIVATE)
+    /**
+     * What Last.fm said, kept in the database (see [com.ikko.aura.data.cache.InsightCache]); the SharedPreferences file
+     * it used to be kept in is moved over on first use.
+     */
+    private val insights = com.ikko.aura.data.cache.InsightCache(
+        dao = remoteCache,
+        namespace = "lastfm:",
+        ttlMs = INSIGHT_TTL_MS,
+        legacy = object : com.ikko.aura.data.cache.InsightCache.Legacy {
+            private val old = context.getSharedPreferences("lastfm_insight", Context.MODE_PRIVATE)
+            override fun entries(): Map<String, String> = old.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+            override fun clear() { old.edit().clear().commit() }
+        },
+    )
+
+    /**
+     * Calls are held back for a while after Last.fm said "not now" (no network, a timeout, its rate limit, the service
+     * down): offline, a background enrichment no longer waits out one connect timeout per artist.
+     */
+    private val backoff = com.ikko.aura.util.Backoff()
 
     /** An answer kept on the device: what Last.fm says of an artist hardly changes, so it is asked about once in two weeks. */
-    private suspend fun cached(kind: String, name: String, ask: () -> List<String>): List<String>? {
+    private suspend fun cached(kind: String, name: String, ask: suspend () -> List<String>): List<String>? {
         if (savedKey.isEmpty()) return null
         val key = kind + ":" + name.lowercase().trim()
-        insightPrefs.getString(key, null)?.let { raw ->
-            val at = raw.substringBefore('\t').toLongOrNull() ?: 0L
-            if (System.currentTimeMillis() - at < INSIGHT_TTL_MS) return raw.substringAfter('\t', "").split('\u0001').filter { it.isNotEmpty() }
-        }
+        insights.get(key)?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                ask().also { insightPrefs.edit().putString(key, "${System.currentTimeMillis()}\t${it.joinToString("\u0001")}").apply() }
+                ask().also { insights.put(key, it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: LastFmError) {
                 // 6: no such artist. A definite answer, kept; anything else (network, limit) is not.
-                if (e.code == 6) { insightPrefs.edit().putString(key, "${System.currentTimeMillis()}\t").apply(); emptyList() } else null
+                if (e.code == 6) { insights.put(key, emptyList()); emptyList() } else null
             } catch (e: Exception) { null }
         }
     }
@@ -180,8 +202,8 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
         val who = prefs.getString("user", null) ?: return null
         if (savedKey.isEmpty()) return null
         return withContext(Dispatchers.IO) {
-            runCatching {
-                fun get(method: String, root: String, item: String, limit: Int, extra: Map<String, String> = emptyMap()): List<JSONObject> {
+            com.ikko.aura.util.runCatchingCancellable {
+                suspend fun get(method: String, root: String, item: String, limit: Int, extra: Map<String, String> = emptyMap()): List<JSONObject> {
                     val arr = call(savedKey, savedSecret, mapOf("method" to method, "user" to who, "limit" to limit.toString()) + extra)
                         .optJSONObject(root)?.optJSONArray(item) ?: JSONArray()
                     return (0 until arr.length()).map { arr.getJSONObject(it) }
@@ -202,7 +224,7 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
     override suspend fun listenerTopArtists(): List<String> {
         val who = prefs.getString("user", null) ?: return emptyList()
         // The last six months first (what is played now), then the whole of the scrobbles (what is loved).
-        fun top(period: String, limit: Int): List<String> {
+        suspend fun top(period: String, limit: Int): List<String> {
             val arr = call(savedKey, savedSecret, mapOf("method" to "user.getTopArtists", "user" to who, "period" to period, "limit" to limit.toString()))
                 .optJSONObject("topartists")?.optJSONArray("artist") ?: JSONArray()
             return (0 until arr.length()).map { arr.getJSONObject(it).getString("name") }
@@ -294,7 +316,15 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
 
     private class LastFmError(val code: Int, message: String) : Exception(message)
 
-    private fun call(apiKey: String, secret: String, params: Map<String, String>): JSONObject {
+    /** Refused without a request: Last.fm said "not now" a moment ago (see [backoff]). Read as any network failure. */
+    private class LastFmPaused(waitMs: Long) : java.io.IOException("Last.fm paused for ${waitMs / 1000}s")
+
+    /**
+     * One signed POST. Cancellable: a caller's timeout closes the connection instead of waiting for the read timeout.
+     * [interactive] calls (the login) are the listener's own and go out even while background calls are held back.
+     */
+    private suspend fun call(apiKey: String, secret: String, params: Map<String, String>, interactive: Boolean = false): JSONObject {
+        if (!interactive && !backoff.allows()) throw LastFmPaused(backoff.remainingMs())
         val all = params + ("api_key" to apiKey)
         val body = (all + ("api_sig" to LastFmRules.sign(all, secret)) + ("format" to "json")).entries
             .joinToString("&") { URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }
@@ -316,13 +346,53 @@ class LastFm @Inject constructor(@param:ApplicationContext private val context: 
             val json = JSONObject(text)
             if (json.has("error")) throw LastFmError(json.getInt("error"), json.optString("message"))
             json
+        val connection = URL("https://ws.audioscrobbler.com/2.0/").openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.doOutput = true
+        connection.connectTimeout = 8_000
+        connection.readTimeout = 12_000
+        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        val (status, text) = try {
+            com.ikko.aura.util.abortableBlocking(abort = connection::disconnect) {
+                try {
+                    connection.outputStream.use { it.write(body.toByteArray()) }
+                    val code = connection.responseCode
+                    code to (if (code < 400) connection.inputStream else connection.errorStream)
+                        ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        } catch (e: java.io.IOException) {
+            // No network, a timeout, a reset: worth a pause before the next background call.
+            backoff.onFailure()
+            throw e
         }
+        val json = runCatching { JSONObject(text) }.getOrNull()
+        if (json == null) {
+            // Not JSON at all: a proxy's or a load balancer's page, an overloaded service (HTTP 429/5xx).
+            if (status == 429 || status >= 500) backoff.onFailure(if (status == 429) RATE_LIMIT_PAUSE_MS else 0L)
+            throw java.io.IOException("Last.fm answered HTTP $status without JSON")
+        }
+        if (json.has("error")) {
+            val code = json.optInt("error")
+            when (code) {
+                RATE_LIMITED -> backoff.onFailure(RATE_LIMIT_PAUSE_MS)
+                in TEMPORARY -> backoff.onFailure()
+            }
+            throw LastFmError(code, json.optString("message"))
+        }
+        backoff.onSuccess()
+        return json
     }
 
     private companion object {
         /** Service offline, temporarily unavailable, rate limit. */
         val TEMPORARY = setOf(11, 16, 29)
         const val ENDPOINT = "https://ws.audioscrobbler.com/2.0/"
+        const val RATE_LIMITED = 29
+        /** Last.fm does not say how long its rate limit lasts; a minute is what its documentation suggests waiting. */
+        const val RATE_LIMIT_PAUSE_MS = 60_000L
         const val INSIGHT_TTL_MS = 14L * 24 * 3600 * 1000
     }
 }

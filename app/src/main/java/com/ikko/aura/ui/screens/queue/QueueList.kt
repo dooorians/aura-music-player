@@ -90,7 +90,7 @@ fun QueueList(
         modifier = modifier.fillMaxWidth(),
         contentPadding = contentPadding,
     ) {
-        itemsIndexed(uiState.queue, key = { index, _ -> uiState.queueKeys.keyAt(index) }) { index, track ->
+        itemsIndexed(uiState.queue, key = { index, _ -> uiState.queueKeys.keyAt(index) }, contentType = { _, _ -> "queue_entry" }) { index, track ->
             // The row's position as it is now: the drag below outlives the moves it makes, and its gesture block is
             // keyed on the entry, not on where the entry was when the block was made.
             val rowIndex by rememberUpdatedState(index)

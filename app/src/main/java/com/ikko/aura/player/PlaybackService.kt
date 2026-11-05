@@ -77,6 +77,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var streamCache: StreamCache
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
+    @Inject lateinit var dspController: com.ikko.aura.core.audio.dsp.DspController
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -267,13 +268,20 @@ class PlaybackService : MediaSessionService() {
                             }
                         },
                     ),
-                    DefaultExtractorsFactory(),
+                    // A raw AAC (ADTS) or AMR file has no seek table, nor does an MP3 whose Xing header carries none:
+                    // without this they play but cannot be seeked, and the progress bar snaps back. Seeking by the
+                    // average bitrate is approximate on variable-bitrate files, which is still far better than nothing.
+                    DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true),
                 ),
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
             // Nothing is held until a track plays; see the listener below and [WakeModePolicy].
             .setWakeMode(C.WAKE_MODE_NONE)
+            // Held only while this player is playing or buffering, so the idle spare holds nothing. Without it the CPU
+            // and the Wi-Fi could sleep with the screen off while a streamed track was still buffering, and playback
+            // stalled until the phone woke up.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             // The locks follow the track: a stream holds the Wi-Fi lock, a local file only the CPU, and ExoPlayer drops
             // either on pause or stop. The idle spare never plays, so never holds anything.
@@ -285,8 +293,8 @@ class PlaybackService : MediaSessionService() {
             }
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
             .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
-            // Both players share one session id so the equaliser applies to whichever is
-            // audible, including through the overlap where both are.
+            // Both players share one session id, so anything attached to the session (a system
+            // visualiser, an external effect) follows whichever of them is audible.
             .apply { setAudioSessionId(audioSessionIdProvider.id) }
 
     /**
@@ -303,17 +311,25 @@ class PlaybackService : MediaSessionService() {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(enableFloatOutput)
-                .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
-                .setAudioProcessorChain(
-                    DefaultAudioSink.DefaultAudioProcessorChain(
-                        arrayOf(transition),
-                        SilenceSkippingAudioProcessor(),
-                        SonicAudioProcessor(),
-                    ),
-                )
-                .build(), beat)
+            ): AudioSink {
+                // The app's equaliser, normaliser and limiter, last in the chain: see DspAudioProcessorChain.
+                val dsp = com.ikko.aura.core.audio.dsp.DspAudioProcessor(dspController.parameters)
+                val sink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
+                    .setAudioProcessorChain(
+                        com.ikko.aura.core.audio.dsp.DspAudioProcessorChain(
+                            DefaultAudioSink.DefaultAudioProcessorChain(
+                                arrayOf(transition),
+                                SilenceSkippingAudioProcessor(),
+                                SonicAudioProcessor(),
+                            ),
+                            dsp,
+                        ),
+                    )
+                    .build(), beat)
+                return com.ikko.aura.core.audio.dsp.DspAudioSink(sink, dsp)
+            }
         }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

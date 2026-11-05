@@ -32,7 +32,7 @@ object DatabaseModule {
     @Singleton
     fun provideAuraDatabase(@ApplicationContext context: Context): AuraDatabase =
         Room.databaseBuilder(context, AuraDatabase::class.java, "aura.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, com.ikko.aura.reco.MIGRATION_9_10, com.ikko.aura.reco.MIGRATION_10_11, com.ikko.aura.reco.MIGRATION_11_12, com.ikko.aura.reco.MIGRATION_12_13, com.ikko.aura.reco.MIGRATION_13_14, com.ikko.aura.reco.MIGRATION_14_15, com.ikko.aura.reco.MIGRATION_15_16, com.ikko.aura.reco.MIGRATION_16_17, com.ikko.aura.reco.MIGRATION_17_18, com.ikko.aura.reco.MIGRATION_18_19)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, com.ikko.aura.reco.MIGRATION_9_10, com.ikko.aura.reco.MIGRATION_10_11, com.ikko.aura.reco.MIGRATION_11_12, com.ikko.aura.reco.MIGRATION_12_13, com.ikko.aura.reco.MIGRATION_13_14, com.ikko.aura.reco.MIGRATION_14_15, com.ikko.aura.reco.MIGRATION_15_16, com.ikko.aura.reco.MIGRATION_16_17, com.ikko.aura.reco.MIGRATION_17_18, com.ikko.aura.reco.MIGRATION_18_19, com.ikko.aura.data.db.MIGRATION_19_20)
             .build()
 
     @Provides
@@ -65,4 +65,7 @@ object DatabaseModule {
 
     @Provides
     fun provideSourceConfigDao(database: AuraDatabase): SourceConfigDao = database.sourceConfigDao()
+
+    @Provides
+    fun provideRemoteCacheDao(database: AuraDatabase): com.ikko.aura.data.cache.RemoteCacheDao = database.remoteCacheDao()
 }

@@ -327,6 +327,12 @@ class CrossfadeController(
             wake.trySend(Unit)
         }
 
+        // At once rather than at the next tick: the tail of a blend has no audio focus and no headphone handling of
+        // its own, so it must stop the moment the session player is paused (headphones pulled) or silenced (a call).
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = followSessionPause()
+
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) = followSessionPause()
+
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -446,18 +452,30 @@ class CrossfadeController(
 
     private fun canArm() = canArm(AutomixSettings.smartFadeEnabled.value, AutomixSettings.crossfadeSeconds.value)
 
+    /**
+     * Makes the tail of a blend follow the session player. Only that player holds audio focus, so a transient loss (a
+     * call, a navigation prompt) leaves its `playWhenReady` true and sets a suppression reason instead: mirroring
+     * `playWhenReady` alone kept the outgoing track playing through the call. Once the focus comes back the suppression
+     * clears and both resume together.
+     */
+    private fun followSessionPause() {
+        if (phase != Phase.FADING && phase != Phase.BAILING) return
+        val session = incoming ?: return
+        val out = outgoing ?: return
+        val shouldPlay = tailShouldPlay(session.playWhenReady, session.playbackSuppressionReason)
+        if (out.playWhenReady != shouldPlay) out.playWhenReady = shouldPlay
+    }
+
     private fun tick() {
         // Nothing to arm and nothing in flight: no analysis line to publish, no plan to make (and nobody reads them).
         if (phase == Phase.IDLE && !canArm()) return
         // A pause has to take the other player with it, or one half of the blend
-        // carries on alone over a stopped one. Mirrored every tick rather than
-        // handled as an event, so audio focus loss, the sleep timer and the
-        // pause button all get the same treatment for free. Which player follows
-        // which flips at the handoff: before it the standby shadows the session,
-        // after it the outgoing tail does.
-        if (phase == Phase.FADING || phase == Phase.BAILING) {
-            outgoing?.playWhenReady = incoming?.playWhenReady ?: true
-        }
+        // carries on alone over a stopped one. The listener applies it the moment
+        // it happens; this is the net under it, every tick, so the pause button,
+        // the sleep timer, a pulled headphone and a call all get the same
+        // treatment. Which player follows which flips at the handoff: before it
+        // the standby shadows the session, after it the outgoing tail does.
+        followSessionPause()
 
         // Every tick, not only when a transition can be planned. This used to
         // live inside [considerSmartTransition], which needs an idle phase, a
@@ -880,7 +898,9 @@ class CrossfadeController(
         // Paused while armed: the transition is no longer imminent, and holding
         // a prepared decoder open against a stopped player is worse than arming
         // again when playback resumes.
-        if (!out.playWhenReady) return bail()
+        // Silenced by a transient focus loss counts as paused: a fade started then would hand the session over to a
+        // player asking for focus in the middle of the call.
+        if (!tailShouldPlay(out.playWhenReady, out.playbackSuppressionReason)) return bail()
 
         val expired = SystemClock.elapsedRealtime() > armDeadline
         val ready = into.playbackState == Player.STATE_READY
@@ -1691,3 +1711,10 @@ class CrossfadeController(
 /** A fade can be armed only by Automix, or by a manual crossfade length above zero. */
 internal fun canArm(smartFadeEnabled: Boolean, crossfadeSeconds: Int): Boolean =
     smartFadeEnabled || crossfadeSeconds > 0
+
+/**
+ * Whether the silent-to-the-system half of a blend should be sounding, given the session player's state. Paused, or
+ * playing but suppressed (transient focus loss, an unsuitable output), means no.
+ */
+internal fun tailShouldPlay(sessionPlayWhenReady: Boolean, sessionSuppressionReason: Int): Boolean =
+    sessionPlayWhenReady && sessionSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE

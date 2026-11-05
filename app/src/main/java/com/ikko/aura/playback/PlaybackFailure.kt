@@ -35,6 +35,9 @@ enum class PlaybackFailure {
             // Parsing (3001..3004) and decoding (4001..4005): the file, not the route to it, is the problem.
             in PARSING_CODES, in DECODING_CODES -> UNSUPPORTED
 
+            // A read past the end of the data: a truncated file (an interrupted copy or download). Skipped like a corrupt one.
+            PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> UNSUPPORTED
+
             else -> UNKNOWN
         }
 

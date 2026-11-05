@@ -91,6 +91,7 @@ data class Candidate(
 }
 
 /** The explanation shown under a recommended song: a code and the names it is about, so it can only say what was used. */
+@androidx.compose.runtime.Immutable
 data class Reason(val code: ReasonCode, val subject: String = "") {
     fun text(): String = when (code) {
         ReasonCode.LISTENED_ARTIST -> "Parce que tu écoutes $subject"

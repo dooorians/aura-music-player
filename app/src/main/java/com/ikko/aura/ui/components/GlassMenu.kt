@@ -289,7 +289,7 @@ fun GlassMenuItem(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 5.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(GlassMenuItemShape)
             .background(
                 when {
                     pressed -> Color.White.copy(alpha = 0.16f)
@@ -321,3 +321,5 @@ fun GlassMenuItem(
         }
     }
 }
+
+private val GlassMenuItemShape = RoundedCornerShape(18.dp)

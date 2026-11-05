@@ -2,11 +2,11 @@ package com.ikko.aura.reco
 
 import androidx.room.Dao
 import androidx.room.Entity
-import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
@@ -60,8 +60,8 @@ data class ArtistMetaEntity(
 /** The graph of artists Last.fm lists as close, restricted to those of the library: a row is "target is close to source". */
 @Entity(
     tableName = "artist_similarity",
+    // No index of its own on sourceArtistKey: the primary key starts with it and already serves "WHERE sourceArtistKey = ?".
     primaryKeys = ["sourceArtistKey", "targetArtistKey"],
-    indices = [Index("sourceArtistKey")],
 )
 data class ArtistSimilarityEntity(
     val sourceArtistKey: String,
@@ -113,6 +113,17 @@ interface SmartDao {
 
     @Query("DELETE FROM artist_similarity WHERE sourceArtistKey = :key")
     suspend fun clearSimilarities(key: String)
+
+    /**
+     * What Last.fm said of an artist, written in one transaction: before, a crash between clearing the artist's graph and
+     * writing the new one left it with no neighbours until the next fetch, 30 days later.
+     */
+    @Transaction
+    suspend fun replaceArtistGraph(meta: ArtistMetaEntity, rows: List<ArtistSimilarityEntity>) {
+        putArtist(meta)
+        clearSimilarities(meta.artistKey)
+        if (rows.isNotEmpty()) putSimilarities(rows)
+    }
 
     /**
      * The songs that share a local playlist with [trackId], with how many playlists they share and in how many the two
