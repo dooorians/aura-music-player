@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.Flow
  * Home's "écoutés récemment" row needs and loses it on exit, which is fine for a row about the
  * last hour and useless for a row about the last months.
  */
-@Entity(tableName = "album_plays")
+// lastPlayedAtMs: "Redécouvrir" reads the last albums played (ORDER BY lastPlayedAtMs DESC LIMIT n) off the index.
+@Entity(tableName = "album_plays", indices = [androidx.room.Index("lastPlayedAtMs")])
 data class AlbumPlayEntity(
     @PrimaryKey val albumId: Long,
     val playCount: Int,

@@ -9,7 +9,9 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 /** [state] is one of QUEUED, DOWNLOADING, DONE, FAILED. [filePath] is where the file is (or will be). */
-@Entity(tableName = "ytm_downloads")
+// (state, updatedAt): the queue's next song (state IN (...) ORDER BY updatedAt LIMIT 1) is the index's first entry, and
+// the counts and lists by state never read the whole table.
+@Entity(tableName = "ytm_downloads", indices = [androidx.room.Index("state", "updatedAt")])
 data class YtmDownloadEntity(
     @PrimaryKey val key: String,
     val state: String,

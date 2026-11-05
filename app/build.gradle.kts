@@ -198,4 +198,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation("org.json:json:20240303")
+    // A real SQLite (with FTS4 and unicode61, as on Android) for the database tests: the migration, the search
+    // index's triggers and its queries are run against the engine, not mocked.
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
 }

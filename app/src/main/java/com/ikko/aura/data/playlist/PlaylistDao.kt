@@ -63,6 +63,10 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlaylistTrack(entry: PlaylistTrackEntity)
 
+    /** One statement prepared once and run for each entry, instead of one insert call per entry. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistTracks(entries: List<PlaylistTrackEntity>)
+
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
 
@@ -70,7 +74,7 @@ interface PlaylistDao {
     @androidx.room.Transaction
     suspend fun replaceTracks(playlistId: Long, entries: List<PlaylistTrackEntity>) {
         clearPlaylistTracks(playlistId)
-        entries.forEach { insertPlaylistTrack(it) }
+        insertPlaylistTracks(entries)
     }
 
     @Query("SELECT * FROM playlist_tracks")
@@ -99,8 +103,9 @@ interface PlaylistDao {
         com.ikko.aura.reco.TrackTagsEntity::class,
         com.ikko.aura.reco.ArtistIdentityEntity::class,
         com.ikko.aura.reco.SongFeaturesEntity::class,
+        com.ikko.aura.catalog.TrackSearchEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -114,6 +119,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun smartDao(): com.ikko.aura.reco.SmartDao
     abstract fun verifiedDiscographyDao(): com.ikko.aura.reco.VerifiedDiscographyDao
     abstract fun trackMetaDao(): com.ikko.aura.reco.TrackMetaDao
+    abstract fun trackSearchDao(): com.ikko.aura.catalog.TrackSearchDao
 }
 
 /**
