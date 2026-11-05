@@ -30,6 +30,11 @@ class PlaybackFailureTest {
     }
 
     @Test
+    fun `a truncated file is skipped like a corrupt one`() {
+        assertEquals(PlaybackFailure.UNSUPPORTED, classify(PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE))
+    }
+
+    @Test
     fun `the audio output and anything unclassified stay unknown`() {
         assertEquals(PlaybackFailure.UNKNOWN, classify(PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED))
         assertEquals(PlaybackFailure.UNKNOWN, classify(PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED))

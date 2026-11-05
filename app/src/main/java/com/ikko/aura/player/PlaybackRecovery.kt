@@ -53,6 +53,8 @@ class PlaybackRecovery(
         val position = p.currentPosition
         val failure = PlaybackFailure.classify(error.errorCode)
         val attemptsOnItem = (attempts[item.mediaId] ?: 0) + 1
+        // Items skipped without ever playing leave their count behind; a long session of them must not grow this forever.
+        if (attempts.size >= MAX_TRACKED_ITEMS && item.mediaId !in attempts) attempts.clear()
         attempts[item.mediaId] = attemptsOnItem
 
         scope.launch {
@@ -63,7 +65,9 @@ class PlaybackRecovery(
             // Repeat-one reports the same item as "next": skipping would only fail on it again.
             val hasNext = p.repeatMode != Player.REPEAT_MODE_ONE && p.hasNextMediaItem()
             val action = policy.decide(failure, attemptsOnItem, consecutiveItemFailures, alternatives, hasNext)
-            // Whatever was decided is for the item that failed: if the listener has moved on since, leave it be.
+            // Whatever was decided is for the item that failed: if the listener has moved on since, or the session has
+            // been handed to the other player by a transition (or released), leave it be.
+            if (player !== p) return@launch
             if (p.currentMediaItemIndex != index || p.currentMediaItem?.mediaId != item.mediaId) return@launch
             when (action) {
                 is RecoveryAction.TryAlternative -> retryFrom(p, index, item, action.source.uri, position)
@@ -89,5 +93,9 @@ class PlaybackRecovery(
         if (playbackState != Player.STATE_READY) return
         consecutiveItemFailures = 0
         player?.currentMediaItem?.let { attempts.remove(it.mediaId) }
+    }
+
+    private companion object {
+        const val MAX_TRACKED_ITEMS = 256
     }
 }

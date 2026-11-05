@@ -272,6 +272,10 @@ class PlaybackService : MediaSessionService() {
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
+            // Held only while this player is playing or buffering, so the idle spare holds nothing. Without it the CPU
+            // and the Wi-Fi could sleep with the screen off while a streamed track was still buffering, and playback
+            // stalled until the phone woke up.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
             .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
