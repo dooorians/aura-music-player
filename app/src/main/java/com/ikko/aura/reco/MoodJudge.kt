@@ -13,6 +13,8 @@ data class SongFeatures(
     val trackTags: List<String> = emptyList(),
     /** What the app's own analyser heard of the preview; null when there was none or it could not be analysed. */
     val probe: AudioProbe? = null,
+    /** What a model (ReccoBeats) heard of the preview: energy, acousticness, mood. The strongest signal there is; null when it could not be asked. */
+    val feel: ReccoFeatures? = null,
 )
 
 /**
@@ -98,6 +100,24 @@ object MoodJudge {
     private val CALM_TITLE = setOf("lullaby", "sleep", "night", "moon", "dream", "quiet", "calm", "slow", "lune", "nuit", "dormir", "berceuse", "reve", "rêve")
     private val ENERGETIC_TITLE = setOf("party", "dance", "club", "bang", "fire", "run", "jump", "bounce", "crazy")
 
+    /** The model's energy: 0 is the stillest, 1 the most driven. */
+    private fun energyValue(energy: Double): Double = when {
+        energy < 0.25 -> 0.9
+        energy < 0.40 -> 0.5
+        energy < 0.55 -> 0.1
+        energy < 0.70 -> -0.3
+        energy < 0.85 -> -0.6
+        else -> -0.9
+    }
+
+    /** Acoustic sound (voice, guitar, piano) is calmer than a produced one. */
+    private fun acousticValue(acousticness: Double): Double = when {
+        acousticness >= 0.7 -> 0.6
+        acousticness >= 0.4 -> 0.25
+        acousticness < 0.1 -> -0.3
+        else -> 0.0
+    }
+
     /** The tempo's say: slow is calm, and the faster the less sure it is (an octave is often wrong above 135). */
     private fun tempo(bpm: Double, sure: Boolean): Signal {
         val value = when {
@@ -140,11 +160,18 @@ object MoodJudge {
     fun read(features: SongFeatures?, artistTags: List<String>, title: String, pool: PoolStats = PoolStats.EMPTY): Reading {
         val signals = ArrayList<Signal>()
         val gain = features?.gainDb
+        val feel = features?.feel
+        if (feel != null) {
+            // What the model heard leads: how much energy there is, how acoustic it is, how much it invites dancing.
+            signals += Signal(energyValue(feel.energy), 1.2)
+            signals += Signal(acousticValue(feel.acousticness), 0.5)
+            signals += Signal(((0.5 - feel.danceability) * 1.2).coerceIn(-0.6, 0.6), 0.4)
+        }
         if (features != null) {
             absoluteLoudness(features)?.let { fixed ->
-                // Against the pool as much as against the scale: the calmest of the songs measured is calm.
+                // Against the pool as much as against the scale: the calmest of the songs measured is calm. A master's loudness says less once the model has spoken.
                 val relative = features.probe?.let { pool.rank(PoolStats.Kind.LEVEL, it.rmsDb) }?.let { 1.0 - 2.0 * it }
-                signals += Signal(if (relative == null) fixed else 0.5 * fixed + 0.5 * relative, 0.6)
+                signals += Signal(if (relative == null) fixed else 0.5 * fixed + 0.5 * relative, if (feel != null) 0.25 else 0.6)
             }
             features.probe?.let { p ->
                 // How much the energy moves: the steadier, the calmer. (The share of bass is measured too but sits near 1 for half the songs: it says nothing.)
@@ -161,7 +188,7 @@ object MoodJudge {
         val artistEnergetic = artist.count { t -> ENERGETIC_ARTIST.any { it == t || t.endsWith(" $it") } }
         if (artistCalm + artistEnergetic > 0) signals += Signal(((artistCalm - artistEnergetic) * 0.7).coerceIn(-1.0, 1.0), 0.45)
         // The tempo last: what else says decides whether a fast one is a fast song or a slow one counted twice. What was heard beats what is stated.
-        val heard = features?.probe?.takeIf { it.bpm > 0.0 && it.beatConfidence >= MIN_BEAT_CONFIDENCE }?.bpm
+        val heard = features?.probe?.takeIf { it.bpm > 0.0 && it.beatConfidence >= MIN_BEAT_CONFIDENCE }?.bpm ?: feel?.tempo?.takeIf { it > 0.0 }
         var bpm = heard ?: features?.bpm?.takeIf { it > 0.0 }
         if (bpm != null) {
             if (signals.isNotEmpty() && mean(signals) >= 0.4 && bpm in 105.0..190.0) bpm /= 2
@@ -172,7 +199,9 @@ object MoodJudge {
         val titleCalm = words.count { it in CALM_TITLE }
         val titleEnergetic = words.count { it in ENERGETIC_TITLE }
         if (titleCalm + titleEnergetic > 0) signals += Signal(((titleCalm - titleEnergetic) * 0.6).coerceIn(-1.0, 1.0), 0.12)
-        return Reading(mean(signals), evidence, bpm, gain, nightCue = trackTags.any { it in NIGHT_TAGS })
+        // A sad, dark song at night; the mood a model heard counts as the cue of a tag.
+        val darkMood = feel != null && feel.valence < 0.3 && feel.energy < 0.45
+        return Reading(mean(signals), evidence, bpm, gain, nightCue = darkMood || trackTags.any { it in NIGHT_TAGS })
     }
 
     /** How well the song fits [mood], 0..1; null when it is not of it, or when too little is known of it to say. */

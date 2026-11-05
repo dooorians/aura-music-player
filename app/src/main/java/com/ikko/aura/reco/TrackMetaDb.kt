@@ -59,6 +59,14 @@ data class SongFeaturesEntity(
     val probeLow: Double = 0.0,
     val probeVar: Double = 0.0,
     val probed: Int = 0,
+    /** What ReccoBeats heard ([ReccoFeatures]); [felt]: 0 not asked yet, 1 heard, 2 asked and could not. */
+    val feelEnergy: Double = 0.0,
+    val feelAcoustic: Double = 0.0,
+    val feelValence: Double = 0.0,
+    val feelDance: Double = 0.0,
+    val feelLoud: Double = 0.0,
+    val feelTempo: Double = 0.0,
+    val felt: Int = 0,
 )
 
 data class TagMark(val trackId: String, val readVersion: Int)
@@ -130,5 +138,15 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         db.execSQL("ALTER TABLE song_features ADD COLUMN probeLow REAL NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE song_features ADD COLUMN probeVar REAL NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE song_features ADD COLUMN probed INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/** What a model heard of the previews (energy, acousticness, mood...); additive only. */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        for (column in listOf("feelEnergy", "feelAcoustic", "feelValence", "feelDance", "feelLoud", "feelTempo")) {
+            db.execSQL("ALTER TABLE song_features ADD COLUMN $column REAL NOT NULL DEFAULT 0")
+        }
+        db.execSQL("ALTER TABLE song_features ADD COLUMN felt INTEGER NOT NULL DEFAULT 0")
     }
 }

@@ -40,7 +40,7 @@ class SongFeatureService @Inject constructor(
         for (c in wanted) {
             val row = kept[c.identity]
             // A song found before the previews were listened to is looked up again, to hear its preview.
-            val fresh = row != null && now - row.fetchedAt < (if (row.found) FOUND_TTL_MS else MISSING_TTL_MS) && !(row.found && row.probed == 0)
+            val fresh = row != null && now - row.fetchedAt < (if (row.found) FOUND_TTL_MS else MISSING_TTL_MS) && !(row.found && row.probed == 0 && row.felt == 0)
             if (!fresh) todo += c else if (row!!.found) out[c.identity] = row.toFeatures()
         }
         val learned = Collections.synchronizedList(ArrayList<SongFeaturesEntity>())
@@ -56,8 +56,10 @@ class SongFeatureService @Inject constructor(
                             val d = try { deezer.trackFeatures(c.title, c.artist) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { failed = true; null }
                             val tags = try { lastFm.trackTags(c.title, c.artist) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }.orEmpty()
                             val url = d?.previewUrl
-                            val probe = if (url != null) listening.withPermit { try { previews.probe(url) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null } } else null
-                            val f = SongFeatures(bpm = d?.bpm?.takeIf { it > 0.0 } ?: c.bpm, gainDb = d?.gainDb, trackTags = tags, probe = probe)
+                            val heard = if (url != null) listening.withPermit { try { previews.listen(url) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null } } else null
+                            val probe = heard?.probe
+                            val feel = heard?.feel
+                            val f = SongFeatures(bpm = d?.bpm?.takeIf { it > 0.0 } ?: c.bpm, gainDb = d?.gainDb, trackTags = tags, probe = probe, feel = feel)
                             val found = d != null || tags.isNotEmpty()
                             if (found) out[c.identity] = f
                             // A network failure is not an answer: it is not kept as one.
@@ -65,6 +67,8 @@ class SongFeatureService @Inject constructor(
                                 c.identity, f.bpm ?: 0.0, f.gainDb, tags.joinToString("\u0000"), found, System.currentTimeMillis(),
                                 probeBpm = probe?.bpm ?: 0.0, probeConf = probe?.beatConfidence ?: 0.0, probeRmsDb = probe?.rmsDb ?: 0.0,
                                 probeLow = probe?.lowShare ?: 0.0, probeVar = probe?.variability ?: 0.0, probed = if (probe != null) 1 else 2,
+                                feelEnergy = feel?.energy ?: 0.0, feelAcoustic = feel?.acousticness ?: 0.0, feelValence = feel?.valence ?: 0.0,
+                                feelDance = feel?.danceability ?: 0.0, feelLoud = feel?.loudness ?: 0.0, feelTempo = feel?.tempo ?: 0.0, felt = if (feel != null) 1 else 2,
                             )
                         }
                     }
@@ -79,6 +83,7 @@ class SongFeatureService @Inject constructor(
         SongFeatures(
             bpm.takeIf { it > 0.0 }, gainDb, trackTags.split('\u0000').filter { it.isNotEmpty() },
             probe = if (probed == 1) AudioProbe(probeBpm, probeConf, probeRmsDb, probeLow, probeVar) else null,
+            feel = if (felt == 1) ReccoFeatures(feelEnergy, feelAcoustic, feelValence, feelDance, feelLoud, feelTempo) else null,
         )
 
     private companion object {

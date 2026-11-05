@@ -43,14 +43,27 @@ class BytesDataSource(private val bytes: ByteArray) : MediaDataSource() {
     override fun close() {}
 }
 
-/** Downloads a preview and listens to it. Best-effort: anything that goes wrong is "no probe", never an error. */
-@Singleton
-class PreviewAnalyzer @Inject constructor() {
+/** What was heard of a preview: what a model said of it ([feel]) and, when that was not available, what the app's own analyser measured ([probe]). */
+class Heard(val feel: ReccoFeatures?, val probe: AudioProbe?)
 
-    suspend fun probe(previewUrl: String): AudioProbe? = withContext(Dispatchers.IO) {
-        runCatching {
+/**
+ * Downloads a preview once and listens to it. ReccoBeats, which has a model for energy, acousticness and mood, is asked first; the app's own
+ * analyser (Automix's) only runs when it could not be, which saves the phone the decoding. Best-effort: anything that goes wrong is "heard
+ * nothing", never an error.
+ */
+@Singleton
+class PreviewAnalyzer @Inject constructor(private val recco: RecoBeatsClient) {
+
+    suspend fun listen(previewUrl: String): Heard? = withContext(Dispatchers.IO) {
+        val bytes = runCatching { download(previewUrl) }.getOrNull() ?: return@withContext null
+        val feel = recco.analyse(bytes)
+        val probe = if (feel == null) measure(bytes) else null
+        if (feel == null && probe == null) null else Heard(feel, probe)
+    }
+
+    private fun measure(bytes: ByteArray): AudioProbe? {
+        return runCatching {
             if (!TrackFeatures.available) return@runCatching null
-            val bytes = download(previewUrl) ?: return@runCatching null
             BytesDataSource(bytes).use { source ->
                 val (pcm, _) = AudioDecoder.decodeRegion(source, 0.0, PREVIEW_SECONDS) ?: return@runCatching null
                 if (pcm.samples.isEmpty()) return@runCatching null
