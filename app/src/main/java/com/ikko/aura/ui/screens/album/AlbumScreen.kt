@@ -544,7 +544,8 @@ internal fun AlbumGround(ground: Color, listState: LazyListState, arrival: andro
 }
 
 /** Where the aurora is fully clear, and where the flat colour is fully there, from the top. */
-private const val GROUND_CLEAR_DP = 205
+// 205 when the header started 54 dp under the status bar: the clear aurora keeps its place under the header (34 dp higher).
+private const val GROUND_CLEAR_DP = 171
 private const val GROUND_SOLID_DP = 395
 
 /** Scrolled past the header: far enough that the flat colour covers the whole screen. */
@@ -606,10 +607,10 @@ private const val ROWS_THAT_RISE = 8
 
 
 /**
- * Positioned to align with the top menu line of Home and Library (~statusBar + 54.dp),
- * giving the Aurora room to breathe under the status bar instead of crowding the clock.
+ * Where an album's or a playlist's cover starts, under the status bar: the height of the artist page's picture (20 dp of
+ * padding), so the pages that open on a cover all open on the same line.
  */
-internal val HEADER_TOP_BELOW_STATUS = 54.dp
+internal val HEADER_TOP_BELOW_STATUS = 20.dp
 
 private const val SKELETON_ROWS = 7
 
