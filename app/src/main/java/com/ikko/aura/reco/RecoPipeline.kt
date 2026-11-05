@@ -2,7 +2,12 @@ package com.ikko.aura.reco
 
 import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
@@ -160,12 +165,18 @@ class RecoPipeline(
         val rejected = HashSet<String>()
         val updated = LinkedHashSet<RecoKind>()
         val kept = LinkedHashSet<RecoKind>()
+        // The ranking itself is CPU work: off the I/O threads the renewal is launched on, and stopped between two steps if nobody waits for it.
+        val job = currentCoroutineContext()[Job]
+        val cancel: () -> Unit = { job?.ensureActive() }
         for (kind in order.filter { it in kinds }) {
             var picks: List<Pick> = emptyList()
             for (attempt in 0 until 3) {
+                currentCoroutineContext().ensureActive()
                 val ctx = ctxBase.copy(hidden = hidden + rejected)
-                val current = pool.map { applied(it, checked[it.id]) }
-                val selected = Ranker.select(kind, current, ctx, HashSet(used))
+                val usedNow = HashSet(used)
+                val selected = withContext(Dispatchers.Default) {
+                    Ranker.select(kind, pool.map { applied(it, checked[it.id]) }, ctx, usedNow)
+                }
                 lookUp(selected.map { it.candidate }, sourcesById, checked)
                 val verified = selected.map { p -> p.copy(candidate = applied(p.candidate, checked[p.candidate.id])) }
                 val bad = ArrayList<Pick>()
@@ -183,11 +194,17 @@ class RecoPipeline(
             val spec = Ranker.specOf(kind)
             if (picks.size >= (playlistFloor?.let { maxOf(it, spec.minimum / 2) } ?: spec.acceptable)) {
                 picks.forEach { used += it.candidate.identity }
-                store.commit(kind, picks, now)
+                // Chosen best first; heard in the order that flows (see [PlaylistFlow]).
+                val ordered = withContext(Dispatchers.Default) {
+                    try { PlaylistFlow.sequence(kind, picks, ctxBase, cancel) } catch (e: CancellationException) { throw e } catch (e: Exception) { picks }
+                }
+                store.commit(kind, ordered, now)
                 updated += kind
             } else {
                 // What the list was short of, kept with the status (the screen reads its beginning) and in the log.
-                val why = runCatching { Ranker.funnel(kind, pool.map { applied(it, checked[it.id]) }, ctxBase.copy(hidden = hidden + rejected), used) }.getOrDefault("?")
+                val why = withContext(Dispatchers.Default) {
+                    runCatching { Ranker.funnel(kind, pool.map { applied(it, checked[it.id]) }, ctxBase.copy(hidden = hidden + rejected), used) }.getOrDefault("?")
+                }
                 log("${kind.key} short: ${picks.size} of ${spec.acceptable} ($why)")
                 store.keep(kind, "kept|${picks.size}/${spec.acceptable} $why", now)
                 kept += kind

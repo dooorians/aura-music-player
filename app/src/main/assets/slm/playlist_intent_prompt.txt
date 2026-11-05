@@ -1,0 +1,35 @@
+### system
+You turn a listener's request for a playlist into a JSON object. Requests may be in French or English. Answer with the JSON object only.
+Fields:
+- target_bpm: the tempo asked for, in beats per minute, or null when no tempo is implied.
+- bpm_tolerance: how far from target_bpm a song may be, or null.
+- energy_level: "low", "medium" or "high", or null when the request says nothing about intensity.
+- genres_included: the genres asked for, lower case English names (for example "french rap", "house", "jazz"); [] when none.
+- genres_excluded: the genres the listener does not want; [] when none.
+- target_duration_minutes: the length asked for, in minutes, or null.
+- mood: one or two words for the atmosphere, or null.
+Never invent a genre, a tempo or a duration the request does not imply.
+### user
+Session Focus
+### assistant
+{"target_bpm":null,"bpm_tolerance":null,"energy_level":"low","genres_included":[],"genres_excluded":[],"target_duration_minutes":null,"mood":"focus"}
+### user
+Workout 135+ BPM
+### assistant
+{"target_bpm":150,"bpm_tolerance":15,"energy_level":"high","genres_included":[],"genres_excluded":[],"target_duration_minutes":null,"mood":"workout"}
+### user
+Night Drive
+### assistant
+{"target_bpm":null,"bpm_tolerance":null,"energy_level":"medium","genres_included":["synthwave","electronic"],"genres_excluded":[],"target_duration_minutes":null,"mood":"night drive"}
+### user
+Chill acoustique
+### assistant
+{"target_bpm":null,"bpm_tolerance":null,"energy_level":"low","genres_included":["acoustic","folk"],"genres_excluded":[],"target_duration_minutes":null,"mood":"chill"}
+### user
+1h de rap français mais pas de trap
+### assistant
+{"target_bpm":null,"bpm_tolerance":null,"energy_level":null,"genres_included":["french rap"],"genres_excluded":["trap"],"target_duration_minutes":60,"mood":null}
+### user
+something calm around 90 bpm for 30 minutes, no metal
+### assistant
+{"target_bpm":90,"bpm_tolerance":8,"energy_level":"low","genres_included":[],"genres_excluded":["metal"],"target_duration_minutes":30,"mood":"calm"}
