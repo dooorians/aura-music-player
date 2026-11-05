@@ -147,10 +147,9 @@ object MoodJudge {
                 signals += Signal(if (relative == null) fixed else 0.5 * fixed + 0.5 * relative, 0.6)
             }
             features.probe?.let { p ->
-                // How much of the sound is bass and how much it moves: the steadier and the lighter, the calmer.
-                val bass = pool.rank(PoolStats.Kind.BASS, p.lowShare)
+                // How much the energy moves: the steadier, the calmer. (The share of bass is measured too but sits near 1 for half the songs: it says nothing.)
                 val movement = pool.rank(PoolStats.Kind.MOVEMENT, p.variability)
-                if (bass != null && movement != null) signals += Signal(1.0 - (bass + movement), 0.5)
+                if (movement != null) signals += Signal(1.0 - 2.0 * movement, 0.4)
             }
         }
         val trackTags = features?.trackTags.orEmpty().map { it.trim().lowercase() }

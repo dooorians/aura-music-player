@@ -229,6 +229,16 @@ object Ranker {
         return picks
     }
 
+    /** Where a playlist's candidates are lost, stage by stage: what a short list was short of. For the log and the playlist's status. */
+    fun funnel(kind: RecoKind, pool: List<Candidate>, ctx: RankContext, used: Set<String>): String {
+        val free = pool.filter { it.identity !in used }
+        val eligible = free.filter { Eligibility.excluded(it, ctx) == null }
+        val measured = eligible.count { ctx.songFeatures.containsKey(it.identity) }
+        val scored = eligible.count { scoreFor(kind, it, ctx) != null }
+        val artists = eligible.mapNotNull { c -> scoreFor(kind, c, ctx)?.let { c.credits.firstOrNull() } }.toSet().size
+        return "free=${free.size} eligible=${eligible.size} measured=$measured judged=$scored artists=$artists"
+    }
+
     private fun jitter(c: Candidate, ctx: RankContext): Double =
         ((c.identity.hashCode().toLong() * 31 + ctx.variation).hashCode() and 0xFFFF) / 65535.0 * 0.06
 

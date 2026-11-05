@@ -185,7 +185,10 @@ class RecoPipeline(
                 store.commit(kind, picks, now)
                 updated += kind
             } else {
-                store.keep(kind, "kept", now)
+                // What the list was short of, kept with the status (the screen reads its beginning) and in the log.
+                val why = runCatching { Ranker.funnel(kind, pool.map { applied(it, checked[it.id]) }, ctxBase.copy(hidden = hidden + rejected), used) }.getOrDefault("?")
+                log("${kind.key} short: ${picks.size} of ${spec.acceptable} ($why)")
+                store.keep(kind, "kept|${picks.size}/${spec.acceptable} $why", now)
                 kept += kind
             }
         }
