@@ -3,6 +3,7 @@ package com.ikko.aura.ui.screens.album
 import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
 import com.ikko.aura.ui.components.heroAnchor
+import com.ikko.aura.ui.components.heroRipple
 import com.ikko.aura.ui.components.coverArrival
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.suppressEdgeBackRipple
@@ -408,7 +409,7 @@ fun AlbumPageContent(
                         }
                     }
                     itemsIndexed(uiState.tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
-                        Box(Modifier.heroRise(index, rows = true)) {
+                        Box(Modifier.heroRipple(pageKey = "album:").heroRise(index, rows = true)) {
                         AlbumTrackRow(
                             number = index + 1,
                             track = track,
@@ -639,6 +640,9 @@ private fun AlbumHeader(
     // As the design: the cover on the left, the title / artist (in the accent) / count beside it, then one row of actions.
     Column(
         modifier = Modifier
+            // When a page opens from this one (the artist's), what is here steps back and clears, and on the way back returns
+            // from the touched name outwards, as a Home card does. Not when the trip is this album's own: it rises by itself.
+            .heroRipple(pageKey = "album:")
             .fillMaxWidth()
             .padding(
                 start = com.ikko.aura.ui.components.designUnit() * 40f,
