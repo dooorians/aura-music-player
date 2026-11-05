@@ -9,7 +9,8 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 /** [state] is one of QUEUED, DOWNLOADING, DONE, FAILED. [filePath] is where the file is (or will be). */
-@Entity(tableName = "ytm_downloads")
+/** Indexed on (state, updatedAt): the download loop asks for the oldest pending row before each file. */
+@Entity(tableName = "ytm_downloads", indices = [androidx.room.Index("state", "updatedAt")])
 data class YtmDownloadEntity(
     @PrimaryKey val key: String,
     val state: String,

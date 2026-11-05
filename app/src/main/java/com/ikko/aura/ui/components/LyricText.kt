@@ -13,11 +13,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -198,10 +199,19 @@ fun SweepLyricLine(
                 // redraw falls to the nearest enclosing layer, which in the player is its whole content.
                 // Not clipped, so the glow below can still spill past the text's bounds.
                 .graphicsLayer()
-                .drawWithContent {
-                    val result = layout ?: return@drawWithContent
+                .drawWithCache {
+                    // The bloom's gradient, made once per colour and size rather than on every frame of the sweep: built
+                    // around the origin, it is moved to the head below, and its strength rides on the brush's alpha.
+                    val glowRadius = GLOW_RADIUS.toPx()
+                    val glowBrush = Brush.radialGradient(
+                        colors = listOf(litColor.copy(alpha = 0.30f), Color.Transparent),
+                        center = Offset.Zero,
+                        radius = glowRadius,
+                    )
+                    onDrawWithContent {
+                    val result = layout ?: return@onDrawWithContent
                     val revealed = line.revealedChars(positionProvider())
-                    if (revealed <= 0f) return@drawWithContent
+                    if (revealed <= 0f) return@onDrawWithContent
 
                     var head = Offset.Unspecified
                     for (row in 0 until result.lineCount) {
@@ -221,7 +231,7 @@ fun SweepLyricLine(
                                 horizontalAt(result, revealed, start, end)
                             }
                         }
-                        clipRect(left, top, right, bottom) { this@drawWithContent.drawContent() }
+                        clipRect(left, top, right, bottom) { this@onDrawWithContent.drawContent() }
                     }
 
                     // A soft bloom riding on the head of the sweep. Modulated by how long
@@ -231,16 +241,10 @@ fun SweepLyricLine(
                     // dragged along under the text.
                     val glow = if (plain) 0f else line.glowIntensity(positionProvider())
                     if (glow > 0.01f && head != Offset.Unspecified) {
-                        val radius = GLOW_RADIUS.toPx()
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(litColor.copy(alpha = 0.30f * glow), Color.Transparent),
-                                center = head,
-                                radius = radius,
-                            ),
-                            radius = radius,
-                            center = head,
-                        )
+                        translate(head.x, head.y) {
+                            drawCircle(brush = glowBrush, radius = glowRadius, center = Offset.Zero, alpha = glow)
+                        }
+                    }
                     }
                 },
         )

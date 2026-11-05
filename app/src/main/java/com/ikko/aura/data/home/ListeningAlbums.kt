@@ -4,6 +4,7 @@ import com.ikko.aura.reco.DayPart
 import java.time.ZoneId
 
 /** One listen of the history, as the rows of Home need it: what was left, and how. */
+@androidx.compose.runtime.Immutable
 data class ListenRow(
     val trackId: String,
     val title: String,

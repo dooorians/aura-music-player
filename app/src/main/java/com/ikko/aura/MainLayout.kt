@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.Shape
@@ -1043,7 +1044,8 @@ fun MainLayout() {
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(dockTotalHeight + screenCorner)
-                    .drawBehind {
+                    // The shape is worked out once per size (three paths and a path operation), not on every frame drawn.
+                    .drawWithCache {
                         val corner = screenCorner.toPx()
                         val pageBottom = size.height - dockTotalHeight.toPx()
                         val strip = androidx.compose.ui.graphics.Path().apply { addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)) }
@@ -1058,7 +1060,7 @@ fun MainLayout() {
                         }
                         val bare = androidx.compose.ui.graphics.Path()
                         bare.op(strip, page, androidx.compose.ui.graphics.PathOperation.Difference)
-                        drawPath(bare, Color.Black)
+                        onDrawBehind { drawPath(bare, Color.Black) }
                     },
             )
         }
@@ -1377,9 +1379,14 @@ fun MainLayout() {
             // BitChord progressive top fade scrim at app root: exactly as BitChord's MainActivity (L3715-3721)
             // One single app-level scrim across the entire app so it never superposes, blinks, or pops during page transitions.
             val isTabs = currentRoute == AuraDestination.Tabs.route
-            val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
-            // The root scrim is off: no dark veil over the top of the app. The formula is kept in case it comes back.
-            @Suppress("UNUSED_VARIABLE") val scrimStrength = (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            // The root scrim is off: no dark veil over the top of the app. The formula is kept in case it comes back, as a
+            // function that nothing calls: evaluated here, its two reads (the header's scrim, which follows every frame of a
+            // scroll of Home or Library and of a swipe between them, and the card's travel) recomposed this level of the
+            // app on each of those frames, for a value that was then not used.
+            @Suppress("UNUSED_VARIABLE") val scrimStrength = {
+                val activeTopAlpha = if (isTabs) headerScrimAlpha.floatValue else 1f
+                (activeTopAlpha * (1f - sheetCard.openProgress)).coerceIn(0f, 1f)
+            }
             val rootTopAlpha = 0f
             com.ikko.aura.ui.screens.album.ProgressiveTopScrim(
                 strength = rootTopAlpha,
@@ -1915,13 +1922,20 @@ private fun TabPager(
             // Exactly as BitChord: top fade scrim under the common header spanning across both Home and Library:
             val unitPx = with(density) { com.ikko.aura.ui.components.designUnit().toPx() }
             val rampPx = unitPx * 120f
-            val p = motion.p.coerceIn(0f, 1f)
-            val homeStrength = (homeScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
-            val libStrength = (libraryScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
-            val currentStrength = (homeStrength * (1f - p) + libStrength * p).coerceIn(0f, 1f)
-            val isTabsRoute = navController.currentBackStackEntry?.destination?.route == AuraDestination.Tabs.route
-            if (isTabsRoute) {
-                LocalHeaderScrimAlpha.current?.let { it.floatValue = currentStrength }
+            // The header's scrim follows the pages' slide and their scroll. Worked out by a snapshot flow rather than here:
+            // read during composition, the pager's position and the two scroll offsets recomposed this whole block (the
+            // header, its view model, the profile picture) on every frame of a swipe between the tabs and of a scroll.
+            val headerScrim = LocalHeaderScrimAlpha.current
+            androidx.compose.runtime.LaunchedEffect(motion, headerScrim, rampPx) {
+                androidx.compose.runtime.snapshotFlow {
+                    val p = motion.p.coerceIn(0f, 1f)
+                    val homeStrength = (homeScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
+                    val libStrength = (libraryScrollPx.floatValue / rampPx).coerceIn(0f, 1f)
+                    (homeStrength * (1f - p) + libStrength * p).coerceIn(0f, 1f)
+                }.collect { currentStrength ->
+                    val isTabsRoute = navController.currentBackStackEntry?.destination?.route == AuraDestination.Tabs.route
+                    if (isTabsRoute) headerScrim?.floatValue = currentStrength
+                }
             }
             // One header for Home and Library, outside the pager: it stays put while the pages slide under it.
             val settingsVm: SettingsViewModel = hiltViewModel()

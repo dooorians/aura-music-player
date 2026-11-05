@@ -43,11 +43,11 @@ data class FeedbackEntity(
 )
 
 /** A song proposed in a playlist, to avoid proposing it again too soon. */
-@Entity(tableName = "reco_history", primaryKeys = ["identity", "kindKey"])
+@Entity(tableName = "reco_history", primaryKeys = ["identity", "kindKey"], indices = [Index("shownAtMs")])
 data class HistoryEntity(val identity: String, val kindKey: String, val shownAtMs: Long)
 
 /** A playlist as it was last generated: what the page shows next to each song. */
-@Entity(tableName = "reco_items", primaryKeys = ["kindKey", "position"])
+@Entity(tableName = "reco_items", primaryKeys = ["kindKey", "position"], indices = [Index("trackId")])
 data class RecoItemEntity(
     val kindKey: String,
     val position: Int,

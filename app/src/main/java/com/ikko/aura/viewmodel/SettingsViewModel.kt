@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@androidx.compose.runtime.Immutable
 data class SettingsUiState(
     val isScanning: Boolean = false,
     val onlineLyricsEnabled: Boolean = true,

@@ -71,7 +71,7 @@ fun EqualizerScreen(
             modifier = Modifier.fillMaxWidth().weight(1f).listTopBlur(eqListState),
             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
-            item {
+            item(key = "eq_switch", contentType = "switch_row") {
                 EqSwitchRow(
                     title = "Égaliseur",
                     subtitle = "Ajuste le rendu sonore de la lecture",
@@ -81,13 +81,13 @@ fun EqualizerScreen(
             }
 
             if (uiState.presets.isNotEmpty()) {
-                item { SectionLabel("Préréglages") }
-                item {
+                item(key = "label_presets", contentType = "section_label") { SectionLabel("Préréglages") }
+                item(key = "eq_presets", contentType = "presets_row") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(uiState.presets.size, key = { uiState.presets[it] }) { index ->
+                        items(uiState.presets.size, key = { uiState.presets[it] }, contentType = { "preset" }) { index ->
                             val label = uiState.presets[index]
                             val isSelected = uiState.selectedPresetIndex == index
                             AuraChip(label = label, selected = isSelected, onClick = { equalizerViewModel.applyPreset(index) })
@@ -96,14 +96,14 @@ fun EqualizerScreen(
                 }
             }
 
-            item { SectionLabel("Bandes de fréquences") }
-            items(uiState.bands, key = { it.index }) { band ->
+            item(key = "label_bands", contentType = "section_label") { SectionLabel("Bandes de fréquences") }
+            items(uiState.bands, key = { it.index }, contentType = { "band" }) { band ->
                 EqBandRow(band = band, onLevelChange = { equalizerViewModel.setBandLevel(band.index, it) })
             }
 
             if (uiState.bassBoostSupported) {
-                item { SectionLabel("Bass Boost") }
-                item {
+                item(key = "label_bass", contentType = "section_label") { SectionLabel("Bass Boost") }
+                item(key = "eq_bass_switch", contentType = "switch_row") {
                     EqSwitchRow(
                         title = "Bass Boost",
                         subtitle = "Renforce les basses fréquences",
@@ -111,7 +111,7 @@ fun EqualizerScreen(
                         onCheckedChange = equalizerViewModel::setBassBoostEnabled,
                     )
                 }
-                item {
+                item(key = "eq_bass_slider", contentType = "slider") {
                     Slider(
                         value = uiState.bassBoostStrength.toFloat(),
                         onValueChange = { equalizerViewModel.setBassBoostStrength(it.roundToInt()) },

@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -175,6 +176,9 @@ class SearchViewModel @Inject constructor(
                         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
                             throw e
                         } catch (e: Exception) {
+                            // A request that failed after this search was replaced throws its own error, not a
+                            // cancellation: without this, the old query's error landed over the new query's songs.
+                            ensureActive()
                             jioSaavnSearch.value = RemoteSection("jiosaavn", "JioSaavn", loading = false, error = true)
                         }
                     }

@@ -194,9 +194,11 @@ fun AlbumArtBackground(
                         Modifier
                             .fillMaxSize()
                             .background(
-                                androidx.compose.ui.graphics.Brush.linearGradient(
-                                    fallbackColors.ifEmpty { AuraColors.DefaultMesh },
-                                ),
+                                remember(fallbackColors) {
+                                    androidx.compose.ui.graphics.Brush.linearGradient(
+                                        fallbackColors.ifEmpty { AuraColors.DefaultMesh },
+                                    )
+                                },
                             ),
                     )
                 }

@@ -21,10 +21,25 @@ import com.ikko.aura.data.lyrics.LyricsCacheDao
 import com.ikko.aura.data.lyrics.LyricsCacheEntity
 import kotlinx.coroutines.flow.Flow
 
+/** A playlist with its entries, loaded by Room in two queries whatever the number of playlists. */
+data class PlaylistWithEntries(
+    @androidx.room.Embedded val playlist: PlaylistEntity,
+    @androidx.room.Relation(parentColumn = "id", entityColumn = "playlistId")
+    val entries: List<PlaylistTrackEntity>,
+)
+
 @Dao
 interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY createdAtMs DESC")
     fun observePlaylists(): Flow<List<PlaylistEntity>>
+
+    /**
+     * Every playlist with its entries, newest first. Replaces one observed query per playlist (N+1): each write to
+     * playlist_tracks re-ran all of them and the list was rebuilt N times.
+     */
+    @androidx.room.Transaction
+    @Query("SELECT * FROM playlists ORDER BY createdAtMs DESC")
+    fun observePlaylistsWithEntries(): Flow<List<PlaylistWithEntries>>
 
     @Query("SELECT * FROM playlists WHERE id = :playlistId")
     fun observePlaylist(playlistId: Long): Flow<PlaylistEntity?>
@@ -63,18 +78,51 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlaylistTrack(entry: PlaylistTrackEntity)
 
+    /** One prepared statement bound once per row, instead of one call (and one statement) per entry. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistTracks(entries: List<PlaylistTrackEntity>)
+
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
+
+    @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId IN (:trackIds)")
+    suspend fun removeTracksFromPlaylist(playlistId: Long, trackIds: Collection<String>)
 
     /** One transaction: the playlist is never seen empty or half-filled between the two steps. */
     @androidx.room.Transaction
     suspend fun replaceTracks(playlistId: Long, entries: List<PlaylistTrackEntity>) {
         clearPlaylistTracks(playlistId)
-        entries.forEach { insertPlaylistTrack(it) }
+        if (entries.isNotEmpty()) insertPlaylistTracks(entries)
+    }
+
+    /**
+     * Adds [trackId] at the end of the playlist. The position is read and written in one transaction: two adds landing
+     * together used to read the same "next" position and share it.
+     */
+    @androidx.room.Transaction
+    suspend fun appendTrack(playlistId: Long, trackId: String, atMs: Long) {
+        insertPlaylistTrack(PlaylistTrackEntity(playlistId, trackId, nextPosition(playlistId), atMs))
+    }
+
+    /**
+     * Puts [trackId] at the top of the playlist, or takes it out if it is there; true when it was added. One
+     * transaction, so a double tap cannot read "absent" twice.
+     */
+    @androidx.room.Transaction
+    suspend fun toggleTrackAtTop(playlistId: Long, trackId: String, atMs: Long): Boolean {
+        if (containsTrack(playlistId, trackId) > 0) {
+            removeTrackFromPlaylist(playlistId, trackId)
+            return false
+        }
+        insertPlaylistTrack(PlaylistTrackEntity(playlistId, trackId, firstPosition(playlistId), atMs))
+        return true
     }
 
     @Query("SELECT * FROM playlist_tracks")
     suspend fun allEntries(): List<PlaylistTrackEntity>
+
+    @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position ASC")
+    suspend fun entriesOf(playlistId: Long): List<PlaylistTrackEntity>
 }
 
 @Database(
@@ -99,8 +147,9 @@ interface PlaylistDao {
         com.ikko.aura.reco.TrackTagsEntity::class,
         com.ikko.aura.reco.ArtistIdentityEntity::class,
         com.ikko.aura.reco.SongFeaturesEntity::class,
+        com.ikko.aura.data.cache.RemoteCacheEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -114,6 +163,7 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun smartDao(): com.ikko.aura.reco.SmartDao
     abstract fun verifiedDiscographyDao(): com.ikko.aura.reco.VerifiedDiscographyDao
     abstract fun trackMetaDao(): com.ikko.aura.reco.TrackMetaDao
+    abstract fun remoteCacheDao(): com.ikko.aura.data.cache.RemoteCacheDao
 }
 
 /**

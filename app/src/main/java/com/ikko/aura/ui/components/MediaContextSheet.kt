@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,7 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -77,6 +76,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /** What a long press landed on. The menu's contents follow from it. */
+@androidx.compose.runtime.Immutable
 sealed interface LibraryContextTarget {
     data class TrackTarget(val track: Track) : LibraryContextTarget
     data class AlbumTarget(val album: Album, val tracks: List<Track>) : LibraryContextTarget
@@ -166,7 +166,7 @@ fun MediaContextSheet(
     }
     val panelSurface = remember(base) { surfaceOf(0.30f) }
     val cardSurface = remember(base) { surfaceOf(0.22f) }
-    val corner = RoundedCornerShape(22.4.dp)
+    val corner = PanelShape
     val track = (target as? LibraryContextTarget.TrackTarget)?.track
     val album = (target as? LibraryContextTarget.AlbumTarget)?.album
     val remote = target as? LibraryContextTarget.RemoteAlbumTarget
@@ -184,14 +184,25 @@ fun MediaContextSheet(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.58f * progress.value))
+                // The scrim's fade is read while drawing: the menu's 210 ms entrance (and its 140 ms exit) redraws this
+                // one rectangle, instead of recomposing the whole menu, every row of it, on each of its frames.
+                .drawBehind { drawRect(Color.Black.copy(alpha = 0.58f * progress.value)) }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
                 .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.navigationBars))
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            BoxWithConstraints(if (origin != null) Modifier.fillMaxSize().onGloballyPositioned { boxPos = it.positionInWindow() } else Modifier) {
-                val panelMax = maxHeight - 0.dp
+            // A plain Box, not BoxWithConstraints: the menu is composed with the dialog rather than subcomposed in its first
+            // layout pass, and the panel's cap (what heightIn(max = maxHeight) did) is the height this box is allowed.
+            val panelMaxPx = remember { IntArray(1) }
+            Box(
+                (if (origin != null) Modifier.fillMaxSize().onGloballyPositioned { boxPos = it.positionInWindow() } else Modifier)
+                    .layout { m, c ->
+                        panelMaxPx[0] = c.maxHeight
+                        val p = m.measure(c)
+                        layout(p.width, p.height) { p.place(0, 0) }
+                    },
+            ) {
                 Column(
                     Modifier
                         .then(
@@ -232,27 +243,39 @@ fun MediaContextSheet(
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(max = panelMax)
+                            .layout { m, c ->
+                                val cap = panelMaxPx[0].coerceIn(c.minHeight, c.maxHeight)
+                                val p = m.measure(c.copy(maxHeight = cap))
+                                layout(p.width, p.height) { p.place(0, 0) }
+                            }
                             .clip(corner)
                             .background(panelSurface)
                             .border(BorderStroke(0.6.dp, Color.White.copy(alpha = 0.18f)), corner)
                             .drawBehind { drawRect(Color.White.copy(alpha = 0.12f), size = Size(size.width, 0.8.dp.toPx())) }
                             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                            .drawWithContent {
-                                drawContent()
-                                // The ends fade where there is more to scroll to.
+                            .drawWithCache {
+                                // The ends fade where there is more to scroll to. Kept with DstIn by a gradient running
+                                // from 1 - top to 1 over the edge (and the same at the foot), which is taking away with
+                                // DstOut a fixed ramp from 1 to 0 drawn at the strength `top`: the same pixels, with the
+                                // two ramps made once per size instead of a brush on every frame of the scroll.
                                 val edge = 28.dp.toPx().coerceAtMost(size.height / 3f)
-                                val top = (scroll.value / edge).coerceIn(0f, 1f)
-                                val bottom = ((scroll.maxValue - scroll.value) / edge).coerceIn(0f, 1f)
-                                if (top > 0f || bottom > 0f) {
-                                    val f = edge / size.height
-                                    drawRect(
-                                        Brush.verticalGradient(
-                                            0f to Color.Black.copy(alpha = 1f - top), f to Color.Black,
-                                            1f - f to Color.Black, 1f to Color.Black.copy(alpha = 1f - bottom),
-                                        ),
-                                        blendMode = BlendMode.DstIn,
-                                    )
+                                val topRamp = Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent, startY = 0f, endY = edge)
+                                val bottomRamp = Brush.verticalGradient(
+                                    0f to Color.Transparent, 1f to Color.Black, startY = size.height - edge, endY = size.height,
+                                )
+                                onDrawWithContent {
+                                    drawContent()
+                                    val top = (scroll.value / edge).coerceIn(0f, 1f)
+                                    val bottom = ((scroll.maxValue - scroll.value) / edge).coerceIn(0f, 1f)
+                                    if (top > 0f) {
+                                        drawRect(topRamp, size = Size(size.width, edge), alpha = top, blendMode = BlendMode.DstOut)
+                                    }
+                                    if (bottom > 0f) {
+                                        drawRect(
+                                            bottomRamp, topLeft = Offset(0f, size.height - edge), size = Size(size.width, edge),
+                                            alpha = bottom, blendMode = BlendMode.DstOut,
+                                        )
+                                    }
                                 }
                             }
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
@@ -348,6 +371,8 @@ fun MediaContextSheet(
 }
 
 private val MenuWidth = 270.dp
+private val PanelShape = RoundedCornerShape(22.4.dp)
+private val QuickActionShape = RoundedCornerShape(14.dp)
 
 @Composable
 private fun PreviewText(title: String, subtitle: String) {
@@ -366,7 +391,7 @@ private fun PreviewText(title: String, subtitle: String) {
 private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
     Column(
         modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(QuickActionShape)
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

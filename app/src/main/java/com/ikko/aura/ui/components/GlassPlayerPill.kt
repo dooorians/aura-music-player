@@ -42,7 +42,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -214,29 +215,37 @@ fun GlassPlayerPill(
             // brightest under the finger and dissolves to nothing at its edge. Drawn after the
             // content and clipped by the pill's own shape, it spreads out from where you touched
             // and is cut cleanly at the rounded edge.
-            .drawWithContent {
-                drawContent()
-                val centre = haloCenter
-                val progress = halo.value
-                if (centre == Offset.Unspecified || progress >= 1f) return@drawWithContent
-                val radius = hypot(size.width, size.height) * progress
-                if (radius <= 0f) return@drawWithContent
-                // Squared falloff: holds its presence through the spread, then lets go gently
-                // instead of cutting out.
-                val strength = 0.20f * (1f - progress) * (1f - progress)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to AuraColors.TextPrimary.copy(alpha = strength),
-                            0.55f to AuraColors.TextPrimary.copy(alpha = strength * 0.5f),
-                            1.0f to Color.Transparent,
-                        ),
-                        center = centre,
-                        radius = radius,
+            .drawWithCache {
+                // The halo's gradient at its full reach, made once per size: a frame of the spread scales it down to the
+                // radius of the moment around the finger, and its strength is the brush's alpha (the stops' alphas were
+                // the strength times 1 and 0.5): the same disc, without a brush and a native shader on every frame.
+                val reach = hypot(size.width, size.height)
+                val haloBrush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to AuraColors.TextPrimary,
+                        0.55f to AuraColors.TextPrimary.copy(alpha = 0.5f),
+                        1.0f to Color.Transparent,
                     ),
-                    radius = radius,
-                    center = centre,
+                    center = Offset.Zero,
+                    radius = reach,
                 )
+                onDrawWithContent {
+                    drawContent()
+                    val centre = haloCenter
+                    val progress = halo.value
+                    if (centre == Offset.Unspecified || progress >= 1f) return@onDrawWithContent
+                    val radius = reach * progress
+                    if (radius <= 0f) return@onDrawWithContent
+                    // Squared falloff: holds its presence through the spread, then lets go gently
+                    // instead of cutting out.
+                    val strength = 0.20f * (1f - progress) * (1f - progress)
+                    withTransform({
+                        translate(centre.x, centre.y)
+                        scale(progress, progress, Offset.Zero)
+                    }) {
+                        drawCircle(brush = haloBrush, radius = reach, center = Offset.Zero, alpha = strength)
+                    }
+                }
             }
             .then(
                 if (enabled) {
@@ -486,13 +495,14 @@ fun GlassPlayerPill(
             },
             contentAlignment = Alignment.Center,
         ) {
-            val sink = 1f - 0.12f * (playHalo.value / HALO_ALPHA).coerceIn(0f, 1f)
+            // The press's sink, read inside the layers below: the halo fading out redraws the glyphs, it does not recompose them.
+            val sink = { 1f - 0.12f * (playHalo.value / HALO_ALPHA).coerceIn(0f, 1f) }
             Icon(
                 imageVector = CupertinoIcons.Play,
                 contentDescription = if (isPlaying) null else "Lecture",
                 tint = accent,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val sc = (1f - 0.65f * playMorph) * sink
+                    val sc = (1f - 0.65f * playMorph) * sink()
                     scaleX = sc; scaleY = sc; alpha = 1f - playMorph
                 },
             )
@@ -501,7 +511,7 @@ fun GlassPlayerPill(
                 contentDescription = if (isPlaying) "Pause" else null,
                 tint = accent,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val sc = (0.35f + 0.65f * playMorph) * sink
+                    val sc = (0.35f + 0.65f * playMorph) * sink()
                     scaleX = sc; scaleY = sc; alpha = playMorph
                 },
             )

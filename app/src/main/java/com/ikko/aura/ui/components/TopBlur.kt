@@ -223,11 +223,18 @@ private class TopBlurNode(var topInset: Dp, var strength: Density.() -> Float) :
         }
         drawLayer(groupLayer)
 
-        drawRect(
-            Brush.verticalGradient(0f to Color.Black.copy(alpha = SCRIM_ALPHA * s), 0.6f to Color.Transparent, startY = 0f, endY = bandHeight),
-            size = Size(size.width, bandHeight),
-        )
+        // Off while SCRIM_ALPHA is 0 (a transparent ramp drew nothing, but was a new brush on every frame of every scroll);
+        // when it is on, the ramp is made once per band and the strength is its alpha.
+        if (SCRIM_ALPHA > 0f) {
+            val scrim = scrimBrush?.takeIf { scrimHeight == bandHeight }
+                ?: Brush.verticalGradient(0f to Color.Black.copy(alpha = SCRIM_ALPHA), 0.6f to Color.Transparent, startY = 0f, endY = bandHeight)
+                    .also { scrimBrush = it; scrimHeight = bandHeight }
+            drawRect(scrim, size = Size(size.width, bandHeight), alpha = s)
+        }
     }
+
+    private var scrimBrush: Brush? = null
+    private var scrimHeight = Float.NaN
 }
 
 /**

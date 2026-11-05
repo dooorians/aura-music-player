@@ -116,7 +116,8 @@ internal fun clamp(value: Double, min: Double, max: Double): Double =
  * [outgoingBpm], the way a DJ counts a 63 BPM track against a 126 BPM one.
  */
 fun alignTempoOctave(outgoingBpm: Double, incomingBpm: Double): Double {
-    if (outgoingBpm <= 0 || incomingBpm <= 0) return incomingBpm
+    // Not finite: halving or doubling an infinite tempo never brings it closer, and the loops below never ended.
+    if (outgoingBpm <= 0 || incomingBpm <= 0 || !outgoingBpm.isFinite() || !incomingBpm.isFinite()) return incomingBpm
     var aligned = incomingBpm
     while (aligned / outgoingBpm > 1.5) aligned /= 2
     while (aligned / outgoingBpm < 0.67) aligned *= 2

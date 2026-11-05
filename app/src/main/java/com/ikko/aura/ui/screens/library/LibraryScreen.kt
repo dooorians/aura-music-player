@@ -671,11 +671,16 @@ private fun LibraryTrackRow(
     track: Track, playing: Boolean, accent: Color, compact: Boolean,
     onClick: () -> Unit, onLongClick: () -> Unit,
 ) {
-    val m = track.durationMs / 1000
+    // Worked out once per song, not on each composition of its row.
+    val length = remember(track.durationMs) {
+        val m = track.durationMs / 1000
+        if (track.durationMs > 0) "${m / 60}:${(m % 60).toString().padStart(2, '0')}" else null
+    }
+    val coverKey = remember(track.albumId) { track.albumId.toString() }
     LibraryListRow(
-        coverUri = track.artworkUri, coverKey = track.albumId.toString(), coverDescription = track.album,
+        coverUri = track.artworkUri, coverKey = coverKey, coverDescription = track.album,
         title = track.title, subtitle = track.artist,
-        trailingText = if (track.durationMs > 0) "${m / 60}:${(m % 60).toString().padStart(2, '0')}" else null,
+        trailingText = length,
         playing = playing, accent = accent, compact = compact,
         onClick = onClick, onLongClick = onLongClick,
     )
@@ -714,7 +719,8 @@ private fun LibraryListRow(
                         androidx.compose.foundation.Canvas(Modifier.size(u * 44f)) {
                             val k = size.width / 24f
                             // The level's three bars, as the design draws them (a 24 grid, bottoms on 20).
-                            listOf(Triple(3.5f, 9f, 11f), Triple(10.2f, 4f, 16f), Triple(16.9f, 12f, 8f)).forEach { (x, y, h) ->
+                            for (b in 0 until 3) {
+                                val x = LEVEL_BARS[b * 3]; val y = LEVEL_BARS[b * 3 + 1]; val h = LEVEL_BARS[b * 3 + 2]
                                 drawRoundRect(
                                     accent, topLeft = Offset(x * k, y * k), size = androidx.compose.ui.geometry.Size(3.6f * k, h * k),
                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.8f * k),
@@ -741,7 +747,7 @@ private fun LibraryListRow(
                     Text(
                         trailingText, color = LibMuted, fontFamily = face, fontWeight = FontWeight.Medium,
                         fontSize = com.ikko.aura.ui.components.designSp(34f), maxLines = 1,
-                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                        style = TABULAR_STYLE,
                     )
                 }
                 // The menu: three dots in a 76 touch area (a long press does the same).
@@ -943,7 +949,7 @@ private fun ArtistList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
     ) {
-        itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, pair ->
+        itemsIndexed(rows, key = { _, r -> r.first().id }, contentType = { _, _ -> "track_pair" }) { rowIndex, pair ->
             Row(
                 modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth().height(u * 132f),
                 horizontalArrangement = Arrangement.spacedBy(u * 40f),
@@ -1041,7 +1047,7 @@ internal fun PlaylistsList(
         contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
         verticalArrangement = Arrangement.spacedBy(u * 32f),
     ) {
-        if (creating) item {
+        if (creating) item(key = "create_playlist", contentType = "create_playlist") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = newName,
@@ -1067,7 +1073,7 @@ internal fun PlaylistsList(
         }
 
         if (playlists.isEmpty() && !creating) {
-            item {
+            item(key = "no_playlists", contentType = "empty") {
                 Text(
                     text = "Aucune playlist pour le moment",
                     style = MaterialTheme.typography.bodyLarge,
@@ -1076,7 +1082,7 @@ internal fun PlaylistsList(
             }
         }
 
-        itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, trio ->
+        itemsIndexed(rows, key = { _, r -> r.first().id }, contentType = { _, _ -> "playlist_trio" }) { rowIndex, trio ->
             Row(
                 modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(u * 26f),
@@ -1260,3 +1266,9 @@ private val AXIS_SHIFT = 30.dp
 private const val AXIS_MENU_REST = 0.3f
 private const val PUSH_MS = 300
 private val PushEasing = androidx.compose.animation.core.FastOutSlowInEasing
+
+/** The playing row's level: x, top and height of its three bars on the design's 24 grid (no list of triples per frame). */
+private val LEVEL_BARS = floatArrayOf(3.5f, 9f, 11f, 10.2f, 4f, 16f, 16.9f, 12f, 8f)
+
+/** A song's length in the rows, in figures of one width; one style, not one per row. */
+private val TABULAR_STYLE = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")

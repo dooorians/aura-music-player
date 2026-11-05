@@ -9,6 +9,7 @@ import com.ikko.aura.playback.TrackResolver
 import com.ikko.aura.source.TrackKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import com.ikko.aura.util.mapBounded
 
 /**
  * Where a queued item becomes something playable. Every controller adds items through here — Aura's own screens, a
@@ -32,8 +33,13 @@ class AuraSessionCallback(
     ): ListenableFuture<MutableList<MediaItem>> {
         val result = SettableFuture.create<MutableList<MediaItem>>()
         scope.launch {
-            // Never completed exceptionally, whatever the resolver does.
-            result.set(mediaItems.mapTo(ArrayList(mediaItems.size)) { resolveOrKeep(it) })
+            // Never completed exceptionally, whatever the resolver does. A few lookups at once: each is a database
+            // read, and a queue of hundreds resolved one after the other held the start of playback back.
+            result.set(ArrayList(mediaItems.mapBounded(RESOLVE_PARALLELISM) { resolveOrKeep(it) }))
+        }.invokeOnCompletion {
+            // The service went away mid-way (its scope cancelled): the items as they came, rather than a future that
+            // never completes and a controller left waiting on it.
+            if (!result.isDone) result.set(mediaItems)
         }
         return result
     }
@@ -52,18 +58,18 @@ class AuraSessionCallback(
         scope.launch {
             val resumed = runCatching { resumable() }.getOrNull()
             if (resumed != null) result.set(resumed) else result.setException(UnsupportedOperationException("nothing to resume"))
+        }.invokeOnCompletion {
+            if (!result.isDone) result.setException(UnsupportedOperationException("the session was released"))
         }
         return result
     }
 
     private suspend fun resumable(): MediaSession.MediaItemsWithStartPosition? {
         val saved = snapshots.read() ?: return null
-        val addressOf = HashMap<String, String>()
-        saved.items.forEach { entry ->
-            if (entry.id !in addressOf) {
-                resolver.candidates(TrackKey(entry.id)).firstOrNull()?.let { addressOf[entry.id] = it.uri }
-            }
-        }
+        val ids = saved.items.map { it.id }.distinct()
+        val addressOf = ids.mapBounded(RESOLVE_PARALLELISM) { id ->
+            id to runCatching { resolver.candidates(TrackKey(id)).firstOrNull()?.uri }.getOrNull()
+        }.mapNotNull { (id, uri) -> uri?.let { id to it } }.toMap()
         val snapshot = saved.surviving { it in addressOf } ?: return null
         val items = snapshot.items.map { entry ->
             MediaItem.Builder()
@@ -88,5 +94,10 @@ class AuraSessionCallback(
         // already on the right address is returned as it is, with the metadata it has just been given.
         if (item.localConfiguration?.uri?.toString() == best.uri) return item
         return item.buildUpon().setUri(best.uri).setMimeType(best.mimeType).build()
+    }
+
+    private companion object {
+        /** Lookups resolved at once: Room reads in parallel on its pool of connections. */
+        const val RESOLVE_PARALLELISM = 8
     }
 }

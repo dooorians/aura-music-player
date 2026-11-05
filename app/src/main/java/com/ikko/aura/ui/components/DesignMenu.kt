@@ -75,6 +75,9 @@ private val IconSize = 17.6.dp
 private val IconGap = 11.2.dp
 private val Rim = 0.6.dp
 private val Danger = Color(0xFFFF8AA8)
+// Made once: a menu's every row and its panel used to make their own on each composition of the menu.
+private val PanelShape = RoundedCornerShape(PanelCorner)
+private val RowShape = RoundedCornerShape(RowCorner)
 
 /** The page's colour, for the menu to be made from: the album or card the page is lit with, else the playing track's. */
 @Composable
@@ -113,7 +116,7 @@ fun DesignMenu(
     }
     val density = LocalDensity.current
     val anchor: Rect = state.anchor
-    val shape = RoundedCornerShape(PanelCorner)
+    val shape = PanelShape
     val statusBarTopPx = WindowInsets.statusBars.getTop(density)
     val navBarBottomPx = WindowInsets.navigationBars.getBottom(density)
     val gapPx = with(density) { 7.2.dp.roundToPx() }
@@ -231,7 +234,7 @@ fun DesignMenuRow(
                 scaleX = pressScale
                 scaleY = pressScale
             }
-            .clip(RoundedCornerShape(RowCorner))
+            .clip(RowShape)
             .then(if (selected == true) Modifier.background(Color.White.copy(alpha = 0.10f)) else Modifier)
             .clickable(interactionSource = interactionSource, indication = androidx.compose.foundation.LocalIndication.current, onClick = onClick)
             .padding(horizontal = RowSide),

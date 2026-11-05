@@ -5,6 +5,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import com.ikko.aura.playback.QueueSnapshot
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -53,12 +55,21 @@ class QueueSnapshotWriter(
         schedule(DEBOUNCE_MS)
     }
 
+    /**
+     * Stops following the player, after a last write taken now, while the player still answers. Without it a queue
+     * change still inside its [DEBOUNCE_MS], and up to a [POSITION_TICK_MS] of position, were lost with the service. The
+     * write runs outside [scope], which the service is about to cancel.
+     */
     fun release() {
         pending?.cancel()
         ticker?.cancel()
+        val last = capture()
         player?.removeListener(this)
         player = null
+        if (last != null) finalWrite.launch { runCatching { store.write(last) } }
     }
+
+    private val finalWrite = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
         entriesDirty = true

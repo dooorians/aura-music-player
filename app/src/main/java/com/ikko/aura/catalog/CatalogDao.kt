@@ -47,8 +47,19 @@ interface CatalogDao {
     @Query("SELECT * FROM track_bindings WHERE trackKey = :key")
     suspend fun bindingsFor(key: String): List<TrackBindingEntity>
 
-    @Query("SELECT * FROM catalog_tracks")
-    fun observeTracks(): Flow<List<CatalogTrackEntity>>
+    /**
+     * The catalogue rows of one playlist's entries only, joined on the primary key, for naming the ones that can no
+     * longer play. Reading the whole table there meant every row of the catalogue, decoded again at each write to it.
+     */
+    @Query(
+        "SELECT c.* FROM playlist_tracks p INNER JOIN catalog_tracks c ON c.`key` = p.trackId " +
+            "WHERE p.playlistId = :playlistId",
+    )
+    fun observeTracksOfPlaylist(playlistId: Long): Flow<List<CatalogTrackEntity>>
+
+    /** The device's files as the catalogue knows them: their keys are MediaStore ids, with no source prefix. */
+    @Query("SELECT * FROM catalog_tracks WHERE `key` NOT LIKE '%:%'")
+    suspend fun localTracks(): List<CatalogTrackEntity>
 
     @Query("SELECT * FROM catalog_tracks WHERE `key` LIKE '%:%' AND inLibrary = 1")
     fun observeSaved(): Flow<List<CatalogTrackEntity>>
@@ -111,6 +122,17 @@ interface CatalogDao {
     @Query("DELETE FROM track_bindings WHERE sourceId = :sourceId")
     suspend fun clearBindings(sourceId: String)
 
+    @Query("DELETE FROM track_bindings WHERE sourceId = :sourceId AND itemId IN (:itemIds)")
+    suspend fun deleteBindings(sourceId: String, itemIds: Collection<String>)
+
+    /** Applies a [CatalogSyncPlan] in one transaction: only the rows that changed are written. */
+    @Transaction
+    suspend fun applySync(sourceId: String, plan: CatalogSyncPlan) {
+        plan.removedItemIds.chunked(SQL_IN_CHUNK).forEach { deleteBindings(sourceId, it) }
+        if (plan.bindings.isNotEmpty()) insertBindings(plan.bindings)
+        if (plan.tracks.isNotEmpty()) upsertTracks(plan.tracks)
+    }
+
     @Query("DELETE FROM track_bindings WHERE trackKey IN (:keys)")
     suspend fun deleteBindingsOfKeys(keys: Collection<String>)
 
@@ -139,7 +161,12 @@ interface CatalogDao {
 
     @Transaction
     suspend fun forgetKeys(keys: Collection<String>) {
-        deleteBindingsOfKeys(keys)
-        deleteTracks(keys)
+        keys.chunked(SQL_IN_CHUNK).forEach {
+            deleteBindingsOfKeys(it)
+            deleteTracks(it)
+        }
     }
 }
+
+/** Well under SQLite's bound-parameter limit, whatever the size of the selection. */
+private const val SQL_IN_CHUNK = 500
