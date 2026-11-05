@@ -354,22 +354,6 @@ class PlaybackService : MediaSessionService() {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(enableFloatOutput)
-                .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
-                .setAudioProcessorChain(
-                    // Edge trimming first, so nothing after it spends time on silence that is about to
-                    // be dropped; the sleep fade last, on exactly what is about to be heard.
-                    TrimmingAudioProcessorChain(
-                        DefaultAudioSink.DefaultAudioProcessorChain(
-                            arrayOf(trimmer, transition, SleepFadeProcessor()),
-                            SilenceSkippingAudioProcessor(),
-                            SonicAudioProcessor(),
-                        ),
-                        trimmer,
-                    ),
-                )
-                .build(), beat)
             ): AudioSink {
                 // The app's equaliser, normaliser and limiter, last in the chain: see DspAudioProcessorChain.
                 val dsp = com.ikko.aura.core.audio.dsp.DspAudioProcessor(dspController.parameters)
@@ -378,10 +362,15 @@ class PlaybackService : MediaSessionService() {
                     .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
                     .setAudioProcessorChain(
                         com.ikko.aura.core.audio.dsp.DspAudioProcessorChain(
-                            DefaultAudioSink.DefaultAudioProcessorChain(
-                                arrayOf(transition),
-                                SilenceSkippingAudioProcessor(),
-                                SonicAudioProcessor(),
+                            // Edge trimming first, so nothing after it spends time on silence that is about to
+                            // be dropped; the sleep fade after the transition filter; the DSP last of all.
+                            TrimmingAudioProcessorChain(
+                                DefaultAudioSink.DefaultAudioProcessorChain(
+                                    arrayOf(trimmer, transition, SleepFadeProcessor()),
+                                    SilenceSkippingAudioProcessor(),
+                                    SonicAudioProcessor(),
+                                ),
+                                trimmer,
                             ),
                             dsp,
                         ),
