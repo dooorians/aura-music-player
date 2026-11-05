@@ -76,7 +76,7 @@ class RecoPipelineTest {
         (1..count).map { candidate("$prefix $artist $it", artist, id = "ytm:$prefix-$artist-$it", release = Release.ofYear(2020)) }
 
     private fun pipeline(store: RecoStore, vararg sources: CandidateSource, now: Long = NOW) =
-        RecoPipeline(store, { sources.toList() }, { now }, ZONE)
+        RecoPipeline(store, { sources.toList() }, { now }, ZONE, playlistFloor = 3)
 
     @Test fun `nothing is done when nothing is due`() = runBlocking {
         val s = store()
@@ -391,7 +391,7 @@ class RecoPipelineTest {
             candidate("Poker Face", "Lady Gaga", id = "ytm:gaga-official-2", release = Release.ofYear(2020)),
             candidate("OG Bichotas", "Lady Gaga", id = "ytm:gaga-fake-bichotas", release = Release.ofYear(2020)),
             candidate("Girlboss energy", "Lady Gaga", id = "ytm:gaga-fake-girlboss", release = Release.ofYear(2020)),
-        ) + (1..12).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it", release = Release.ofYear(2020)) }
+        ) + (1..3).map { candidate("Song $it", "Liked Artist $it", id = "ytm:s$it", release = Release.ofYear(2020)) }
 
         val source = FakeSource("ytm", catalogue = { candidates }, verdict = { Verification(true, isSong = true) })
         val pipe = RecoPipeline(
@@ -402,11 +402,13 @@ class RecoPipelineTest {
             authority = authority,
             verifier = verifier,
             deezerClient = deezerClient,
+            playlistFloor = 3,
         )
 
         pipe.refresh(force = true)
         val allPicks = s.playlists.values.flatten().map { it.candidate.id }
-        assertTrue("Bad Romance must be accepted", "ytm:gaga-official-1" in allPicks)
+        // The two official songs compete with each other and with the others for the lists: at least one is in, and neither fake is.
+        assertTrue("an official song must be accepted", "ytm:gaga-official-1" in allPicks || "ytm:gaga-official-2" in allPicks)
         assertFalse("OG Bichotas must be rejected", "ytm:gaga-fake-bichotas" in allPicks)
         assertFalse("Girlboss energy must be rejected", "ytm:gaga-fake-girlboss" in allPicks)
     }

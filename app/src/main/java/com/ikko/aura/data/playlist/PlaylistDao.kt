@@ -98,8 +98,9 @@ interface PlaylistDao {
         com.ikko.aura.reco.VerifiedDiscographyEntity::class,
         com.ikko.aura.reco.TrackTagsEntity::class,
         com.ikko.aura.reco.ArtistIdentityEntity::class,
+        com.ikko.aura.reco.SongFeaturesEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {

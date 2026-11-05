@@ -25,6 +25,8 @@ data class RankContext(
     val hits: Map<String, List<String>> = emptyMap(),
     /** Artist key → their tags (Last.fm), most telling first: what tells a metal band from a pop star, whatever a source says of their song. */
     val artistTags: Map<String, List<String>> = emptyMap(),
+    /** Song identity → what was measured of it (tempo, loudness, the tags of the song): what the ambiances are judged on. */
+    val songFeatures: Map<String, SongFeatures> = emptyMap(),
 ) {
     /** The broad families of what the listener plays, from the genres their library and their artists carry; empty when there is not enough to tell. */
     val likedFamilies: Set<String> by lazy {
@@ -135,15 +137,15 @@ object CandidateMerger {
 object Ranker {
 
     /** What a playlist asks of its songs and how many it wants. */
-    data class Spec(val target: Int, val minimum: Int, val maxPerArtist: Int) {
-        /** The fewest songs worth replacing the previous playlist with: half of what is wanted, and three at least. */
-        val acceptable: Int get() = maxOf(3, minimum / 2)
+    data class Spec(val target: Int, val minimum: Int, val maxPerArtist: Int, val floor: Int = 10) {
+        /** The fewest songs worth a playlist: what it needs at least, and [floor]; fewer leaves the previous one in place rather than show three titles. */
+        val acceptable: Int get() = maxOf(floor, minimum)
     }
 
     fun specOf(kind: RecoKind) = when (kind) {
         RecoKind.DAILY -> Spec(target = 40, minimum = 8, maxPerArtist = 1)
         RecoKind.DISCOVERY -> Spec(target = 40, minimum = 6, maxPerArtist = 2)
-        RecoKind.NEW -> Spec(target = 25, minimum = 4, maxPerArtist = 2)
+        RecoKind.NEW -> Spec(target = 25, minimum = 4, maxPerArtist = 2, floor = 5)
         else -> Spec(target = 35, minimum = 6, maxPerArtist = 2)
     }
 
@@ -345,12 +347,11 @@ object Ranker {
             }
             RecoKind.ENERGY, RecoKind.CHILL, RecoKind.NIGHT -> {
                 val mood = when (kind) { RecoKind.ENERGY -> Mood.ENERGY; RecoKind.CHILL -> Mood.CHILL; else -> Mood.NIGHT }
-                val verdict = MoodModel.verdict(c, mood) ?: return null
-                if (verdict < MoodModel.THRESHOLD) return null
-                // Night and chill are told apart: a song that reads more as one is not put in the other.
-                val fit = MoodModel.fit(c.title, c.album, c.durationMs, c.tags)
-                if (mood == Mood.CHILL && fit.night > fit.chill + 0.05) return null
-                if (mood == Mood.NIGHT && fit.chill > fit.night + 0.05) return null
+                // The ambience is judged on what the song is (its tempo, its loudness, the tags of the song and of the artist), never on its name alone: a loud
+                // K-pop song called "All Night" is no calm night song. Night is the stricter of the calm ones, so a song fits one and is kept from the other.
+                val features = ctx.songFeatures[c.identity] ?: c.bpm?.let { SongFeatures(bpm = it) }
+                val artistTags = c.credits.firstOrNull()?.let { ctx.artistTags[it] }.orEmpty()
+                val verdict = MoodJudge.verdict(mood, features, artistTags, c.title) ?: return null
                 // The ambience decides what goes in, but only among songs with a tie to the listener: a query for "chill"
                 // answers with whatever its source ranks first, and that is not the listener's music.
                 if (taste < MOOD_MIN_TASTE) return null

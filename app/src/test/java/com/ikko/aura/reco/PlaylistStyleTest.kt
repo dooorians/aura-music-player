@@ -38,6 +38,10 @@ class PlaylistStyleTest {
 
     private fun tagged(vararg pairs: Pair<String, List<String>>) = ctx(profile).copy(artistTags = pairs.associate { ArtistNames.key(it.first) to it.second })
 
+    private val CALM = SongFeatures(bpm = 68.0, gainDb = -16.0, trackTags = listOf("chill", "ambient"))
+    private val LOUD = SongFeatures(bpm = 128.0, gainDb = -6.5, trackTags = listOf("dance", "party"))
+    private fun RankContext.measured(c: Candidate, f: SongFeatures) = copy(songFeatures = mapOf(c.identity to f))
+
     @Test fun `Dans ton style holds the styles the listener plays, judged on the artist's tags`() {
         val song = candidate("A Song", "Liked Artist")
         val pop = Ranker.select(RecoKind.STYLE, listOf(song), tagged("Liked Artist" to listOf("pop", "dance")), HashSet())
@@ -53,18 +57,18 @@ class PlaylistStyleTest {
 
     @Test fun `a metal band is not Chill or Nuit, but a calm pop artist is`() {
         val calm = candidate("Soft Piano Lullaby", "Liked Artist", durationMs = 220_000)
-        val metal = Ranker.select(RecoKind.CHILL, listOf(calm), tagged("Liked Artist" to listOf("metal", "heavy metal")), HashSet())
+        val metal = Ranker.select(RecoKind.CHILL, listOf(calm), tagged("Liked Artist" to listOf("metal", "heavy metal")).measured(calm, CALM), HashSet())
         assertTrue(metal.isEmpty())
-        val pop = Ranker.select(RecoKind.CHILL, listOf(calm), tagged("Liked Artist" to listOf("pop", "acoustic")), HashSet())
+        val pop = Ranker.select(RecoKind.CHILL, listOf(calm), tagged("Liked Artist" to listOf("pop", "acoustic")).measured(calm, CALM), HashSet())
         assertEquals(1, pop.size)
         val night = candidate("Midnight Nocturne", "Liked Artist", durationMs = 300_000)
-        assertTrue(Ranker.select(RecoKind.NIGHT, listOf(night), tagged("Liked Artist" to listOf("punk", "pop punk")), HashSet()).isEmpty())
+        assertTrue(Ranker.select(RecoKind.NIGHT, listOf(night), tagged("Liked Artist" to listOf("punk", "pop punk")).measured(night, CALM), HashSet()).isEmpty())
     }
 
     @Test fun `a symphony is not Ca bouge`() {
         val loud = candidate("Club Bass Banger", "Liked Artist", durationMs = 190_000)
-        assertTrue(Ranker.select(RecoKind.ENERGY, listOf(loud), tagged("Liked Artist" to listOf("classical", "orchestral")), HashSet()).isEmpty())
-        assertEquals(1, Ranker.select(RecoKind.ENERGY, listOf(loud), tagged("Liked Artist" to listOf("electronic", "dance")), HashSet()).size)
+        assertTrue(Ranker.select(RecoKind.ENERGY, listOf(loud), tagged("Liked Artist" to listOf("classical", "orchestral")).measured(loud, LOUD), HashSet()).isEmpty())
+        assertEquals(1, Ranker.select(RecoKind.ENERGY, listOf(loud), tagged("Liked Artist" to listOf("electronic", "dance")).measured(loud, LOUD), HashSet()).size)
     }
 
     @Test fun `Decouvertes, the daily mix and Nouveautes are not narrowed to one style`() {

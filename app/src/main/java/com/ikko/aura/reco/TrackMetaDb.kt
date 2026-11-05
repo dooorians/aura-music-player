@@ -42,6 +42,18 @@ data class ArtistIdentityEntity(
     val resolvedAt: Long,
 )
 
+/** What was measured of a recommended song (tempo, loudness, the tags listeners gave it), kept so it is looked up once. [found]: false when nothing was. */
+@Entity(tableName = "song_features")
+data class SongFeaturesEntity(
+    @PrimaryKey val identity: String,
+    val bpm: Double,
+    val gainDb: Double?,
+    /** Tags joined by NUL. */
+    val trackTags: String,
+    val found: Boolean,
+    val fetchedAt: Long,
+)
+
 data class TagMark(val trackId: String, val readVersion: Int)
 
 object TagScanVersion { const val CURRENT = 1 }
@@ -65,6 +77,12 @@ interface TrackMetaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putIdentity(row: ArtistIdentityEntity)
+
+    @Query("SELECT * FROM song_features WHERE identity IN (:ids)")
+    suspend fun songFeatures(ids: List<String>): List<SongFeaturesEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putSongFeatures(rows: List<SongFeaturesEntity>)
 }
 
 /**
@@ -83,5 +101,15 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         )
         db.execSQL("ALTER TABLE track_stats ADD COLUMN canonicalKey TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE artist_meta ADD COLUMN affinityUpdatedAt INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/** What was measured of the songs recommended (see [SongFeaturesEntity]); additive only. */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS song_features (identity TEXT NOT NULL PRIMARY KEY, bpm REAL NOT NULL, gainDb REAL, trackTags TEXT NOT NULL, " +
+                "found INTEGER NOT NULL, fetchedAt INTEGER NOT NULL)",
+        )
     }
 }

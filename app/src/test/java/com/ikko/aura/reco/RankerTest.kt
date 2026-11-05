@@ -21,6 +21,13 @@ class RankerTest {
 
     private val related = listOf(Provenance(ProvKind.RELATED_TRACK, "Liked 1", 0.8))
 
+    // What can be measured of a song: a calm one, a loud one, a slow night one, a soft one.
+    private val CALM = SongFeatures(bpm = 68.0, gainDb = -16.0, trackTags = listOf("chill", "ambient"))
+    private val LOUD = SongFeatures(bpm = 128.0, gainDb = -6.5, trackTags = listOf("dance", "party"))
+    private val NIGHTLY = SongFeatures(bpm = 62.0, gainDb = -17.0, trackTags = listOf("night", "ambient"))
+    private val SOFT = SongFeatures(bpm = 100.0, gainDb = -12.0, trackTags = listOf("chill"))
+    private fun measured(vararg pairs: Pair<Candidate, SongFeatures>) = ctx(profile).copy(songFeatures = pairs.associate { it.first.identity to it.second })
+
     // --- exclusions ---
 
     @Test fun `a blocked artist is excluded from every playlist, collaborations included`() {
@@ -86,28 +93,31 @@ class RankerTest {
         val loud = candidate("Club Bass Banger", "Liked Artist", durationMs = 190_000)
         val plain = candidate("Neutral Title", "Liked Artist")
         val pool = listOf(calm, loud, plain)
-        assertEquals(listOf("Soft Piano Lullaby"), select(RecoKind.CHILL, pool).map { it.candidate.title })
-        assertEquals(listOf("Club Bass Banger"), select(RecoKind.ENERGY, pool).map { it.candidate.title })
+        val c = measured(calm to CALM, loud to LOUD)
+        assertEquals(listOf("Soft Piano Lullaby"), select(RecoKind.CHILL, pool, c).map { it.candidate.title })
+        assertEquals(listOf("Club Bass Banger"), select(RecoKind.ENERGY, pool, c).map { it.candidate.title })
         // Nothing is put in an ambience on a guess: "Neutral Title" is in none of the three.
         assertTrue(RecoKind.entries.filter { it in listOf(RecoKind.CHILL, RecoKind.NIGHT, RecoKind.ENERGY) }
-            .all { k -> select(k, pool).none { it.candidate.title == "Neutral Title" } })
+            .all { k -> select(k, pool, c).none { it.candidate.title == "Neutral Title" } })
     }
 
     @Test fun `night and chill are told apart`() {
         val night = candidate("Midnight Nocturne", "Liked Artist", durationMs = 300_000)
         val chill = candidate("Sunday Acoustic Chill", "Liked Artist", durationMs = 200_000)
-        val nightPicks = select(RecoKind.NIGHT, listOf(night, chill)).map { it.candidate.title }
-        val chillPicks = select(RecoKind.CHILL, listOf(night, chill)).map { it.candidate.title }
+        val c = measured(night to NIGHTLY, chill to SOFT)
+        val nightPicks = select(RecoKind.NIGHT, listOf(night, chill), c).map { it.candidate.title }
+        val chillPicks = select(RecoKind.CHILL, listOf(night, chill), c).map { it.candidate.title }
+        // Night is the stricter: a soft song is for Chill only; the nocturnal one is calm enough for both, and Night (drawn first) keeps it.
         assertEquals(listOf("Midnight Nocturne"), nightPicks)
-        assertEquals(listOf("Sunday Acoustic Chill"), chillPicks)
-        assertEquals(ReasonCode.NIGHT, select(RecoKind.NIGHT, listOf(night)).first().reason.code)
-        assertEquals(ReasonCode.CALM, select(RecoKind.CHILL, listOf(chill)).first().reason.code)
+        assertTrue("Sunday Acoustic Chill" in chillPicks)
+        assertEquals(ReasonCode.NIGHT, select(RecoKind.NIGHT, listOf(night), c).first().reason.code)
+        assertEquals(ReasonCode.CALM, select(RecoKind.CHILL, listOf(chill), c).first().reason.code)
     }
 
-    @Test fun `a song found by a mood query counts weakly and is still checked against the words`() {
+    @Test fun `a song found by a mood query is still judged on what it is`() {
         val byQuery = candidate("Plain Name", "Liked Artist", provenance = listOf(Provenance(ProvKind.MOOD_QUERY, "chill", 0.0, Mood.CHILL), Provenance(ProvKind.ARTIST, "Liked Artist", 0.8)))
         val againstIt = candidate("Hype Club Banger", "Liked Artist", provenance = byQuery.provenance)
-        val picks = select(RecoKind.CHILL, listOf(byQuery, againstIt)).map { it.candidate.title }
+        val picks = select(RecoKind.CHILL, listOf(byQuery, againstIt), measured(byQuery to CALM, againstIt to LOUD)).map { it.candidate.title }
         assertEquals(listOf("Plain Name"), picks)
     }
 
@@ -119,7 +129,7 @@ class RankerTest {
         ) + (1..12).map { candidate("Style $it", "Liked Artist$it", provenance = listOf(Provenance(ProvKind.RELATED_TRACK, "Liked 1", 0.9))) } +
             (1..12).map { candidate("Plain $it", "Other Artist$it", provenance = listOf(Provenance(ProvKind.RELATED_TRACK, "Other 1", 0.6))) }
         val used = HashSet<String>()
-        val c = ctx(profile)
+        val c = ctx(profile).copy(songFeatures = mapOf(pool[0].identity to CALM, pool[1].identity to NIGHTLY, pool[2].identity to LOUD))
         val lists = listOf(RecoKind.NEW, RecoKind.ENERGY, RecoKind.NIGHT, RecoKind.CHILL, RecoKind.STYLE, RecoKind.DISCOVERY, RecoKind.DAILY)
             .associateWith { Ranker.select(it, pool, c, used).map { p -> p.candidate.identity } }
         // No song is in two playlists of the same renewal.
@@ -213,7 +223,8 @@ class RankerTest {
         assertEquals(listOf("Brand New"), Ranker.select(RecoKind.STYLE, listOf(remix, fresh), c, HashSet()).map { it.candidate.title })
         assertEquals(listOf("Brand New"), Ranker.select(RecoKind.DAILY, listOf(remix, fresh), c, HashSet()).map { it.candidate.title })
         val energetic = candidate("Alterlife (Club Remix)", "Liked Artist", id = "ytm:club")
-        assertEquals(listOf("Alterlife (Club Remix)"), Ranker.select(RecoKind.ENERGY, listOf(energetic), c, HashSet()).map { it.candidate.title })
+        val measuredCtx = c.copy(songFeatures = mapOf(energetic.identity to LOUD))
+        assertEquals(listOf("Alterlife (Club Remix)"), Ranker.select(RecoKind.ENERGY, listOf(energetic), measuredCtx, HashSet()).map { it.candidate.title })
     }
 
     @Test fun `a discovery is mostly unknown artists`() {

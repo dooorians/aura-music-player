@@ -57,6 +57,7 @@ class RecommendationEngine @Inject constructor(
     val authority: com.ikko.aura.reco.authority.ArtistAuthority,
     val verifier: com.ikko.aura.reco.authority.DiscographyVerifier,
     val deezerClient: com.ikko.aura.data.deezer.DeezerClient,
+    private val songFeatures: SongFeatureService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -68,6 +69,7 @@ class RecommendationEngine @Inject constructor(
         authority = authority,
         verifier = verifier,
         deezerClient = deezerClient,
+        features = songFeatures,
     )
 
     init {
@@ -310,7 +312,7 @@ class RecommendationEngine @Inject constructor(
 
     private companion object {
         /** Bumped when the rules that choose songs change in a way that makes earlier playlists wrong. */
-        const val RULES_VERSION = 15
+        const val RULES_VERSION = 16
         /** What a source puts in the artist field when an album has none: nobody to block. */
         val NOT_AN_ARTIST = Regex("^(?:various(?: artists)?|va|v a|divers|artistes? divers|youtube music|jiosaavn|unknown|unknown artist|artiste inconnu)$")
     }

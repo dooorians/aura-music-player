@@ -126,6 +126,20 @@ class LastFm @Inject constructor(@ApplicationContext context: Context) : com.ikk
             .take(5)
     }
 
+    /** What listeners called this very song ("chill", "dance", "night"): kept two weeks like the artist's. */
+    override suspend fun trackTags(title: String, artist: String): List<String>? =
+        cached("trktags_v1", com.ikko.aura.reco.ArtistNames.askName(artist) + " - " + title.trim()) {
+            val arr = call(
+                savedKey, savedSecret,
+                mapOf("method" to "track.getTopTags", "artist" to com.ikko.aura.reco.ArtistNames.askName(artist), "track" to title.trim(), "autocorrect" to "1"),
+            ).optJSONObject("toptags")?.optJSONArray("tag") ?: JSONArray()
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+                .filter { it.optInt("count", 0) >= 15 }
+                .map { it.getString("name").trim().lowercase() }
+                .filter { it.isNotEmpty() && it !in noiseTags }
+                .take(10)
+        }
+
     override suspend fun similar(name: String): List<String>? = cached("similar", com.ikko.aura.reco.ArtistNames.askName(name)) {
         val arr = call(savedKey, savedSecret, mapOf("method" to "artist.getSimilar", "artist" to com.ikko.aura.reco.ArtistNames.askName(name), "limit" to "40", "autocorrect" to "0"))
             .optJSONObject("similarartists")?.optJSONArray("artist") ?: JSONArray()

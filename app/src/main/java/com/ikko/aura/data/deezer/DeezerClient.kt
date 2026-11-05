@@ -33,6 +33,9 @@ data class DeezerAlbumInfo(
 data class DeezerRelease(val id: Long, val title: String, val type: String, val releaseDate: String, val cover: String)
 
 /** An album of a genre's chart, with its cover. */
+/** What Deezer states of one song: its tempo (often an octave off, 0 when it has none), its loudness in dB, a 30-second preview. */
+data class DeezerTrackFeatures(val bpm: Double, val gainDb: Double?, val previewUrl: String?)
+
 data class DeezerChartAlbum(val id: Long, val title: String, val artist: String, val coverXl: String)
 
 data class DeezerTrackInfo(
@@ -338,6 +341,37 @@ class DeezerClient(
             }
             result.also { albumTracksCache[albumId] = it }
         }.getOrDefault(emptyList())
+    }
+
+    private val featuresCache = ConcurrentHashMap<String, DeezerTrackFeatures>()
+    private val featuresMissing: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * The tempo and loudness Deezer states for the song [title] by [artist]: the search result whose title and artist are the same, then the song's own
+     * page (the search result has neither). Null when Deezer does not have it; throws when it could not be asked, so that a failure is not taken for "none".
+     */
+    suspend fun trackFeatures(title: String, artist: String): DeezerTrackFeatures? {
+        val wantedTitle = com.ikko.aura.reco.TrackIdentity.titleKey(title)
+        val wantedArtist = com.ikko.aura.reco.ArtistNames.primaryKey(artist)
+        if (wantedTitle.isEmpty() || wantedArtist.isEmpty()) return null
+        val key = wantedArtist + "\u0001" + wantedTitle
+        featuresCache[key]?.let { return it }
+        if (key in featuresMissing) return null
+        val q = URLEncoder.encode("$artist $title", "UTF-8")
+        val data = JSONObject(fetch("$BASE_URL/search/track?q=$q&limit=6")).optJSONArray("data") ?: JSONArray()
+        var id = 0L
+        for (i in 0 until data.length()) {
+            val item = data.getJSONObject(i)
+            val name = item.optString("title")
+            val sameTitle = com.ikko.aura.reco.TrackIdentity.titleKey(name) == wantedTitle ||
+                com.ikko.aura.reco.TrackIdentity.titleKey(item.optString("title_short", name)) == wantedTitle
+            val by = item.optJSONObject("artist")?.optString("name").orEmpty()
+            if (sameTitle && com.ikko.aura.reco.ArtistNames.compatible(com.ikko.aura.reco.ArtistNames.primaryKey(by), wantedArtist)) { id = item.optLong("id"); break }
+        }
+        if (id <= 0L) { featuresMissing += key; return null }
+        val page = JSONObject(fetch("$BASE_URL/track/$id"))
+        val gain = if (page.has("gain") && !page.isNull("gain")) page.optDouble("gain") else null
+        return DeezerTrackFeatures(page.optDouble("bpm", 0.0), gain, page.optString("preview").ifBlank { null }).also { featuresCache[key] = it }
     }
 
     suspend fun getRelatedArtists(artistId: Long, limit: Int = 30): List<DeezerArtistProfile> {

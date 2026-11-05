@@ -55,6 +55,10 @@ class RecoPipeline(
     private val authority: com.ikko.aura.reco.authority.ArtistAuthority? = null,
     private val verifier: com.ikko.aura.reco.authority.DiscographyVerifier? = null,
     private val deezerClient: com.ikko.aura.data.deezer.DeezerClient? = null,
+    /** What can be measured of a song (tempo, loudness, its tags): what the ambiances are judged on. */
+    private val features: SongFeatureSource? = null,
+    /** The fewest songs a playlist needs to replace the previous one; null for each playlist's own (see [Ranker.Spec.acceptable]). */
+    private val playlistFloor: Int? = null,
 ) {
     /**
      * Most specific first: a song fits the narrowest playlist it can, the broad ones take what is left. Discovery comes
@@ -123,7 +127,15 @@ class RecoPipeline(
             log("taste gate: $before -> ${pool.size}")
         }
         // What the artists of the candidates are, by their own tags: what every playlist judges its style on (see [StyleFit]).
-        val ctxBase = ctxBase0.copy(artistTags = runCatching { tagsOf(insight, pool, profile) }.getOrDefault(emptyMap()))
+        val artistTags = runCatching { tagsOf(insight, pool, profile) }.getOrDefault(emptyMap())
+        // The songs the ambiances may draw from are measured (their tempo, their loudness, the tags of the song): the closest to the listener first.
+        val moodsAsked = kinds.any { it == RecoKind.ENERGY || it == RecoKind.NIGHT || it == RecoKind.CHILL }
+        val songFeatures = if (moodsAsked && features != null) {
+            val toMeasure = pool.filter { Eligibility.excluded(it, ctxBase0) == null }.sortedByDescending { tieOf(it, profile) }.take(MAX_FEATURE_LOOKUPS)
+            runCatching { features?.featuresOf(toMeasure, FEATURE_BUDGET_MS) }.getOrNull().orEmpty()
+        } else emptyMap()
+        log("tags=${artistTags.size} measured=${songFeatures.size}")
+        val ctxBase = ctxBase0.copy(artistTags = artistTags, songFeatures = songFeatures)
         // Dates of recent releases are not in a search result: asked for the few that could be new.
         if (RecoKind.NEW in kinds) {
             lookUp(pool.filter { needsDate(it, ctxBase) }.sortedByDescending { tieOf(it, profile) }.take(MAX_DATE_LOOKUPS), sourcesById, checked)
@@ -162,11 +174,13 @@ class RecoPipeline(
                     }
                 }
                 picks = verified - bad.toSet()
+                log("${kind.key} attempt=$attempt selected=${selected.size} refused=${bad.size} kept=${picks.size}")
                 if (bad.isEmpty()) break
                 rejected += bad.map { it.candidate.identity }
             }
             // A short list is kept short rather than padded; a very short one is not worth replacing the last one with.
-            if (picks.size >= Ranker.specOf(kind).acceptable) {
+            val spec = Ranker.specOf(kind)
+            if (picks.size >= (playlistFloor?.let { maxOf(it, spec.minimum / 2) } ?: spec.acceptable)) {
                 picks.forEach { used += it.candidate.identity }
                 store.commit(kind, picks, now)
                 updated += kind
@@ -365,5 +379,7 @@ class RecoPipeline(
         const val MAX_SIMILAR_ARTISTS = 40
         const val MAX_HIT_LOOKUPS = 16
         const val MAX_TAG_LOOKUPS = 150
+        const val MAX_FEATURE_LOOKUPS = 160
+        const val FEATURE_BUDGET_MS = 100_000L
     }
 }
