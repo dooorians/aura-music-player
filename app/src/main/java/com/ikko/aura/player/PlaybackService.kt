@@ -267,7 +267,10 @@ class PlaybackService : MediaSessionService() {
                             }
                         },
                     ),
-                    DefaultExtractorsFactory(),
+                    // A raw AAC (ADTS) or AMR file has no seek table, nor does an MP3 whose Xing header carries none:
+                    // without this they play but cannot be seeked, and the progress bar snaps back. Seeking by the
+                    // average bitrate is approximate on variable-bitrate files, which is still far better than nothing.
+                    DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true),
                 ),
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)

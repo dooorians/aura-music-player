@@ -47,8 +47,15 @@ interface CatalogDao {
     @Query("SELECT * FROM track_bindings WHERE trackKey = :key")
     suspend fun bindingsFor(key: String): List<TrackBindingEntity>
 
-    @Query("SELECT * FROM catalog_tracks")
-    fun observeTracks(): Flow<List<CatalogTrackEntity>>
+    /**
+     * The catalogue rows of one playlist's entries only, joined on the primary key, for naming the ones that can no
+     * longer play. Reading the whole table there meant every row of the catalogue, decoded again at each write to it.
+     */
+    @Query(
+        "SELECT c.* FROM playlist_tracks p INNER JOIN catalog_tracks c ON c.`key` = p.trackId " +
+            "WHERE p.playlistId = :playlistId",
+    )
+    fun observeTracksOfPlaylist(playlistId: Long): Flow<List<CatalogTrackEntity>>
 
     /** The device's files as the catalogue knows them: their keys are MediaStore ids, with no source prefix. */
     @Query("SELECT * FROM catalog_tracks WHERE `key` NOT LIKE '%:%'")

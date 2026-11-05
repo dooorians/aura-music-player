@@ -9,6 +9,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 
@@ -80,7 +81,9 @@ class PlaylistRepository @Inject constructor(
         playlistDao.observePlaylist(playlistId),
         playlistDao.observeTracksForPlaylist(playlistId),
         musicRepository.tracks,
-        catalogDao.observeTracks(),
+        // Only the playlist's own rows, and only re-read into a new list when one of them changed: a write elsewhere in
+        // the catalogue (a scan, a streamed song remembered) no longer rebuilds the screen.
+        catalogDao.observeTracksOfPlaylist(playlistId).distinctUntilChanged(),
         ytmLibrary.observeKnown(),
     ) { playlist, entries, allTracks, remembered, streamed ->
         if (playlist == null) return@combine null

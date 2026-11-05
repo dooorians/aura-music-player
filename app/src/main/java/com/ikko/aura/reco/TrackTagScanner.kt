@@ -40,7 +40,11 @@ class TrackTagScanner @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
 
-    fun scan(tracks: List<Track>) {
+    /**
+     * Reads the tags of [tracks] not read yet. [changed] are files read before whose modification date or size has
+     * moved since (re-tagged, replaced in place): their tags are read again, the others are left alone.
+     */
+    fun scan(tracks: List<Track>, changed: Set<String> = emptySet()) {
         scope.launch {
             if (!mutex.tryLock()) return@launch
             try {
@@ -53,8 +57,8 @@ class TrackTagScanner @Inject constructor(
                         val present = local.mapTo(HashSet(local.size)) { it.id }
                         marks.map { it.trackId }.filter { it !in present }.chunked(SQL_IN_CHUNK).forEach { dao.forgetTags(it) }
                     }
-                    val done = marks.filter { it.readVersion == TagScanVersion.CURRENT }.mapTo(HashSet()) { it.trackId }
-                    val todo = local.filter { it.id !in done }
+                    val toRead = tagsToRead(local.map { it.id }, marks, changed)
+                    val todo = local.filter { it.id in toRead }
                     todo.chunked(BATCH).forEach { batch ->
                         // A few files at a time: each read waits on the disk far more than on the CPU.
                         val rows = batch.mapBounded(PARALLEL_READS) { t -> rowOf(t, readSafely(t)) }
@@ -130,4 +134,15 @@ class TrackTagScanner @Inject constructor(
             return "UFID:$owner" to id
         }
     }
+}
+
+/**
+ * The files whose tags have to be read: never read, read by an older [TagScanVersion], or changed on disk since they
+ * were read. In the order of [localIds].
+ */
+internal fun tagsToRead(localIds: List<String>, marks: List<TagMark>, changed: Set<String>): Set<String> {
+    val done = marks.asSequence()
+        .filter { it.readVersion == TagScanVersion.CURRENT && it.trackId !in changed }
+        .mapTo(HashSet()) { it.trackId }
+    return localIds.filterTo(LinkedHashSet()) { it !in done }
 }

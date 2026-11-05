@@ -121,12 +121,48 @@ filtrés en mémoire par le moteur. Un index n'y apporterait rien en lecture et 
     session sont libérés ;
   - les transitions sont gérées par le moteur de fondu à deux lecteurs.
 
+## 5. Seconde passe (commit suivant)
+
+Validation : `./gradlew test assembleDebug` → **BUILD SUCCESSFUL**, 538 tests (525 + 13 nouveaux), 0 échec, 1 ignoré
+(le même que sur la base).
+
+- **Fondu enchaîné et focus audio (bug corrigé)**. Pendant le chevauchement de deux titres, seul le lecteur de la
+  session gère le focus audio et le débranchement du casque. La fin du titre sortant suivait seulement son
+  `playWhenReady`. Or une perte de focus temporaire (appel entrant, consigne GPS) ne change pas `playWhenReady` : elle
+  pose une `playbackSuppressionReason`. **La fin du titre sortant continuait donc de jouer pendant l'appel.** Elle suit
+  maintenant `playWhenReady && suppression == NONE` (`tailShouldPlay`), dès l'événement (`onPlayWhenReadyChanged`,
+  `onPlaybackSuppressionReasonChanged`) et plus seulement au tick suivant. Elle reprend avec la session quand le focus
+  revient. En préparation du fondu, une session réduite au silence compte comme en pause : le fondu est abandonné, puis
+  réarmé à la reprise. Le casque débranché coupait déjà les deux lecteurs, avec jusqu'à 30 ms de retard. C'est
+  maintenant immédiat.
+- **Dernière écriture de la file à l'arrêt du service**. `QueueSnapshotWriter.release()` annulait l'écriture en attente
+  (600 ms après un changement de file) et la position pouvait dater de 10 s. Une capture finale est prise avant la
+  libération des lecteurs, et écrite hors du scope du service, qui est annulé juste après.
+- **Recherche dans les fichiers sans table d'index** : `DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)`.
+  Un `.aac` brut (ADTS), un AMR ou un MP3 dont l'en-tête Xing n'a pas de table jouaient sans pouvoir être parcourus. La
+  position est estimée sur le débit moyen, donc approximative en VBR.
+- **Tags relus quand le fichier change**. Le scanner de tags ne relisait jamais un fichier déjà lu, même re-taggé. Il
+  reçoit maintenant les fichiers dont l'empreinte MediaStore `dateModified:size` a changé depuis le scan précédent
+  (`changedSinceLastScan`, à partir du cache des propriétés audio, qui la gardait déjà). Seuls ceux-là sont relus. Pas
+  de changement de schéma.
+- **Détail d'une playlist** : l'observation de toute la table `catalog_tracks` (toutes les lignes, décodées à chaque
+  écriture dans le catalogue) est remplacée par une jointure sur les seules entrées de la playlist,
+  `observeTracksOfPlaylist`, suivie d'un `distinctUntilChanged`. Plan SQLite vérifié sur le schéma 20 : les deux tables
+  sont lues par index (`SEARCH … USING COVERING INDEX (playlistId=?)`, puis `SEARCH … (key=?)`), sans parcours complet.
+- **Vérifié sans changement** :
+  - gapless natif (Automix désactivé) : `BeatAudioSink` délègue tout au `DefaultAudioSink`, qui retire le délai et le
+    remplissage de l'encodeur ;
+  - tampon : `DefaultLoadControl` par défaut sur chaque lecteur. Le lecteur de réserve précharge le titre entrant avant
+    le fondu.
+- Tests ajoutés : `CrossfadeFocusTest`, `TagRescanTest`, `ChangedSinceLastScanTest`.
+
 ## Limites et pistes non traitées
 
 - `PlayerController` ne se reconnecte pas si le `MediaController` est déconnecté. En pratique, cela n'arrive que si le
   processus meurt, et tout redémarre alors. Une reconnexion obligerait à réabonner `PlayerViewModel`, que d'autres
   branches modifient.
-- `playlistDetail` observe encore toute la table `catalog_tracks` pour nommer les titres indisponibles.
+- Un rescan forcé lancé pendant une lecture de tags en cours est ignoré par le scanner (`tryLock`). Ses fichiers
+  modifiés ne seront alors relus qu'à la prochaine modification, ou à la prochaine `TagScanVersion`.
 - Pas de test d'instrumentation Room (`MigrationTestHelper`) : il faudrait un émulateur. La migration est vérifiée
   contre les schémas exportés.
 

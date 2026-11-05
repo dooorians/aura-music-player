@@ -73,3 +73,10 @@ internal class AudioPropertiesCache(private val file: File) {
         const val FIELDS = 6
     }
 }
+
+/**
+ * The files known at the previous scan whose modification date or size has moved since: re-tagged, re-encoded or
+ * replaced in place under the same id. A new file is not in it (nothing was known about it), nor is one that is gone.
+ */
+internal fun changedSinceLastScan(previous: Map<String, String>, current: Map<String, String>): Set<String> =
+    previous.filter { (id, stamp) -> current[id]?.let { it != stamp } == true }.keys

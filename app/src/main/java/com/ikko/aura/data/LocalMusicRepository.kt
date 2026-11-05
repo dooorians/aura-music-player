@@ -132,8 +132,9 @@ class LocalMusicRepository @Inject constructor(
             hasScanned = true
             // The covers found missing are looked for again: a file may have been given one since.
             com.ikko.aura.util.AbsentCovers.clear()
-            // The files' own tags (identifiers, ReplayGain, every genre, tempo), read once in the background.
-            tagScanner.scan(initial)
+            // The files' own tags (identifiers, ReplayGain, every genre, tempo), read once in the background, and again
+            // for a file whose modification date or size moved since the last scan (its tags may have been edited).
+            tagScanner.scan(initial, changedSinceLastScan(cached.mapValues { it.value.stamp }, scan.stamps))
             enrichAudioProperties(initial, scan.stamps, cached)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
