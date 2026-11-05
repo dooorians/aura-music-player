@@ -29,7 +29,10 @@ class AlbumRefResolver internal constructor(
         foundRefs.clear()
     }
 
-    suspend fun find(title: String, artist: String): String? = withContext(Dispatchers.IO) {
+    suspend fun find(rawTitle: String, rawArtist: String): String? = withContext(Dispatchers.IO) {
+        // A source's text may carry HTML entities, sometimes escaped twice ("Kaskade &amp;amp; Tiësto"): a search for that finds nothing.
+        val title = unescape(rawTitle)
+        val artist = unescape(rawArtist)
         val cacheKey = title.trim().lowercase() + "\u0000" + artist.trim().lowercase()
         foundRefs[cacheKey]?.let { return@withContext it }
         // Titles are written with signs that are letters to the unicode and nothing to a search: "ᐸHyper-Egoᐳ".
@@ -42,9 +45,10 @@ class AlbumRefResolver internal constructor(
             ytmClient?.let { client -> runCatching { client.searchAlbums(q) }.getOrNull() }.orEmpty()
         }
 
-        // The name as written, then cleaned of its signs ("<Hyper-Ego>"), then with the artist's first name only.
-        val found = listOf("${norm(title)} ${norm(artist)}", "$title $artist", "$wantTitle $wantArtist").distinct()
-            .firstNotNullOfOrNull { q -> searchFunc(q).takeIf { it.isNotEmpty() } }.orEmpty()
+        // The name as written, then cleaned of its signs ("<Hyper-Ego>"), then with the artist's first name only, then the title
+        // alone: a search that names the artist can be answered by karaoke and tribute albums only, and the real one is
+        // further down, or in the next search.
+        val queries = listOf("${norm(title)} ${norm(artist)}", "$title $artist", "$wantTitle $wantArtist", wantTitle).distinct()
 
         fun isUnwanted(albumTitle: String): Boolean {
             val low = albumTitle.lowercase()
@@ -60,12 +64,31 @@ class AlbumRefResolver internal constructor(
                 ArtistNames.key(a.artist) == ArtistNames.key(artist)
         }
 
-        val filtered = found.filter { a -> !isUnwanted(a.title) && artistMatches(a) }
-
         // The exact album only: a title that is a prefix of, or contains, the wanted one — "Greatest Hits"
         // vs "Greatest Hits (Deluxe Edition)", "TiK ToK" vs "TiK ToK - Remixes" — is a different record
         // (an edition, a remix, a reissue) and must not open in its place.
-        val exact = filtered.firstOrNull { a -> norm(a.title) == wantTitle }
+        fun exactIn(found: List<YtmAlbumRef>): YtmAlbumRef? =
+            found.filter { a -> !isUnwanted(a.title) && artistMatches(a) }.firstOrNull { a -> norm(a.title) == wantTitle }
+                // The same title credited otherwise: "Lady Gaga" for what the source lists as "Tony Bennett & Lady Gaga", or the
+                // reverse. Only when the credits share a whole name word, so "Greatest Hits" by someone else stays out.
+                ?: found.firstOrNull { a -> !isUnwanted(a.title) && norm(a.title) == wantTitle && sharesNameWord(a.artist, artist, ::norm) }
+
+        val exact = queries.firstNotNullOfOrNull { q -> exactIn(searchFunc(q)) }
         exact?.id?.also { foundRefs[cacheKey] = it }
+    }
+
+    private fun unescape(text: String): String {
+        fun once(t: String) = t.replace("&quot;", "\"").replace("&#039;", "'").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        return once(once(text))
+    }
+
+    /** Whether two credits have a name word in common (three letters or more, and not a credit word like "feat"). */
+    private fun sharesNameWord(a: String, b: String, norm: (String) -> String): Boolean {
+        fun words(x: String) = norm(x).split(' ').filter { it.length >= 3 && it !in CREDIT_WORDS }.toSet()
+        return words(a).intersect(words(b)).isNotEmpty()
+    }
+
+    private companion object {
+        val CREDIT_WORDS = setOf("feat", "ft", "featuring", "and", "with", "the", "various", "artists", "topic", "vevo")
     }
 }

@@ -177,7 +177,7 @@ fun HomeScreen(
 
     MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         val resolveRef: suspend (com.ikko.aura.data.home.SectionAlbum) -> String? = remember(viewModel) {
-            { item -> kotlinx.coroutines.withTimeoutOrNull(4_000L) { viewModel.albumRefOf(item) } }
+            { item -> kotlinx.coroutines.withTimeoutOrNull(8_000L) { viewModel.albumRefOf(item) } }
         }
         val onMenuLongPress = remember(menu) { { target: LibraryContextTarget -> menu.show(target) } }
 
@@ -427,6 +427,9 @@ private fun HomeSectionBlock(
                                 } else if (item.items.isNotEmpty()) {
                                     // No page exists for it (a source that gives none): its songs are all there is to open.
                                     playerViewModel.playQueue(item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }, 0, context = section.id)
+                                } else if (item.artist.isNotBlank()) {
+                                    // Neither a page nor songs: a tap that does nothing reads as a broken app. The artist's page is where it can be found.
+                                    navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.artist))
                                 }
                             }
                         }

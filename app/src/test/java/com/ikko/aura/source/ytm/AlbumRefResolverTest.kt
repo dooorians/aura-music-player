@@ -74,4 +74,40 @@ class AlbumRefResolverTest {
         // Une édition différente n'est pas l'album : pas de résolution.
         assertNull(resolver.find("TiK ToK", "Kesha"))
     }
+
+    @Test
+    fun aSearchAnsweredByKaraokeOnlyDoesNotStopTheNextOne() = runBlocking {
+        val asked = ArrayList<String>()
+        val resolver = AlbumRefResolver { q ->
+            asked += q
+            if (q.contains("lady gaga")) listOf(
+                YtmAlbumRef("k1", "Cheek to Cheek (Karaoke Version Originally Performed by Tony Bennett & Lady Gaga)", "Karaoke Star", null),
+                YtmAlbumRef("k2", "Cheek To Cheek (Tribute)", "Some Band", null),
+            ) else listOf(YtmAlbumRef("real_id", "Cheek To Cheek (Deluxe)", "Tony Bennett & Lady Gaga", null))
+        }
+        assertEquals("real_id", resolver.find("Cheek To Cheek (Deluxe)", "Lady Gaga"))
+    }
+
+    @Test
+    fun theSameAlbumCreditedToTheOtherHalfOfTheDuoIsFound() = runBlocking {
+        val resolver = AlbumRefResolver { _ -> listOf(YtmAlbumRef("duo_id", "Cheek To Cheek (Deluxe)", "Tony Bennett", null)) }
+        assertEquals("duo_id", resolver.find("Cheek To Cheek (Deluxe)", "Tony Bennett & Lady Gaga"))
+    }
+
+    @Test
+    fun aSharedTitleBySomeoneElseStaysOut() = runBlocking {
+        val resolver = AlbumRefResolver { _ -> listOf(YtmAlbumRef("other_id", "Greatest Hits", "Queen", null)) }
+        assertNull(resolver.find("Greatest Hits", "Abba"))
+    }
+
+    @Test
+    fun htmlEntitiesAreDecodedBeforeSearching() = runBlocking {
+        val asked = ArrayList<String>()
+        val resolver = AlbumRefResolver { q ->
+            asked += q
+            listOf(YtmAlbumRef("only_id", "Only You", "Kaskade & Tiësto", null))
+        }
+        assertEquals("only_id", resolver.find("Only You", "Kaskade &amp;amp; Tiësto"))
+        assertEquals(true, asked.none { it.contains("amp") })
+    }
 }
