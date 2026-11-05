@@ -60,7 +60,16 @@ internal class AudioPropertiesCache(private val file: File) {
                         .append(p.bitrateKbps.toString()).append('\n')
                 }
             }
-            if (!temp.renameTo(file)) temp.delete()
+            // Files.move, not File.renameTo: the latter does not replace an existing file on Windows, where a reader
+            // would then see a missing cache between the delete and the rename.
+            try {
+                java.nio.file.Files.move(
+                    temp.toPath(), file.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (e: java.io.IOException) {
+                temp.delete()
+            }
         }
     }
 
