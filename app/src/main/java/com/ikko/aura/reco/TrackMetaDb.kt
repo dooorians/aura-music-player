@@ -71,7 +71,8 @@ data class SongFeaturesEntity(
 
 data class TagMark(val trackId: String, val readVersion: Int)
 
-object TagScanVersion { const val CURRENT = 1 }
+/** v2: the clean-up of BOMs/NULs in values, and the MusicBrainz UFID frame as Picard writes it (owner "http://musicbrainz.org"). */
+object TagScanVersion { const val CURRENT = 2 }
 
 @Dao
 interface TrackMetaDao {

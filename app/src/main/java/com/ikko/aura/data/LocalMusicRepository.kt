@@ -7,6 +7,7 @@ import com.ikko.aura.catalog.Availability
 import com.ikko.aura.catalog.CatalogDao
 import com.ikko.aura.catalog.CatalogTrackEntity
 import com.ikko.aura.catalog.LocalBinding
+import com.ikko.aura.catalog.LocalCatalogSync
 import com.ikko.aura.catalog.LocalReconciler
 import com.ikko.aura.catalog.ScannedFile
 import com.ikko.aura.catalog.TrackBindingEntity
@@ -15,6 +16,7 @@ import com.ikko.aura.data.model.Album
 import com.ikko.aura.data.model.Artist
 import com.ikko.aura.data.model.AudioFormat
 import com.ikko.aura.data.model.Track
+import com.ikko.aura.util.mapBounded
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -159,18 +161,24 @@ class LocalMusicRepository @Inject constructor(
      * of the catalogue must not cost the library: the scan then goes through under its MediaStore ids, as before.
      */
     private suspend fun keyed(scan: Scan): Scan = try {
-        val previous = catalog.bindingsOf(SOURCE).map {
+        val previousRows = catalog.bindingsOf(SOURCE)
+        val previous = previousRows.map {
             LocalBinding(it.itemId, it.trackKey, it.fingerprint, Availability.valueOf(it.availability), it.lastSeenAt)
         }
-        val result = LocalReconciler.reconcile(previous, scan.files, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val result = LocalReconciler.reconcile(previous, scan.files, now)
         if (scan.files.isNotEmpty()) {
-            catalog.replaceBindings(
-                SOURCE,
-                result.bindings.map {
+            // Only what changed since the last scan is written; an unchanged library costs two reads and no write.
+            val plan = LocalCatalogSync.plan(
+                previousBindings = previousRows,
+                nextBindings = result.bindings.map {
                     TrackBindingEntity(SOURCE, it.itemId, it.trackKey, it.fingerprint, it.availability.name, it.lastSeenAt)
                 },
-                result.tracks.map { CatalogTrackEntity(it.key, it.title, it.artist, it.album, it.durationMs) },
+                previousTracks = catalog.localTracks(),
+                nextTracks = result.tracks.map { CatalogTrackEntity(it.key, it.title, it.artist, it.album, it.durationMs) },
+                now = now,
             )
+            if (!plan.isEmpty) catalog.applySync(SOURCE, plan)
         }
         val key = result.keyByItem
         Scan(
@@ -296,19 +304,25 @@ class LocalMusicRepository @Inject constructor(
         if (toMeasure.isNotEmpty()) {
             val enriched = initial.toMutableList()
             var lastEmitAt = System.currentTimeMillis()
-            for (index in toMeasure) {
-                val track = initial[index]
-                val properties = MetadataExtractor.extract(context, track.contentUri, null)
-                enriched[index] = track.withProperties(properties)
-                stamps[track.id]?.let { fresh[track.id] = AudioPropertiesCache.Entry(it, properties) }
+            // A few files are opened at once: each open waits on the disk and the media provider far more than it
+            // uses the CPU, so a small window overlaps that waiting without crowding the screen's own reads.
+            for (window in toMeasure.chunked(ENRICHMENT_WINDOW)) {
+                val measured = window.mapBounded(ENRICHMENT_PARALLELISM) { index ->
+                    index to MetadataExtractor.extract(context, initial[index].contentUri, null)
+                }
+                for ((index, properties) in measured) {
+                    val track = initial[index]
+                    enriched[index] = track.withProperties(properties)
+                    stamps[track.id]?.let { fresh[track.id] = AudioPropertiesCache.Entry(it, properties) }
+                }
                 val now = System.currentTimeMillis()
                 if (now - lastEmitAt >= ENRICHMENT_EMIT_INTERVAL_MS) {
                     _tracks.value = enriched.filterNot { it.id in forgotten }
                     lastEmitAt = now
                 }
-                // Yield between files so thumbnail decoding for on-screen items isn't
+                // Yield between windows so thumbnail decoding for on-screen items isn't
                 // starved of IO/binder time by this background scan on low-end SoCs.
-                delay(ENRICHMENT_STEP_DELAY_MS)
+                delay(ENRICHMENT_STEP_DELAY_MS * window.size)
             }
             _tracks.value = enriched.filterNot { it.id in forgotten }
         }
@@ -397,6 +411,8 @@ class LocalMusicRepository @Inject constructor(
         private val SOURCE = SourceId.LOCAL.value
         private const val ENRICHMENT_EMIT_INTERVAL_MS = 500L
         private const val ENRICHMENT_STEP_DELAY_MS = 4L
+        private const val ENRICHMENT_PARALLELISM = 3
+        private const val ENRICHMENT_WINDOW = 12
     }
 }
 

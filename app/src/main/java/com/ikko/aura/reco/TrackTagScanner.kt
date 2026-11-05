@@ -22,6 +22,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import com.ikko.aura.util.mapBounded
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -43,15 +45,38 @@ class TrackTagScanner @Inject constructor(
             if (!mutex.tryLock()) return@launch
             try {
                 runCatching {
-                    val done = dao.marks().filter { it.readVersion == TagScanVersion.CURRENT }.mapTo(HashSet()) { it.trackId }
-                    val todo = tracks.filter { !YtmLibrary.isStreamed(it) && it.id !in done }
+                    val marks = dao.marks()
+                    val local = tracks.filter { !YtmLibrary.isStreamed(it) }
+                    // The rows of files that are gone: nothing deleted them before, so the table only grew. Never on an
+                    // empty scan, which is a MediaStore hiccup or a missing permission far more often than an empty library.
+                    if (local.isNotEmpty()) {
+                        val present = local.mapTo(HashSet(local.size)) { it.id }
+                        marks.map { it.trackId }.filter { it !in present }.chunked(SQL_IN_CHUNK).forEach { dao.forgetTags(it) }
+                    }
+                    val done = marks.filter { it.readVersion == TagScanVersion.CURRENT }.mapTo(HashSet()) { it.trackId }
+                    val todo = local.filter { it.id !in done }
                     todo.chunked(BATCH).forEach { batch ->
-                        dao.putTags(batch.map { t -> rowOf(t, runCatching { read(t) }.getOrDefault(ParsedTags())) })
+                        // A few files at a time: each read waits on the disk far more than on the CPU.
+                        val rows = batch.mapBounded(PARALLEL_READS) { t -> rowOf(t, readSafely(t)) }
+                        dao.putTags(rows)
                         delay(PAUSE_MS)
                     }
                 }
             } finally { mutex.unlock() }
         }
+    }
+
+    /**
+     * The file's tags, or nothing: a file that is corrupt, unreadable, gone, or that keeps the parser busy past
+     * [READ_TIMEOUT_MS] is recorded as having none, so it is not tried again at every launch.
+     */
+    private suspend fun readSafely(t: Track): ParsedTags = try {
+        withTimeoutOrNull(READ_TIMEOUT_MS) { read(t) } ?: ParsedTags()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        // OutOfMemoryError on a huge embedded picture included: one bad file must not end the scan.
+        ParsedTags()
     }
 
     private fun rowOf(t: Track, p: ParsedTags) = TrackTagsEntity(
@@ -76,11 +101,7 @@ class TrackTagScanner @Inject constructor(
         is TextInformationFrame -> entry.values.map { v -> (if (entry.id == "TXXX") entry.description.orEmpty() else entry.id) to v }
         is VorbisComment -> listOf(entry.key to entry.value)
         is InternalFrame -> listOf(entry.description to entry.text)
-        // UFID: the owner, a NUL, then the identifier.
-        is BinaryFrame -> if (entry.id == "UFID") {
-            val at = entry.data.indexOf(0)
-            if (at > 0) listOf("UFID:" + String(entry.data, 0, at) to String(entry.data, at + 1, entry.data.size - at - 1)) else emptyList()
-        } else emptyList()
+        is BinaryFrame -> if (entry.id == "UFID") listOfNotNull(ufidPair(entry.data)) else emptyList()
         else -> emptyList()
     }
 
@@ -89,8 +110,24 @@ class TrackTagScanner @Inject constructor(
         c.invokeOnCancellation { cancel(false) }
     }
 
-    private companion object {
+    internal companion object {
         const val BATCH = 20
         const val PAUSE_MS = 150L
+        const val PARALLEL_READS = 3
+        const val READ_TIMEOUT_MS = 15_000L
+        const val SQL_IN_CHUNK = 500
+
+        /**
+         * An ID3 UFID frame: the owner in ISO-8859-1, a NUL, then the identifier (bytes, in practice ASCII, at most 64).
+         * Read with explicit charsets rather than the platform's, and with any padding NULs dropped.
+         */
+        fun ufidPair(data: ByteArray): Pair<String, String>? {
+            val at = data.indexOf(0)
+            if (at <= 0) return null
+            val owner = String(data, 0, at, Charsets.ISO_8859_1).trim()
+            val id = String(data, at + 1, data.size - at - 1, Charsets.ISO_8859_1).trim { it.isWhitespace() || it == '\u0000' }
+            if (owner.isEmpty() || id.isEmpty()) return null
+            return "UFID:$owner" to id
+        }
     }
 }
