@@ -30,7 +30,7 @@ fun TasteProfileScreen(navController: NavHostController, vm: RecoSettingsViewMod
     val summary = vm.profileSummary.collectAsStateWithLifecycle().value
     val u = designUnit()
     GradientScreenScaffold(applyStatusBarInset = false) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().settingsPageBody().verticalScroll(rememberScrollState())) {
             SettingsHeader("Ton profil") {}
             SettingsGroup(footer = "Ce que l'app a appris de tes écoutes, de tes likes et de tes réponses — et pourquoi elle propose ce qu'elle propose.") {
                 val s = summary

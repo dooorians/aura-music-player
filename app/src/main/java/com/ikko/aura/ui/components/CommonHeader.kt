@@ -66,6 +66,9 @@ fun CommonHeader(
     shiftX: () -> Float = { 0f },
     /** False while it is hidden under a page of the library: it stays built (so it is there at once on the way back) but takes no touch. */
     enabled: Boolean = true,
+    /** Where the profile picture is, for the trip that opens the settings from it (null: the picture opens them without one). */
+    profileAnchor: HeroAnchor? = null,
+    profileTripKey: String? = null,
 ) {
     val u = designUnit()
     Box(modifier.fillMaxWidth().height(u * 236f)) {
@@ -101,6 +104,7 @@ fun CommonHeader(
                 .offset(x = u * 944f, y = u * 112f)
                 .heroRipple(fast = true, baseAlpha = groupAlpha, shiftX = shiftX)
                 .size(u * 96f)
+                .then(if (profileAnchor != null && profileTripKey != null) Modifier.heroAnchor(profileTripKey, profileAnchor) else Modifier)
                 .clip(CircleShape)
                 .background(Color(0xFF1F1F27))
                 .clickable(enabled = enabled, onClick = onProfile),

@@ -583,7 +583,8 @@ private fun setToCard(path: androidx.compose.ui.graphics.Path, edge: Float, size
 /** A page a trip of the hero ends on: an album, a playlist, an artist (of any source), the lyrics. */
 private fun isHeroPageRoute(route: String?): Boolean {
     if (route == null) return false
-    return route == AuraDestination.Lyrics.route || route == AuraDestination.Queue.route || HERO_PAGE_PREFIXES.any { route.startsWith(it) }
+    return route == AuraDestination.Lyrics.route || route == AuraDestination.Queue.route || HERO_PAGE_PREFIXES.any { route.startsWith(it) } ||
+        com.ikko.aura.navigation.isSettingsPageRoute(route)
 }
 
 private val HERO_PAGE_PREFIXES = listOf(
@@ -632,8 +633,9 @@ private fun popExit() =
 private fun isLyrics(entry: NavBackStackEntry) = entry.destination.route == AuraDestination.Lyrics.route
 private fun isLyricsOrAlbum(entry: NavBackStackEntry): Boolean {
     val route = entry.destination.route ?: return false
-    // Every page the player opens over itself: the queue, the lyrics, an album or an artist of any source.
-    return route == AuraDestination.Queue.route || isHeroPageRoute(route)
+    // Every page the player opens over itself: the queue, the lyrics, an album or an artist of any source. Not the settings: the
+    // player never opens them, and what is said of these pages' transitions with the player does not apply to them.
+    return route == AuraDestination.Queue.route || (isHeroPageRoute(route) && !com.ikko.aura.navigation.isSettingsPageRoute(route))
 }
 
 // The incoming page's first frame is the heavy one (it is composed there), and the transition's clock runs through it:
@@ -1158,10 +1160,13 @@ fun MainLayout() {
                     val fromArtist = isArtistRoute(initialState.destination.route)
                     // An album that opens its artist's page leaves the way an artist's page leaves for an album.
                     val albumToArtist = isAlbumKind(initialState.destination.route) && isArtistRoute(targetState.destination.route)
-                    if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist || albumToArtist) &&
+                    // A settings page that opens another one (the hub opens its pages, a page opens its menus) leaves the same way.
+                    val settingsToSettings = com.ikko.aura.navigation.isSettingsPageRoute(initialState.destination.route) &&
+                        com.ikko.aura.navigation.isSettingsPageRoute(targetState.destination.route)
+                    if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist || albumToArtist || settingsToSettings) &&
                         hero.matchesEntry(targetState.destination.route, targetState.arguments)
                     ) {
-                        if (fromArtist || albumToArtist) {
+                        if (fromArtist || albumToArtist || settingsToSettings) {
                             fadeOut(tween(110, easing = androidx.compose.animation.core.FastOutLinearInEasing))
                         } else {
                             fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
@@ -1188,7 +1193,8 @@ fun MainLayout() {
                     // Back to the list: it is there, and each item comes back by itself from the one that was touched.
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
                         isArtistRoute(targetState.destination.route) ||
-                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route))
+                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route)) ||
+                        com.ikko.aura.navigation.isSettingsPageRoute(targetState.destination.route)
                     if (isAlbumRoute(initialState) && toHeroList &&
                         hero.matchesEntry(initialState.destination.route, initialState.arguments) &&
                         (hero.canClose || hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing)
@@ -1213,7 +1219,8 @@ fun MainLayout() {
                     }
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
                         isArtistRoute(targetState.destination.route) ||
-                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route))
+                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route)) ||
+                        com.ikko.aura.navigation.isSettingsPageRoute(targetState.destination.route)
                     if (returningToPlayer && (matchesClosing || isLyricsOrAlbum(initialState))) {
                         fadeOut(tween(PLAYER_RETURN_FADE_MS + 40, easing = LinearEasing), targetAlpha = 0.999f)
                     } else if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && hero.scrolledFallbackClose) {
@@ -1236,6 +1243,11 @@ fun MainLayout() {
                     // The settings take the cover's colours (their switches, their tiles), as Home and Library do.
                     CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
                         UnderSheet { SettingsScreen(navController) }
+                    }
+                }
+                composable(AuraDestination.SettingsPagePattern.route) { backStack ->
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { com.ikko.aura.ui.screens.settings.SettingsPageScreen(navController, backStack.arguments?.getString("page")) }
                     }
                 }
                 composable(AuraDestination.Tabs.route) {
@@ -1952,11 +1964,24 @@ private fun TabPager(
             val headerGone by remember {
                 androidx.compose.runtime.derivedStateOf { libraryPageProgress.floatValue * motion.p.coerceIn(0f, 1f) >= 0.5f }
             }
+            val profileTripHero = com.ikko.aura.ui.components.LocalHero.current
+            val profileAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+            val profileTripKey = com.ikko.aura.navigation.settingsTripKey(AuraDestination.Settings.route)
             com.ikko.aura.ui.components.CommonHeader(
                 enabled = !headerGone,
                 profileUri = profileUri,
                 onSearch = openSearch,
-                onProfile = { navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true } },
+                // The picture opens the settings as a row opens its page: a trip from it, what is on Home or the library stepping
+                // back from it, and back from it on the way back.
+                onProfile = {
+                    if (profileTripHero.begin(
+                            key = profileTripKey, uri = null, cacheKey = null, cover = profileAnchor, radiusPx = 0f,
+                            title = null, sub = null, drawCover = false,
+                        )
+                    ) navController.navigate(AuraDestination.Settings.route) { launchSingleTop = true }
+                },
+                profileAnchor = profileAnchor,
+                profileTripKey = profileTripKey,
                 progress = { motion.p },
                 ink = palette.ink,
                 modifier = Modifier.offset {

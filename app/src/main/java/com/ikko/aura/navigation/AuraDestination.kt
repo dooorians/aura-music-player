@@ -70,6 +70,11 @@ sealed class AuraDestination(val route: String) {
 
     data object Playlists : AuraDestination("playlists")
 
+    /** One of the settings' own pages (Apparence, Lecture…): [page] is the name of the page in the settings screen. */
+    data object SettingsPagePattern : AuraDestination("settings/{page}") {
+        fun route(page: String) = "settings/$page"
+    }
+
     companion object {
         /** Routes with no mini-player pill at all (their own full-bleed player UI). */
         /** Reached from the player and part of it: the mini player has no business on any of them. */
@@ -98,3 +103,30 @@ fun com.ikko.aura.data.model.Track.streamedAlbumRoute(): String? = remoteAlbumId
 fun com.ikko.aura.data.model.Track.streamedArtistRoute(): String =
     if (id.startsWith("ytm:")) AuraDestination.YtmArtistPattern.route(artist)
     else AuraDestination.RemoteArtistPattern.route(id.substringBefore(':'), artist)
+
+/**
+ * The pages that belong to the settings: the hub, the pages it opens, and the pages those open. They move the way an album
+ * page does (a trip from the touched row, the page rising round it, the way back the trip's own), in both directions.
+ *
+ * A new page of the settings is one of these as soon as its route starts with `settings/`, or is added to [SETTINGS_PAGE_ROUTES].
+ * Then: wrap its body in `settingsPageBody()`, mark its title with `settingsPageTitle(...)`, and open it from a `SettingsRow(trip = ...)`
+ * (see ui/screens/settings/SettingsMotion.kt).
+ */
+private val SETTINGS_PAGE_ROUTES = setOf(
+    AuraDestination.Settings.route,
+    AuraDestination.Equalizer.route,
+    AuraDestination.SourceOrder.route,
+    AuraDestination.TastePicker.route,
+    AuraDestination.TasteProfile.route,
+    AuraDestination.LikedArtists.route,
+    AuraDestination.BlockedArtists.route,
+)
+
+fun isSettingsPageRoute(route: String?): Boolean =
+    route != null && (route in SETTINGS_PAGE_ROUTES || route.startsWith("settings/"))
+
+/**
+ * The key of a trip to a settings page, from its route as it is navigated to (`settings/APPEARANCE`, `equalizer`…): what a row
+ * that opens the page and the page's own title agree on.
+ */
+fun settingsTripKey(route: String): String = "settings:$route"

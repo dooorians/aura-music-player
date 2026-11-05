@@ -31,6 +31,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.ikko.aura.ui.components.HeroAnchor
+import com.ikko.aura.ui.components.HeroState
+import com.ikko.aura.ui.components.HeroText
+import com.ikko.aura.ui.components.LocalHero
+import com.ikko.aura.ui.components.heroAnchor
+import com.ikko.aura.ui.components.heroRipple
+import com.ikko.aura.ui.components.heroRise
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,13 +88,16 @@ internal fun SettingsGroup(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val u = designUnit()
-    Column(Modifier.fillMaxWidth().padding(horizontal = u * 40f)) {
+    val pageKey = rememberSettingsPageKey()
+    val riseCounter = LocalSettingsRise.current
+    val order = remember { if (riseCounter == null) 0 else riseCounter.next++ }
+    Column(Modifier.fillMaxWidth().heroRise(order, rows = true).padding(horizontal = u * 40f)) {
         if (title != null) {
             Text(
                 title,
                 color = Color.White.copy(alpha = 0.55f),
                 style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = designSp(32f), lineHeight = designSp(40f)),
-                modifier = Modifier.padding(start = u * 20f, top = u * 40f, bottom = u * 14f),
+                modifier = Modifier.heroRipple(pageKey = pageKey).padding(start = u * 20f, top = u * 40f, bottom = u * 14f),
             )
         } else {
             Spacer(Modifier.height(u * 24f))
@@ -99,7 +109,7 @@ internal fun SettingsGroup(
                 footer,
                 color = Color.White.copy(alpha = 0.5f),
                 style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = designSp(28f), lineHeight = designSp(36f)),
-                modifier = Modifier.padding(start = u * 20f, end = u * 20f, top = u * 14f),
+                modifier = Modifier.heroRipple(pageKey = pageKey).padding(start = u * 20f, end = u * 20f, top = u * 14f),
             )
         }
     }
@@ -125,14 +135,38 @@ internal fun SettingsRow(
     danger: Boolean = false,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /**
+     * The route of the page this row opens: the tap then starts a trip from the row (its title travels to the page's), and
+     * [onClick] does the navigating. Null for a row that opens nothing.
+     */
+    tripRoute: String? = null,
 ) {
     val u = designUnit()
     val accent = settingsAccent()
     var open by remember { mutableStateOf(false) }
+    val hero = LocalHero.current
+    val pageKey = rememberSettingsPageKey()
+    val tripKey = tripRoute?.let(::tripKeyOf)
+    val rowAnchor = remember { HeroAnchor() }
+    val titleAnchor = remember { HeroAnchor() }
+    val titleStyle = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = designSp(42f), lineHeight = designSp(50f))
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            // What is on the page steps back and clears from the touched row when a page opens, and returns from it.
+            .heroRipple(tripKey, pageKey = pageKey)
+            .then(if (tripKey != null) Modifier.heroAnchor(tripKey, rowAnchor) else Modifier)
+            .then(
+                if (onClick != null) Modifier.clickable {
+                    if (tripKey == null) onClick()
+                    else if (hero.begin(
+                            key = tripKey, uri = null, cacheKey = null, cover = rowAnchor, radiusPx = 0f,
+                            title = titleAnchor to HeroText(title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, Color.White),
+                            sub = null, drawCover = false,
+                        )
+                    ) onClick()
+                } else Modifier,
+            )
             .padding(horizontal = u * 28f, vertical = u * 26f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -147,7 +181,8 @@ internal fun SettingsRow(
             Text(
                 title,
                 color = if (danger) DangerColor else Color.White,
-                style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = designSp(42f), lineHeight = designSp(50f)),
+                style = titleStyle,
+                modifier = if (tripKey != null) Modifier.heroAnchor(tripKey, titleAnchor, HeroState.ROLE_TITLE) else Modifier,
             )
             if (summary != null) {
                 Text(

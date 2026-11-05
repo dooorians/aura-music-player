@@ -1,5 +1,8 @@
 package com.ikko.aura.ui.screens.taste
 
+import com.ikko.aura.ui.screens.settings.rememberSettingsPageKey
+import com.ikko.aura.ui.screens.settings.settingsPageTitle
+import com.ikko.aura.ui.screens.settings.settingsPageBody
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -94,7 +97,7 @@ internal fun TastePickerContent(state: TastePickerUiState, onToggle: (PickerArti
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().settingsPageBody(),
                 contentPadding = PaddingValues(start = u * 40f, end = u * 40f, bottom = navBottom + barHeight),
                 horizontalArrangement = Arrangement.spacedBy(u * 26f),
                 verticalArrangement = Arrangement.spacedBy(u * 34f),
@@ -108,7 +111,15 @@ internal fun TastePickerContent(state: TastePickerUiState, onToggle: (PickerArti
                                 fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold,
                                 fontSize = designSp(84f), lineHeight = designSp(96f), letterSpacing = designSp(84f * -0.03f),
                             ),
-                            modifier = Modifier.heroRipple(fast = true, blend = androidx.compose.ui.graphics.BlendMode.Plus, baseAlpha = { 0.42f }),
+                            modifier = Modifier
+                                .heroRipple(pageKey = rememberSettingsPageKey(), fast = true, blend = androidx.compose.ui.graphics.BlendMode.Plus, baseAlpha = { 0.42f })
+                                .settingsPageTitle(
+                                    "Tes artistes",
+                                    TextStyle(
+                                        fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold,
+                                        fontSize = designSp(84f), lineHeight = designSp(96f), letterSpacing = designSp(84f * -0.03f),
+                                    ),
+                                ),
                         )
                         Text(
                             "Touche ceux que tu aimes : d'autres, proches de tes choix, arrivent à côté. Reste appuyé sur un artiste pour le bloquer.", color = Muted,

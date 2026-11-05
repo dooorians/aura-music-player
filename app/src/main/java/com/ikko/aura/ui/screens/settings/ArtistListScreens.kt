@@ -87,7 +87,7 @@ private fun ArtistListPage(
 ) {
     val u = designUnit()
     GradientScreenScaffold(applyStatusBarInset = false) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().settingsPageBody().verticalScroll(rememberScrollState())) {
             SettingsHeader(title) {}
             SettingsGroup(footer = footer) {
                 if (entries.isEmpty()) {

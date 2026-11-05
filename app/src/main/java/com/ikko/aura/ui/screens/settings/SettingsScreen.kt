@@ -84,85 +84,35 @@ private enum class SettingsPage(val title: String) {
     ABOUT("À propos"),
 }
 
-// A page comes in as on Android's shared axis (the library's pages do the same): 30 dp from the right, fading in once the
-// hub has begun to leave; the hub goes 30 dp to the left and stays faintly in sight under it.
-private val AXIS_SHIFT = 30.dp
-private const val AXIS_HUB_REST = 0.3f
-private const val AXIS_MS = 300
-
 /** Which of the palette's pools tints each hub tile: the light and middle ones, never the deep. */
 private val TILE_TONES = intArrayOf(1, 3, 5, 0, 1, 3, 5)
 
 /**
  * The settings: a hub of seven cards (what they are for, and how they stand now), each opening its own page of groups —
- * with small drawings where a choice is easier to see than to read.
+ * with small drawings where a choice is easier to see than to read. Each page is a destination of the navigation, so it
+ * opens and closes the way an album does (see SettingsMotion.kt).
  */
 @Composable
 fun SettingsScreen(
     navController: NavHostController,
     settingsViewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val scope = rememberCoroutineScope()
-    var shown by rememberSaveable { mutableStateOf<String?>(null) }
-    val page = shown?.let { name -> SettingsPage.entries.firstOrNull { it.name == name } }
-    val clip = remember { Animatable(if (page != null) 1f else 0f) }
-    var closing by remember { mutableStateOf(false) }
-    LaunchedEffect(shown) {
-        if (shown != null && clip.value < 1f) clip.animateTo(1f, tween(AXIS_MS, easing = FastOutSlowInEasing))
-    }
-    fun closePage() {
-        if (shown == null || closing) return
-        closing = true
-        scope.launch {
-            clip.animateTo(0f, tween(AXIS_MS, easing = FastOutSlowInEasing))
-            shown = null
-            closing = false
-        }
-    }
-    // The back gesture takes the page back as the finger goes; with no page up it is the screen's own back.
-    PredictiveBackHandler(enabled = shown != null && LocalSheetCard.current.owner == null) { events ->
-        try {
-            events.collect { e -> if (!closing) clip.snapTo(1f - e.progress.coerceIn(0f, 1f)) }
-            closePage()
-        } catch (c: kotlin.coroutines.cancellation.CancellationException) {
-            clip.animateTo(1f, tween(AXIS_MS, easing = FastOutSlowInEasing))
-            throw c
-        }
-    }
+    SettingsHub(settingsViewModel, navController, onBack = { navController.popBackStack() })
+}
 
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val c = clip.value
-                    translationX = -AXIS_SHIFT.toPx() * c
-                    alpha = 1f - (1f - AXIS_HUB_REST) * c
-                },
-        ) {
-            SettingsHub(
-                settingsViewModel = settingsViewModel,
-                onBack = { navController.popBackStack() },
-                onOpen = { shown = it.name },
-            )
-        }
-        if (page != null) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val c = clip.value
-                        translationX = (1f - c) * AXIS_SHIFT.toPx()
-                        alpha = c
-                    }
-                    .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
-            ) {
-                // Its own ground (the same mesh): the hub stays faintly in sight under a page, and must not show through it.
-                com.ikko.aura.ui.components.EctoMesh(LocalEctoPalette.current, drifting = false)
-                SettingsPageContent(page, settingsViewModel, navController, onBack = ::closePage)
-            }
-        }
+/** One page of the hub, by the name it has in [SettingsPage]. */
+@Composable
+fun SettingsPageScreen(
+    navController: NavHostController,
+    pageName: String?,
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val page = SettingsPage.entries.firstOrNull { it.name == pageName }
+    if (page == null) {
+        LaunchedEffect(Unit) { navController.popBackStack() }
+        return
     }
+    SettingsPageContent(page, settingsViewModel, navController, onBack = { navController.popBackStack() })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -170,6 +120,14 @@ fun SettingsScreen(
 @Composable
 internal fun SettingsHeader(title: String, onBack: () -> Unit) {
     val u = designUnit()
+    val pageKey = rememberSettingsPageKey()
+    val titleStyle = TextStyle(
+        fontFamily = AuraFontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = designSp(84f),
+        lineHeight = designSp(96f),
+        letterSpacing = designSp(84f * -0.03f),
+    )
     Box(
         Modifier
             .fillMaxWidth()
@@ -179,14 +137,10 @@ internal fun SettingsHeader(title: String, onBack: () -> Unit) {
             title,
             // The translucent title of Home and the library: white added to what is behind, at 42 %.
             color = Color.White,
-            style = TextStyle(
-                fontFamily = AuraFontFamily,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = designSp(84f),
-                lineHeight = designSp(96f),
-                letterSpacing = designSp(84f * -0.03f),
-            ),
-            modifier = Modifier.heroRipple(fast = true, blend = androidx.compose.ui.graphics.BlendMode.Plus, baseAlpha = { 0.42f }),
+            style = titleStyle,
+            modifier = Modifier
+                .heroRipple(pageKey = pageKey, fast = true, blend = androidx.compose.ui.graphics.BlendMode.Plus, baseAlpha = { 0.42f })
+                .settingsPageTitle(title, titleStyle),
         )
     }
 }
@@ -194,15 +148,18 @@ internal fun SettingsHeader(title: String, onBack: () -> Unit) {
 @Composable
 private fun PageScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     val u = designUnit()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        SettingsHeader(title, onBack)
-        content()
-        Spacer(Modifier.height(LocalPlayerPillHeight.current + u * 60f))
+    val rise = remember { SettingsRise() }
+    androidx.compose.runtime.CompositionLocalProvider(LocalSettingsRise provides rise) {
+        Column(Modifier.fillMaxSize().settingsPageBody().verticalScroll(rememberScrollState())) {
+            SettingsHeader(title, onBack)
+            content()
+            Spacer(Modifier.height(LocalPlayerPillHeight.current + u * 60f))
+        }
     }
 }
 
 @Composable
-private fun SettingsHub(settingsViewModel: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPage) -> Unit) {
+private fun SettingsHub(settingsViewModel: SettingsViewModel, navController: NavHostController, onBack: () -> Unit) {
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val amoled by settingsViewModel.amoledBackgroundEnabled.collectAsStateWithLifecycle()
     val glass by settingsViewModel.miniPlayerGlass.collectAsStateWithLifecycle()
@@ -231,7 +188,8 @@ private fun SettingsHub(settingsViewModel: SettingsViewModel, onBack: () -> Unit
                 SettingsRow(
                     title = p.title, summary = summary, icon = icon,
                     iconTint = palette.cols[TILE_TONES[i % TILE_TONES.size]],
-                    onClick = { onOpen(p) },
+                    tripRoute = AuraDestination.SettingsPagePattern.route(p.name),
+                    onClick = { navController.navigate(AuraDestination.SettingsPagePattern.route(p.name)) },
                     trailing = { ChevronTrailing() },
                 )
             }
@@ -325,7 +283,7 @@ private fun PlaybackPage(vm: SettingsViewModel, navController: NavHostController
         SettingsRow(
             title = "Égaliseur", summary = "10 bandes, AutoEq et normalisation R128",
             icon = CupertinoIcons.Sort,
-            onClick = { navController.navigate(AuraDestination.Equalizer.route) },
+            tripRoute = AuraDestination.Equalizer.route, onClick = { navController.navigate(AuraDestination.Equalizer.route) },
             trailing = { ChevronTrailing() },
         )
     }
@@ -405,7 +363,7 @@ private fun SourcesPage(vm: SettingsViewModel, navController: NavHostController)
         }
         SettingsRow(
             title = "Priorité des sources", summary = "Glisse-les pour choisir celle qui passe en premier",
-            onClick = { navController.navigate(AuraDestination.SourceOrder.route) }, trailing = { ChevronTrailing() },
+            tripRoute = AuraDestination.SourceOrder.route, onClick = { navController.navigate(AuraDestination.SourceOrder.route) }, trailing = { ChevronTrailing() },
         )
         SettingsDivider()
         SettingsRow(
@@ -511,26 +469,26 @@ private fun RecommendationsPage(navController: NavHostController) {
             title = "Choisir mes artistes",
             summary = "Une grille d'artistes à toucher : l'app apprend ce que tu aimes",
             icon = CupertinoIcons.Person,
-            onClick = { navController.navigate(AuraDestination.TastePicker.route) }, trailing = { ChevronTrailing() },
+            tripRoute = AuraDestination.TastePicker.route, onClick = { navController.navigate(AuraDestination.TastePicker.route) }, trailing = { ChevronTrailing() },
         )
         SettingsDivider()
         SettingsRow(
             title = "Artistes que tu aimes",
             summary = if (seeds.isEmpty()) "Aucun · aide les recommandations à démarrer" else "${seeds.size} artiste${if (seeds.size > 1) "s" else ""} · photos et retrait",
-            onClick = { navController.navigate(AuraDestination.LikedArtists.route) }, trailing = { ChevronTrailing() },
+            tripRoute = AuraDestination.LikedArtists.route, onClick = { navController.navigate(AuraDestination.LikedArtists.route) }, trailing = { ChevronTrailing() },
         )
         SettingsDivider()
         SettingsRow(
             title = "Artistes bloqués",
             summary = if (blocked.isEmpty()) "Aucun · bloque un artiste depuis une playlist recommandée"
             else "${blocked.size} artiste${if (blocked.size > 1) "s" else ""}, exclus des sept playlists",
-            onClick = { navController.navigate(AuraDestination.BlockedArtists.route) }, trailing = { ChevronTrailing() },
+            tripRoute = AuraDestination.BlockedArtists.route, onClick = { navController.navigate(AuraDestination.BlockedArtists.route) }, trailing = { ChevronTrailing() },
         )
         SettingsDivider()
         SettingsRow(
             title = "Ton profil",
             summary = "Ce que l'app a appris de tes goûts, et pourquoi elle propose ce qu'elle propose",
-            onClick = { navController.navigate(AuraDestination.TasteProfile.route) }, trailing = { ChevronTrailing() },
+            tripRoute = AuraDestination.TasteProfile.route, onClick = { navController.navigate(AuraDestination.TasteProfile.route) }, trailing = { ChevronTrailing() },
         )
     }
     SettingsGroup(title = "Données") {

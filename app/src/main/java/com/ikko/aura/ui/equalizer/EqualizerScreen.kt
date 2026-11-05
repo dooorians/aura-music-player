@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.equalizer
 
+import com.ikko.aura.ui.screens.settings.settingsPageBody
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -85,7 +86,7 @@ fun EqualizerScreen(
     var dialog by rememberSaveable { mutableStateOf<EqDialog?>(null) }
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().settingsPageBody().verticalScroll(rememberScrollState())) {
             SettingsHeader("Égaliseur", onBack = { navController.popBackStack() })
 
             SettingsGroup {

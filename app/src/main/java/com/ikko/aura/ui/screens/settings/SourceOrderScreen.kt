@@ -64,7 +64,7 @@ fun SourceOrderScreen(viewModel: SourceOrderViewModel = hiltViewModel()) {
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().settingsPageBody(),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item(key = "source_order_header", contentType = "header") {
@@ -74,6 +74,9 @@ fun SourceOrderScreen(viewModel: SourceOrderViewModel = hiltViewModel()) {
                         style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.Bold,
                         color = AuraColors.TextPrimary,
+                        modifier = Modifier.settingsPageTitle(
+                            "Priorité des sources", MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold), AuraColors.TextPrimary,
+                        ),
                     )
                     Text(
                         text = "Glisse une source par sa poignée : plus elle est haut, plus elle passe en premier dans la recherche.",

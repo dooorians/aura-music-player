@@ -367,6 +367,9 @@ class HeroState {
             route.startsWith("ytm_artist/") || route.startsWith("remote_artist/") -> "artist:"
             route == "lyrics" -> "lyrics"
             route == "queue" -> "queue"
+            // The settings' pages: the hub, the pages it opens, the pages those open. Matched whole, never by kind.
+            com.ikko.aura.navigation.isSettingsPageRoute(route) ->
+                com.ikko.aura.navigation.settingsTripKey(if (route.startsWith("settings/")) "settings/" + (argStr("page") ?: "") else route)
             else -> return false
         }
         val mine = key ?: return false
