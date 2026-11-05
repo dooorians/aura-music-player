@@ -1,5 +1,6 @@
 package com.ikko.aura.viewmodel
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -76,7 +77,7 @@ class LibraryWaitTest {
         val early = kotlinx.coroutines.withTimeoutOrNull(100) { awaitLibrary(scanned) { listOf("123") } }
         assertEquals(null, early)
 
-        val later = kotlinx.coroutines.async { awaitLibrary(scanned) { listOf("123") } }
+        val later = async { awaitLibrary(scanned) { listOf("123") } }
         scanned.value = true
         assertEquals(listOf("123"), later.await())
     }
