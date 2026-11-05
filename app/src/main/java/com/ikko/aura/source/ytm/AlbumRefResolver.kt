@@ -72,9 +72,18 @@ class AlbumRefResolver internal constructor(
                 // The same title credited otherwise: "Lady Gaga" for what the source lists as "Tony Bennett & Lady Gaga", or the
                 // reverse. Only when the credits share a whole name word, so "Greatest Hits" by someone else stays out.
                 ?: found.firstOrNull { a -> !isUnwanted(a.title) && norm(a.title) == wantTitle && sharesNameWord(a.artist, artist, ::norm) }
+                // The kind of release written after the name ("Honey (Remix EP)" for what the source lists as "Honey (Remix)"): a
+                // label, not part of the name. Only for the same artist, and only that word at the end, so an edition stays another record.
+                ?: found.filter { a -> !isUnwanted(a.title) && artistMatches(a) }.firstOrNull { a -> withoutReleaseKind(norm(a.title)) == withoutReleaseKind(wantTitle) }
 
         val exact = queries.firstNotNullOfOrNull { q -> exactIn(searchFunc(q)) }
         exact?.id?.also { foundRefs[cacheKey] = it }
+    }
+
+    /** A normalised title without "ep" or "single" as its last word, when something else stands before it. */
+    private fun withoutReleaseKind(title: String): String {
+        val words = title.split(' ').filter { it.isNotEmpty() }
+        return if (words.size > 1 && words.last() in RELEASE_KINDS) words.dropLast(1).joinToString(" ") else title
     }
 
     private fun unescape(text: String): String {
@@ -89,6 +98,7 @@ class AlbumRefResolver internal constructor(
     }
 
     private companion object {
+        val RELEASE_KINDS = setOf("ep", "single")
         val CREDIT_WORDS = setOf("feat", "ft", "featuring", "and", "with", "the", "various", "artists", "topic", "vevo")
     }
 }
