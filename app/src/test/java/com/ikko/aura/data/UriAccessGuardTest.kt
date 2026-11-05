@@ -1,5 +1,6 @@
 package com.ikko.aura.data
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,5 +35,28 @@ class UriAccessGuardTest {
     @Test
     fun `the scheme is matched whatever its case`() {
         assertFalse(UriAccessGuard.isStillReadable("CONTENT://provider/doc/1", emptySet()))
+    }
+
+    @Test
+    fun `a grant no picture refers to any more is given back`() {
+        val replaced = "content://com.android.providers.media.documents/document/image%3A7"
+        assertEquals(setOf(replaced), UriAccessGuard.orphanedGrants(setOf(photo, replaced), setOf(photo)))
+    }
+
+    @Test
+    fun `every grant in use is kept`() {
+        val cover = "content://com.android.externalstorage.documents/document/primary%3Acover.png"
+        assertEquals(emptySet<String>(), UriAccessGuard.orphanedGrants(setOf(photo, cover), setOf(photo, cover)))
+    }
+
+    @Test
+    fun `a directory grant is never given back`() {
+        val tree = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+        assertEquals(emptySet<String>(), UriAccessGuard.orphanedGrants(setOf(tree), emptySet()))
+    }
+
+    @Test
+    fun `nothing referenced and nothing held is nothing to release`() {
+        assertEquals(emptySet<String>(), UriAccessGuard.orphanedGrants(emptySet(), setOf(photo)))
     }
 }

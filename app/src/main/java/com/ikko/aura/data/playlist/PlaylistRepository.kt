@@ -199,6 +199,8 @@ class PlaylistRepository @Inject constructor(
     suspend fun deletePlaylist(playlistId: Long) {
         if (playlistId == FAVORITES_PLAYLIST_ID) return
         playlistDao.deletePlaylist(playlistId)
+        // Its cover went on being listed, so its grant was never given back (see UriAccessGuard.releaseOrphanedGrants).
+        runCatching { settingsStore.setPlaylistCustomArtwork(playlistId, null) }
     }
 
     suspend fun renamePlaylist(playlistId: Long, name: String) {
