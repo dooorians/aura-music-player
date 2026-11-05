@@ -658,8 +658,11 @@ private fun AlbumHeader(
                 fontFamily = com.ikko.aura.ui.theme.AuraFontFamily, fontWeight = FontWeight.Bold,
                 fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f),
             )
+            // An album of a source: the cover the trip carried stays, with the key it was drawn under while the page loaded. Switching
+            // to the first song's own picture, under that song's key, drew the placeholder in between (normal, grey, normal).
+            val keepTripCover = uiState.coverUri != null && uiState.tracks.firstOrNull()?.let(com.ikko.aura.source.ytm.YtmLibrary::isStreamed) == true
             AlbumArt(
-                uri = uiState.tracks.firstOrNull()?.artworkUri ?: uiState.coverUri,
+                uri = if (keepTripCover) uiState.coverUri else uiState.tracks.firstOrNull()?.artworkUri ?: uiState.coverUri,
                 contentDescription = uiState.title,
                 shape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover,
                 modifier = Modifier
@@ -669,7 +672,7 @@ private fun AlbumHeader(
                     .coverArrival(heroKey)
                     .size(u * 240f),
                 targetSizeDp = u * 240f,
-                cacheKey = uiState.tracks.firstOrNull()?.albumId?.toString(),
+                cacheKey = if (keepTripCover) null else uiState.tracks.firstOrNull()?.albumId?.toString(),
             )
             Spacer(Modifier.width(u * 40f))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(u * 6f)) {
