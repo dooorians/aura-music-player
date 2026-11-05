@@ -301,6 +301,8 @@ internal fun LibraryPageHeader(
     onProfile: (() -> Unit)? = null,
     onShuffle: () -> Unit,
     onCreate: () -> Unit,
+    /** The playlist assistant, offered beside "+" on the playlists page. */
+    onAi: (() -> Unit)? = null,
     visibleProgress: Float = 1f,
 ) {
     val u = designUnit()
@@ -351,6 +353,20 @@ internal fun LibraryPageHeader(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(CupertinoIcons.Search, contentDescription = "Rechercher", tint = Color.White, modifier = Modifier.size(u * 44f))
+            }
+
+            if (filter == LibraryFilter.PLAYLISTS && onAi != null) {
+                // The playlist assistant: a playlist composed from a sentence, on the device.
+                Box(
+                    Modifier
+                        .size(u * 96f)
+                        .glassSurface(CircleShape)
+                        .clip(CircleShape)
+                        .clickable(onClick = onAi),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(CupertinoIcons.AutoAwesome, contentDescription = "Composer une playlist avec l'IA", tint = Color.White, modifier = Modifier.size(u * 44f))
+                }
             }
 
             if (filter == LibraryFilter.PLAYLISTS) {

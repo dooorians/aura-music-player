@@ -296,6 +296,7 @@ fun LibraryScreen(
     var closing by remember { mutableStateOf(false) }
     val containerOrigin = remember { arrayOf(Offset.Zero) }
     var creatingPlaylist by remember { mutableStateOf(false) }
+    var composingWithAi by remember { mutableStateOf(false) }
     fun ms(v: Int) = if (reduceMotion) (v * 0.2f).toInt().coerceAtLeast(1) else v
 
     // Where each row of the menu is, for a page asked for from elsewhere (Home's "Tout voir") to open from its row.
@@ -547,6 +548,7 @@ fun LibraryScreen(
                                 }
                             },
                             onCreate = { creatingPlaylist = true },
+                            onAi = { composingWithAi = true },
                             visibleProgress = subMenuHeaderVisible.value,
                         )
                     }
@@ -554,6 +556,13 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+    if (composingWithAi) {
+        com.ikko.aura.ui.playlist.ai.AiPlaylistSheet(
+            playerViewModel = playerViewModel,
+            onDismiss = { composingWithAi = false },
+            onOpenPlaylist = { id -> navController.navigate(AuraDestination.PlaylistPattern.route(id.toString())) },
+        )
     }
     if (creatingPlaylist) {
         com.ikko.aura.ui.components.CreatePlaylistDialog(
