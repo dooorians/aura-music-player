@@ -594,6 +594,13 @@ private val HERO_PAGE_PREFIXES = listOf(
 private fun isArtistRoute(route: String?): Boolean =
     route != null && (route.startsWith("artist/") || route.startsWith("ytm_artist/") || route.startsWith("remote_artist/"))
 
+/** An album page and an artist's, in either order: the two pages that open each other. */
+private fun isAlbumArtistPair(a: String?, b: String?): Boolean =
+    (isAlbumKind(a) && isArtistRoute(b)) || (isArtistRoute(a) && isAlbumKind(b))
+
+/** How long the fade of a back between an album and an artist's page lasts: the time an album page takes to leave. */
+private const val ALBUM_ARTIST_BACK_FADE_MS = 140
+
 private fun isAlbumRoute(entry: NavBackStackEntry): Boolean = isHeroPageRoute(entry.destination.route)
 
 private fun isAlbumKind(route: String?): Boolean =
@@ -1169,6 +1176,10 @@ fun MainLayout() {
                     } else base
                 },
                 popEnterTransition = {
+                    // Back between an album and an artist's page: the page under is simply there, the one leaving fades over it.
+                    if (isAlbumArtistPair(initialState.destination.route, targetState.destination.route)) {
+                        return@NavHost EnterTransition.None
+                    }
                     if (isSheet(targetState)) { sheetFlags.opening = false; sheetFlags.away = false }
                     val base: EnterTransition = when {
                         isSheet(initialState) -> AuraMotion.sheetUnderEnter
@@ -1197,6 +1208,12 @@ fun MainLayout() {
                     } else base
                 },
                 popExitTransition = {
+                    // Back between an album and an artist's page: no trip home, a plain fade as long as an album page takes to
+                    // leave (140 ms). The trip that brought here is ended where it stands, so nothing flies back.
+                    if (isAlbumArtistPair(initialState.destination.route, targetState.destination.route)) {
+                        if (hero.canClose || hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing) hero.reset()
+                        return@NavHost fadeOut(tween(ALBUM_ARTIST_BACK_FADE_MS, easing = LinearEasing))
+                    }
                     if (isSheet(initialState)) sheetFlags.closing = !isLyricsOrAlbum(targetState)
                     // An album page opened from another album's (the whole album, from the menu of what is downloaded of it) has no
                     // cover to land on: the trip belongs to the page under it, not to this one.
