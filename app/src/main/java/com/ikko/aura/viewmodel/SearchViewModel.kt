@@ -104,6 +104,7 @@ class SearchViewModel @Inject constructor(
     private val ytmLibrary: YtmLibrary,
     private val remoteSources: com.ikko.aura.source.remote.RemoteSources,
     private val jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient,
+    private val searchIndex: com.ikko.aura.catalog.TrackSearchIndex,
     order: com.ikko.aura.source.SourceOrder,
 ) : ViewModel() {
 
@@ -314,24 +315,23 @@ class SearchViewModel @Inject constructor(
         if (q.isBlank()) {
             SearchUiState(query = q, filter = f)
         } else {
-            val needle = q.trim()
-            val filteredTracks = if (f == SearchFilter.ALL || f == SearchFilter.TRACKS) {
-                tracks.asSequence().filter { it.title.contains(needle, ignoreCase = true) || it.artist.contains(needle, ignoreCase = true) }.take(30).toList()
-            } else emptyList()
-            
-            val filteredAlbums = if (f == SearchFilter.ALL || f == SearchFilter.ALBUMS) {
-                albums.asSequence().filter { it.title.contains(needle, ignoreCase = true) || it.artist.contains(needle, ignoreCase = true) }.take(15).toList()
-            } else emptyList()
-            
-            val filteredArtists = if (f == SearchFilter.ALL || f == SearchFilter.ARTISTS) {
-                artists.asSequence().filter { it.name.contains(needle, ignoreCase = true) }.take(15).toList()
-            } else emptyList()
+            val limits = com.ikko.aura.catalog.LocalSearch.Limits(
+                tracks = if (f == SearchFilter.ALL || f == SearchFilter.TRACKS) 30 else 0,
+                albums = if (f == SearchFilter.ALL || f == SearchFilter.ALBUMS) 15 else 0,
+                artists = if (f == SearchFilter.ALL || f == SearchFilter.ARTISTS) 15 else 0,
+            )
+            // The FTS index first: word prefixes, case and accents aside. A part of a word ("eatles") is not in it, so
+            // when it finds nothing — or cannot answer — the lists are scanned as before.
+            val indexed = searchIndex.hits(q)
+                ?.let { com.ikko.aura.catalog.LocalSearch.fromHits(q, it, tracks, albums, artists, limits) }
+                ?.takeUnless { it.isEmpty }
+            val found = indexed ?: com.ikko.aura.catalog.LocalSearch.scan(q, tracks, albums, artists, limits)
 
             SearchUiState(
                 query = q,
-                tracks = filteredTracks,
-                albums = filteredAlbums,
-                artists = filteredArtists,
+                tracks = found.tracks,
+                albums = found.albums,
+                artists = found.artists,
                 filter = f
             )
         }
