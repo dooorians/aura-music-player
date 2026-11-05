@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +50,17 @@ fun TrackListItem(
     isPlayingTrack: Boolean = false,
 ) {
     val accent = rememberPlayerAccent()
+    // Made once per screen size, not on every composition of a row: a fling composes new rows on most of its frames.
+    val u = designUnit()
+    val coverShape = remember(u) { androidx.compose.foundation.shape.RoundedCornerShape(u * 32f) }
+    val titleSize = designSp(40f)
+    val titleLine = designSp(48f)
+    val subtitleSize = designSp(32f)
+    val subtitleLine = designSp(40f)
+    val titleStyle = remember(titleSize, titleLine) { ROW_TITLE.copy(fontSize = titleSize, lineHeight = titleLine) }
+    val subtitleStyle = remember(subtitleSize, subtitleLine) {
+        ROW_TITLE.copy(fontSize = subtitleSize, lineHeight = subtitleLine, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -72,7 +84,7 @@ fun TrackListItem(
         AlbumArt(
             uri = track.artworkUri,
             contentDescription = track.album,
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(designUnit() * 32f),
+            shape = coverShape,
             modifier = Modifier.size(artSize),
             targetSizeDp = artSize,
             cacheKey = track.albumId.toString(),
@@ -81,7 +93,7 @@ fun TrackListItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                style = ROW_TITLE.copy(fontSize = designSp(40f), lineHeight = designSp(48f)),
+                style = titleStyle,
                 color = if (isPlayingTrack) accent else Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -89,8 +101,7 @@ fun TrackListItem(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CoverText(
                     text = subtitle,
-                    style = ROW_TITLE.copy(fontSize = designSp(32f), lineHeight = designSp(40f),
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    style = subtitleStyle,
                     alpha = 0.78f,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

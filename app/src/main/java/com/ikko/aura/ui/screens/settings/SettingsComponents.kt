@@ -92,7 +92,7 @@ internal fun SettingsGroup(
         } else {
             Spacer(Modifier.height(u * 24f))
         }
-        val shape = RoundedCornerShape(u * 38f)
+        val shape = remember(u) { RoundedCornerShape(u * 38f) }
         Column(Modifier.fillMaxWidth().darkGlass(shape, u * 1.5f).clip(shape), content = content)
         if (footer != null) {
             Text(
@@ -138,7 +138,7 @@ internal fun SettingsRow(
     ) {
         if (icon != null) {
             Box(
-                Modifier.size(u * 80f).clip(RoundedCornerShape(u * 24f)).background(iconTint ?: accent),
+                Modifier.size(u * 80f).clip(remember(u) { RoundedCornerShape(u * 24f) }).background(iconTint ?: accent),
                 contentAlignment = Alignment.Center,
             ) { Icon(icon, null, tint = Color.White, modifier = Modifier.size(u * 44f)) }
             Spacer(Modifier.width(u * 26f))
@@ -257,7 +257,7 @@ internal fun PreviewOption(
     val u = designUnit()
     val accent = settingsAccent()
     val ring by animateColorAsState(if (selected) accent else Color.White.copy(alpha = 0.08f), tween(180), label = "preview-ring")
-    val shape = RoundedCornerShape(u * 28f)
+    val shape = remember(u) { RoundedCornerShape(u * 28f) }
     Column(
         modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.RadioButton, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -476,7 +476,7 @@ internal fun AutomixDiagram(enabled: Boolean) {
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(2.4f)
-                .clip(RoundedCornerShape(u * 28f))
+                .clip(remember(u) { RoundedCornerShape(u * 28f) })
                 .background(Color.White.copy(alpha = 0.06f))
                 .padding(u * 24f),
         ) {
