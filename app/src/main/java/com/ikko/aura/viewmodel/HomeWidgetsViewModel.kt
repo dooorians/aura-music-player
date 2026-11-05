@@ -206,6 +206,7 @@ class HomeWidgetsViewModel @Inject constructor(
                 }.awaitAll().flatten()
             }
             if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
+            fetchTags(batch.map { it.name })
         }
         // The artists close to the ones they like most.
         val seeds = (chosen + playedProfiles).distinctBy { it.id }.sortedByDescending { it.nbFan }.take(RELATED_FROM)
@@ -219,7 +220,10 @@ class HomeWidgetsViewModel @Inject constructor(
                 batch.map { p -> async { gate.withPermit { runCatching { deezer.artistAlbumsWithCovers(p.id, p.name, limit = RELATED_ALBUMS) }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
             }
             if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
+            fetchTags(batch.map { it.name })
         }
+        // The artists of the genres' charts: they fill a row of a style, so each is placed by its own tags first.
+        fetchTags(chartAlbums.value.values.flatten().map { it.artist })
     }
 
     /** An explicit refresh: another set of rows. */
@@ -245,6 +249,24 @@ class HomeWidgetsViewModel @Inject constructor(
 
     /** Artist key → the tags Last.fm gives it, for the artists the sources offer: the rows of themes are drawn from them. */
     private val externalTags = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+
+    /**
+     * Fetches, a few at a time, the tags of artists whose albums Home may offer and whose tags are not known yet: without them an album cannot be
+     * placed in a row of a style (and is left out of it, rather than put where it does not belong).
+     */
+    private suspend fun fetchTags(names: Collection<String>) {
+        val missing = names.filter { it.isNotBlank() }.distinctBy { com.ikko.aura.reco.ArtistNames.key(it) }
+            .filter { externalTags.value[com.ikko.aura.reco.ArtistNames.key(it)].isNullOrEmpty() }
+            .take(TAGS_PER_ROUND)
+        if (missing.isEmpty()) return
+        val gate = kotlinx.coroutines.sync.Semaphore(8)
+        kotlinx.coroutines.coroutineScope {
+            missing.chunked(20).forEach { batch ->
+                val found = batch.map { n -> async { gate.withPermit { com.ikko.aura.reco.ArtistNames.key(n) to runCatching { enricher.tagsOf(n) }.getOrDefault(emptySet()) } } }.awaitAll()
+                externalTags.value = externalTags.value + found
+            }
+        }
+    }
 
     init {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -849,6 +871,9 @@ private const val STOCK_BATCH = 8
 
 /** The least number of measured songs for an album to count as slow. */
 private const val SLOW_MIN_SONGS = 3
+
+/** The artists whose tags are asked for in one go. */
+private const val TAGS_PER_ROUND = 160
 
 /** MusicBrainz's country codes as the nationality tag Last.fm uses for the same artists. */
 private val NATIONALITY = mapOf(

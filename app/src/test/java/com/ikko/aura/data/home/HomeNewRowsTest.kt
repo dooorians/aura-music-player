@@ -119,4 +119,54 @@ class HomeNewRowsTest {
         rows.forEach { r -> assertEquals("Au ralenti", r.title); assertTrue(r.albums.all { it.title.startsWith("Slow") }) }
         assertTrue(seen { ctx(it, emptyList(), slow = slow.take(2)) }.none { it.id == "tempo:slow" })
     }
+
+    // --- a row holds what its title says ---
+
+    private fun ctxWith(seed: Long, external: List<SectionAlbum>, tags: Map<String, Set<String>>, charts: Map<Int, List<SectionAlbum>> = emptyMap()) =
+        RotationContext(
+            base = emptyList(), loop = emptyList(), listens = emptyList(), external = external, artistTags = tags, recoItems = emptyMap(),
+            nowMs = now, seed = seed, zone = zone, chartAlbums = charts,
+        )
+
+    private fun rockRows(external: List<SectionAlbum>, tags: Map<String, Set<String>>, charts: Map<Int, List<SectionAlbum>> = emptyMap()) =
+        (1L..80L).flatMap { HomeRotation.arrange(ctxWith(it, external, tags, charts)) }.filter { it.id == "tag:rock" }
+
+    private val rockers = (1..5).map { "Rocker$it" }
+    private fun rockTags() = rockers.associate { ArtistNames.key(it) to linkedSetOf("rock", "alternative rock", "indie") }
+
+    @Test fun `a pop star whose tags only end in rock is not in the rock row`() {
+        val katy = "Katy Perry"
+        val external = (rockers + katy).mapIndexed { i, a -> album("Disc $i", a) }
+        // Last.fm lists her pop first; "rock" comes fifth.
+        val tags = rockTags() + (ArtistNames.key(katy) to linkedSetOf("pop", "female vocalists", "dance", "pop rock", "rock"))
+        val rows = rockRows(external, tags)
+        assertTrue("no rock row in 80 draws", rows.isNotEmpty())
+        rows.forEach { r -> assertTrue(r.albums.none { it.artist == katy }) }
+    }
+
+    @Test fun `an artist with no tags known is left out of a row of a style rather than put in it`() {
+        val external = (rockers + "Mystery").mapIndexed { i, a -> album("Disc $i", a) }
+        val rows = rockRows(external, rockTags())
+        assertTrue(rows.isNotEmpty())
+        rows.forEach { r -> assertTrue(r.albums.none { it.artist == "Mystery" }) }
+    }
+
+    @Test fun `the genre's chart only completes a row with artists whose own tags agree`() {
+        // Too few tagged rock artists for a row: the chart makes up the rest, and only the ones that are rock.
+        val tags = (1..2).associate { ArtistNames.key("Rocker$it") to linkedSetOf("rock") } +
+            (ArtistNames.key("ChartRock") to linkedSetOf("hard rock", "rock")) +
+            (ArtistNames.key("ChartPop") to linkedSetOf("pop", "dance", "female vocalists", "rock"))
+        val external = (1..2).map { album("Disc $it", "Rocker$it") }
+        val chart = mapOf(152 to listOf(album("Chart A", "ChartPop"), album("Chart B", "ChartRock"), album("Chart C", "NoTags")))
+        val rows = rockRows(external, tags, chart)
+        assertTrue("the chart's rock artist completes the row", rows.any { r -> r.albums.any { it.artist == "ChartRock" } })
+        rows.forEach { r -> assertTrue(r.albums.none { it.artist == "ChartPop" || it.artist == "NoTags" }) }
+    }
+
+    @Test fun `the family of a name is the one its words say, and a pop rock record is pop`() {
+        assertEquals("pop", com.ikko.aura.reco.GenreNormalizer.family("pop rock"))
+        assertEquals("rock", com.ikko.aura.reco.GenreNormalizer.family("alternative rock"))
+        assertEquals("rock", com.ikko.aura.reco.GenreNormalizer.family("indie"))
+        assertEquals("hip-hop", com.ikko.aura.reco.GenreNormalizer.family("french rap").let { if (it == "chanson") "hip-hop" else it })
+    }
 }

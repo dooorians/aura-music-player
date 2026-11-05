@@ -226,7 +226,7 @@ object HomeRotation {
     private val LIVE_TITLE = Regex("(?i)(?:[(\\[]\\s*live\\b|\\blive (?:at|in|from|on|à|au|aux|session|sessions|and|\\d{4})\\b|\\blive[!.]?\\s*$|[-–:]\\s*live\\b|unplugged|en concert|in concert|en direct|\\bconcert\\b)")
     fun isLiveAlbum(title: String): Boolean = LIVE_TITLE.containsMatchIn(title)
 
-    private class Family(val id: String, val titles: List<String>, val subtitle: String? = null, val tags: List<String>, val needs: List<String> = emptyList(), val not: List<String> = emptyList())
+    private class Family(val id: String, val titles: List<String>, val subtitle: String? = null, val tags: List<String>, val needs: List<String> = emptyList(), val not: List<String> = emptyList(), val allowed: Set<String>? = null)
 
     private val FAMILIES = listOf(
         Family(
@@ -243,6 +243,7 @@ object HomeRotation {
             not = listOf("death metal", "black metal", "thrash metal", "k-pop", "kpop", "reggaeton"),
         ),
         Family(
+            allowed = setOf("hip-hop"),
             id = "rap_fr",
             titles = listOf("Rap francophone"),
             tags = listOf("french rap", "french hip hop", "french hip-hop", "rap français", "rap francais", "rap fr", "rap", "hip-hop", "hip hop", "cloud rap", "trap"),
@@ -250,6 +251,7 @@ object HomeRotation {
             not = listOf("k-pop", "kpop", "latin", "reggaeton", "rock", "metal", "country"),
         ),
         Family(
+            allowed = setOf("pop", "hip-hop"),
             id = "kpop",
             titles = listOf("K-pop festive", "Pop coréenne"),
             tags = listOf("k-pop", "kpop", "korean pop"),
@@ -281,12 +283,14 @@ object HomeRotation {
             not = listOf("pop", "rnb", "r&b", "soul", "alternative rnb", "alternative r&b", "contemporary r&b", "hip-hop", "hip hop", "rap", "trap", "k-pop", "kpop", "korean", "dance-pop", "dance pop", "dance", "electropop", "synthpop", "electronic", "edm", "house", "hyperpop", "reggaeton", "latin", "latin pop", "boy band", "girl group", "metal", "hard rock"),
         ),
         Family(
+            allowed = setOf("rnb"),
             id = "rnb",
             titles = listOf("R&B contemporain", "R&B & Soul"),
             tags = listOf("rnb", "r&b", "contemporary r&b", "alternative rnb", "alternative r&b", "neo-soul", "neo soul", "soul"),
             not = listOf("k-pop", "kpop", "rock", "indie rock", "metal", "punk", "country", "edm", "techno"),
         ),
         Family(
+            allowed = setOf("latin", "pop", "hip-hop"),
             id = "latin",
             titles = listOf("Musique latine"),
             tags = listOf("reggaeton", "latin pop", "urbano latino", "trap latino", "latin trap", "bachata", "salsa", "cumbia", "merengue", "dembow", "corridos tumbados", "regional mexicano", "latin"),
@@ -298,13 +302,13 @@ object HomeRotation {
     // The rows of genres. Not listed one by one: the great genres are a catalogue, and the styles the listener's artists carry (a Last.fm
     // tag with a weight) become rows of their own, so that "dream pop" or "city pop" appear without anyone having thought of them.
 
-    private class Genre(val id: String, val title: String, val tags: List<String>, val not: List<String>, val favored: Boolean, val chart: Int? = null)
+    private class Genre(val id: String, val title: String, val tags: List<String>, val not: List<String>, val favored: Boolean, val chart: Int? = null, val allowed: Set<String>? = null)
 
     private class Popular(val id: String, val title: String, val tags: List<String>, val not: List<String> = emptyList(), val chart: Int? = null)
 
     private val POPULAR = listOf(
         Popular("pop", "Pop", listOf("pop"), listOf("k-pop", "hip-hop", "r&b", "rock", "metal", "latin", "reggaeton", "j-pop", "hyperpop", "country", "jazz"), chart = 132),
-        Popular("rock", "Rock", listOf("rock", "classic rock", "hard rock", "alternative rock", "pop rock", "garage rock", "glam rock"), listOf("k-pop", "hip-hop", "r&b", "electronic", "edm", "reggaeton", "latin", "hyperpop", "j-pop"), chart = 152),
+        Popular("rock", "Rock", listOf("rock", "classic rock", "hard rock", "alternative rock", "garage rock", "glam rock"), listOf("k-pop", "hip-hop", "r&b", "electronic", "edm", "reggaeton", "latin", "hyperpop", "j-pop"), chart = 152),
         Popular("hiphop", "Hip-hop & rap", listOf("hip-hop", "trap", "cloud rap", "boom bap", "drill", "southern hip hop", "east coast hip hop"), listOf("french hip hop", "french hip-hop", "french rap", "rap français", "rap francais", "k-pop", "k-hip-hop"), chart = 116),
         Popular("electro", "Électro", listOf("electronic", "electronica", "synthwave", "electro", "idm", "future bass", "downtempo"), listOf("k-pop", "hyperpop", "metal"), chart = 106),
         Popular("dance", "House & dance", listOf("house", "deep house", "tech house", "techno", "trance", "drum and bass", "dubstep", "uk garage", "club", "eurodance"), listOf("k-pop", "metal"), chart = 113),
@@ -334,7 +338,7 @@ object HomeRotation {
         val taste = c.tasteTags.filterValues { it > 0.0 }.entries.sortedByDescending { it.value }
         val tasteKeys = taste.map { it.key.lowercase() }.toHashSet()
         val out = ArrayList<Genre>()
-        for (p in POPULAR) out += Genre(p.id, p.title, p.tags, p.not, favored = p.tags.any { it in tasteKeys }, chart = p.chart)
+        for (p in POPULAR) out += Genre(p.id, p.title, p.tags, p.not, favored = p.tags.any { it in tasteKeys }, chart = p.chart, allowed = FAMILIES_OF[p.id])
         for ((raw, _) in taste) {
             val tag = raw.trim().lowercase()
             if (tag.isEmpty() || YEAR_TAG.matches(tag) || com.ikko.aura.reco.GenreNormalizer.isGeneric(tag) || isUnwantedStyle(listOf(tag))) continue
@@ -368,6 +372,28 @@ object HomeRotation {
     }
 
     private fun matchesGenre(g: Genre, tags: Set<String>): Boolean = fit(tags, g.tags, g.not) > 0.0
+
+    /** The broad families (see [com.ikko.aura.reco.GenreNormalizer.family]) a great genre's row accepts: what its artists are, whatever the tags a source gave an album. */
+    private val FAMILIES_OF = mapOf(
+        "pop" to setOf("pop"), "rock" to setOf("rock", "punk", "metal"), "hiphop" to setOf("hip-hop"), "electro" to setOf("electronic"),
+        "dance" to setOf("electronic"), "funk" to setOf("rnb"), "metal" to setOf("metal"), "punk" to setOf("punk"), "reggae" to setOf("reggae"),
+        "folk" to setOf("folk"), "classical" to setOf("classical", "soundtrack"), "blues" to setOf("blues"), "chill" to setOf("electronic"),
+    )
+
+    /** How many of an artist's first tags say what they are; the rest is what is left of whatever else they are. */
+    private const val LEADING_TAGS = 3
+
+    /**
+     * Whether an artist belongs in a row of [allowed] families: one of their first [LEADING_TAGS] tags is of one of them. An artist with no tags known
+     * cannot be placed, so is not: a row of "Rock" with Katy Perry in it (pop, female vocalists, dance first) is worse than a row without her. [unknownOk] is
+     * for when no artist has any tag (Last.fm cannot be asked): the genre's chart then stands as Deezer made it, or Home would have no row of a style at all.
+     * No restriction for a row that has no family (a style of its own, a country, a mood).
+     */
+    private fun belongs(allowed: Set<String>?, tags: Set<String>, unknownOk: Boolean = false): Boolean {
+        if (allowed == null) return true
+        if (tags.isEmpty()) return unknownOk
+        return tags.take(LEADING_TAGS).any { com.ikko.aura.reco.GenreNormalizer.family(it) in allowed }
+    }
 
     /** How much of the listener's own taste an album carries: an artist they own or play first, then what the engine found for the artists they play, and the loosest last. */
     private fun tie(a: SectionAlbum, c: RotationContext): Double {
@@ -457,7 +483,7 @@ object HomeRotation {
         // The themes: albums of the sources whose artist's sound the tags place in them.
         for (f in FAMILIES) {
             list += Candidate("family:${f.id}", "family:${f.id}", "style") { used ->
-                val albums = c.external.filter { it.album == null && matches(f, tagsOfAlbum(it, c)) }
+                val albums = c.external.filter { it.album == null && tagsOfAlbum(it, c).let { tags -> matches(f, tags) && belongs(f.allowed, tags) } }
                 val title = f.titles[(hash(c.seed, f.id) % f.titles.size).toInt()]
                 row(
                     "family:${f.id}", title, ranked(albums, c, f.id) { fit(tagsOfAlbum(it, c), f.tags, f.not) }, used, c.seed, f.id,
@@ -468,9 +494,10 @@ object HomeRotation {
         // The rows of genres: the great ones, and the styles that the listener's own artists carry, all made by the tags.
         for (g in genres(c)) {
             list += Candidate("tag:${g.id}", "tag:${g.id}", "genre", favored = g.favored) { used ->
-                val tagged = c.external.filter { it.album == null && matchesGenre(g, tagsOfAlbum(it, c)) }
+                val tagged = c.external.filter { it.album == null && tagsOfAlbum(it, c).let { tags -> matchesGenre(g, tags) && belongs(g.allowed, tags) } }
                 // The albums of the listener's own artists in that style first; the genre's chart makes up the row when there are too few.
-                val charted = g.chart?.let { c.chartAlbums[it] }.orEmpty()
+                // The genre's chart is Deezer's: its albums are of that genre by Deezer's say, which puts a pop record in the rock chart. Only the artists whose own tags agree stay.
+                val charted = g.chart?.let { c.chartAlbums[it] }.orEmpty().filter { belongs(g.allowed, tagsOfAlbum(it, c), unknownOk = c.artistTags.isEmpty()) }
                 val own = ranked(tagged, c, "tag:${g.id}") { fit(tagsOfAlbum(it, c), g.tags, g.not) }
                 val chart = charted.sortedBy { hash(c.seed, "tag:${g.id}" + it.key) }
                 row("tag:${g.id}", g.title, own + chart, used, c.seed, "tag:${g.id}", shuffle = false)
