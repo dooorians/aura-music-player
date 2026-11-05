@@ -110,4 +110,28 @@ class AlbumRefResolverTest {
         assertEquals("only_id", resolver.find("Only You", "Kaskade &amp;amp; Tiësto"))
         assertEquals(true, asked.none { it.contains("amp") })
     }
+
+    @Test
+    fun theKindOfReleaseWrittenAfterTheNameDoesNotHideTheAlbum() = runBlocking {
+        val resolver = AlbumRefResolver { _ ->
+            listOf(
+                YtmAlbumRef("mura_id", "Honey (Mura Masa Wonder Remix)", "Troye Sivan", null),
+                YtmAlbumRef("remix_id", "Honey (Remix)", "Troye Sivan", null),
+            )
+        }
+        // Home calls it "Honey (Remix EP)"; the source lists "Honey (Remix)". Same artist, same name, "EP" is a label.
+        assertEquals("remix_id", resolver.find("Honey (Remix EP)", "Troye Sivan"))
+    }
+
+    @Test
+    fun theKindOfReleaseDoesNotLetAnotherArtistsAlbumIn() = runBlocking {
+        val resolver = AlbumRefResolver { _ -> listOf(YtmAlbumRef("other_id", "Honey", "Mariah Carey", null)) }
+        assertNull(resolver.find("Honey EP", "Troye Sivan"))
+    }
+
+    @Test
+    fun anEditionIsStillAnotherRecordThanTheEp() = runBlocking {
+        val resolver = AlbumRefResolver { _ -> listOf(YtmAlbumRef("deluxe_id", "Honey (Deluxe)", "Troye Sivan", null)) }
+        assertNull(resolver.find("Honey EP", "Troye Sivan"))
+    }
 }
