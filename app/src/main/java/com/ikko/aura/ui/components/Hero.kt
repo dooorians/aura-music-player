@@ -1340,6 +1340,8 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
     if (phase != HeroPhase.Opening && phase != HeroPhase.Closing) return
     if (hero.scrolledFallbackClose) return
     val src = hero.srcCover
+    // What the travelling copy draws with on each frame, made once for the trip instead of once per frame.
+    val drawCache = remember { HeroDrawCache() }
 
     // While the cover is travelling nothing underneath is touchable: the finger that has just opened a page is still
     // on the screen where that page's rows are, and a second touch used to land on one of them (and play it).
@@ -1376,16 +1378,16 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                             // At the card's place the copy is faded as the page fades the card (the same gradient), so that it
                             // takes its place and leaves it with no jump; the fade lets go as it travels.
                             drawIntoCanvas { canvas ->
-                                val paint = androidx.compose.ui.graphics.Paint()
-                                canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
+                                canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), drawCache.layerPaint)
                                 clipRect(c.left, c.top, c.right, c.bottom) { this@drawWithContent.drawContent() }
-                                val top = Color.Black.copy(alpha = 1f - s)
+                                // Kept with DstIn by a ramp from 1 - s (to 0.6) up to 1 is the same as taking away with
+                                // DstOut a fixed ramp from 1 (to 0.6) down to 0 drawn at alpha s: 1 - s(1 - r) = (1 - s) + s r.
+                                // The ramp depends on fadeBottom alone, so it is made once for the trip, not on every frame.
                                 drawRect(
-                                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                                        0f to top, 0.6f to top, 1f to Color.Black, startY = 0f, endY = fadeBottom,
-                                    ),
+                                    drawCache.fadeFor(fadeBottom),
                                     size = androidx.compose.ui.geometry.Size(size.width, fadeBottom),
-                                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                                    alpha = s,
+                                    blendMode = androidx.compose.ui.graphics.BlendMode.DstOut,
                                 )
                                 canvas.restore()
                             }
@@ -1455,7 +1457,8 @@ fun HeroOverlay(hero: HeroState = LocalHero.current, reduceMotion: Boolean = fal
                                 val cx = size.width - size.width * (74f / 456f)
                                 val cy = size.height - size.height * (84f / 456f)
                                 drawCircle(Color(0xFFA9DCEF).copy(alpha = a), radius = r, center = Offset(cx, cy))
-                                val tri = Path().apply {
+                                val tri = drawCache.triangle.apply {
+                                    rewind()
                                     moveTo(cx - 0.26f * r, cy - 0.34f * r)
                                     lineTo(cx + 0.34f * r, cy)
                                     lineTo(cx - 0.26f * r, cy + 0.34f * r)
@@ -1659,3 +1662,19 @@ fun Modifier.verticalFadingEdge(
         }
     }
 
+/** The travelling copy's drawing objects, reused frame after frame (see [HeroOverlay]). */
+private class HeroDrawCache {
+    val layerPaint = androidx.compose.ui.graphics.Paint()
+    val triangle = Path()
+    private var fadeBottom = Float.NaN
+    private var fade: androidx.compose.ui.graphics.Brush? = null
+
+    /** The ramp the copy is faded by under the card's own fade: 1 down to 0.6 of [bottom], then down to nothing at it. */
+    fun fadeFor(bottom: Float): androidx.compose.ui.graphics.Brush {
+        fade?.let { if (bottom == fadeBottom) return it }
+        fadeBottom = bottom
+        return androidx.compose.ui.graphics.Brush.verticalGradient(
+            0f to Color.Black, 0.6f to Color.Black, 1f to Color.Transparent, startY = 0f, endY = bottom,
+        ).also { fade = it }
+    }
+}

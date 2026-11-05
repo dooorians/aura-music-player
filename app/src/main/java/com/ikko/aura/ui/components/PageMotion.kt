@@ -33,7 +33,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -389,23 +391,30 @@ fun PagedContainer(
 }
 
 /** The soft diagonal light that crosses a glass surface while things move: 105 degrees, white at 20% in the middle. */
-fun Modifier.sheen(position: () -> Float, strength: () -> Float): Modifier = drawWithContent {
-    drawContent()
-    val s = strength()
-    if (s <= 0.001f) return@drawWithContent
-    val centre = Offset(size.width * position(), size.height / 2f)
+fun Modifier.sheen(position: () -> Float, strength: () -> Float): Modifier = drawWithCache {
+    // The band of light made once per size, around the origin; a frame of the slide moves it to its place with translate
+    // and takes its strength as the brush's alpha. The same light, without a new brush and shader on each frame of a
+    // change of tab.
     val angle = Math.toRadians(105.0)
     val dir = Offset(sin(angle).toFloat(), -cos(angle).toFloat())
     val half = size.width * 0.24f
-    drawRect(
-        Brush.linearGradient(
-            0f to Color.Transparent,
-            0.5f to Color.White.copy(alpha = 0.20f * s),
-            1f to Color.Transparent,
-            start = centre - dir * half,
-            end = centre + dir * half,
-        ),
+    val band = Brush.linearGradient(
+        0f to Color.Transparent,
+        0.5f to Color.White.copy(alpha = 0.20f),
+        1f to Color.Transparent,
+        start = -dir * half,
+        end = dir * half,
     )
+    onDrawWithContent {
+        drawContent()
+        val s = strength()
+        if (s <= 0.001f) return@onDrawWithContent
+        val cx = size.width * position()
+        val cy = size.height / 2f
+        translate(cx, cy) {
+            drawRect(band, topLeft = Offset(-cx, -cy), size = size, alpha = s)
+        }
+    }
 }
 
 /** Runs an [Animatable] to [target] the capsule's way in (a bouncy spring) or out (a wind-up, then away). */
