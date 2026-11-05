@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 class AuraApplication : Application() {
     @Inject lateinit var ytm: Lazy<YtmClient>
     @Inject lateinit var jioSaavn: Lazy<JioSaavnClient>
+    @Inject lateinit var uriAccessGuard: Lazy<com.ikko.aura.data.UriAccessGuard>
 
     override fun onCreate() {
         super.onCreate()
@@ -24,5 +25,7 @@ class AuraApplication : Application() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope.launch { runCatching { ytm.get().warmUp() } }
         scope.launch { runCatching { jioSaavn.get().warmUp() } }
+        // Pictures picked through the system's file picker whose grant has since gone (see UriAccessGuard).
+        scope.launch { runCatching { uriAccessGuard.get().pruneLostGrants() } }
     }
 }

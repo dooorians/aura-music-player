@@ -96,7 +96,11 @@ class PlaybackService : MediaSessionService() {
     private var spareBeat = com.ikko.aura.player.beat.BeatDetector()
 
     /** Automix's DSP analyzer. Constructed lazily — see [TrackAnalyzer]'s note about contexts. */
-    private val trackAnalyzer by lazy { TrackAnalyzer(this) }
+    private val trackAnalyzer by lazy {
+        // The application, not the service: the analysis runs on its own threads and can outlive onDestroy by a decode
+        // or a model run, and holding the service there would keep the whole destroyed service (and its players) alive.
+        TrackAnalyzer(applicationContext)
+    }
 
     private var crossfade: CrossfadeController? = null
     private var mediaSession: MediaSession? = null
@@ -116,6 +120,13 @@ class PlaybackService : MediaSessionService() {
                 .build()
                 .apply { setSmallIcon(R.drawable.ic_cu_headphones) },
         )
+
+        // Android 12+ refuses to put a service in the foreground from the background (a media button pressed long after
+        // the app was left, a resumption the system asks for). Media3 catches the refusal and calls this: playback
+        // cannot start there, so the listener is offered a notification that resumes it from a tap instead.
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() = PlaybackResumeNotice.post(this@PlaybackService)
+        })
 
         val active = buildPlayer(activeFilter, activeBeat, ownsSession = true)
         val standby = buildPlayer(spareFilter, spareBeat, ownsSession = false)
@@ -309,6 +320,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
+        clearListener()
         recovery.release()
         snapshotWriter.release()
         crossfade?.release()

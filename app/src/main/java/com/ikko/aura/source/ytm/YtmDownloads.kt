@@ -103,8 +103,14 @@ class YtmDownloads @Inject constructor(
         if (dao.pendingCount() > 0) start()
     }
 
+    /**
+     * Refused when the app is no longer in the foreground (Android 12+): the rows stay pending, and [resume] starts
+     * the queue again the next time the app is opened instead of the refusal crashing the process.
+     */
     private fun start() {
-        ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
+        com.ikko.aura.util.ForegroundStart.attempt {
+            ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
+        }
     }
 
     suspend fun pending(): Int = dao.pendingCount()
