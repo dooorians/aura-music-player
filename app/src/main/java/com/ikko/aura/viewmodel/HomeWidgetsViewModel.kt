@@ -335,6 +335,21 @@ class HomeWidgetsViewModel @Inject constructor(
 
     suspend fun albumRefFor(title: String, artist: String): String? = albumRefs.find(title, artist)
 
+    /**
+     * The song of a Home tile that has no album page on the source (a single, a remix): found by its title and artist, the same
+     * record only. What the tile plays when there is nothing to open.
+     */
+    suspend fun songFor(title: String, artist: String): com.ikko.aura.data.model.Track? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        runCatching {
+            fun norm(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+            val want = norm(title)
+            val credits = com.ikko.aura.reco.ArtistNames.split(artist)
+            ytmClient.search("$title $artist").songs
+                .firstOrNull { s -> norm(s.title) == want && com.ikko.aura.reco.ArtistNames.anyCompatible(credits, com.ikko.aura.reco.ArtistNames.split(s.artist)) }
+                ?.let(com.ikko.aura.source.ytm.YtmLibrary::trackOf)
+        }.getOrNull()
+    }
+
     init {
         // Renewals that are due run when the app is opened; and at once when the listener turns the switch on.
         viewModelScope.launch {

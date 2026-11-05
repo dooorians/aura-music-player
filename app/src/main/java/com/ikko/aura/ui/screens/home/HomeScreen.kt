@@ -273,6 +273,7 @@ fun HomeScreen(
                     tracksOf = tracksOf,
                     onBlockArtist = viewModel::blockArtist,
                     prepareRef = { ref -> viewModel.prepareAlbum(ref) },
+                    resolveSong = { item -> kotlinx.coroutines.withTimeoutOrNull(8_000L) { viewModel.songFor(item.title, item.artist) } },
                 )
             }
         }
@@ -291,6 +292,7 @@ private fun HomeSectionBlock(
     tracksOf: (Long) -> List<com.ikko.aura.data.model.Track>,
     onBlockArtist: (String) -> Unit,
     prepareRef: suspend (String) -> Unit,
+    resolveSong: suspend (com.ikko.aura.data.home.SectionAlbum) -> com.ikko.aura.data.model.Track?,
 ) {
     val u = designUnit()
     // The radio of one artist whose long press asked to stop recommending them: confirmed before it is done.
@@ -427,9 +429,12 @@ private fun HomeSectionBlock(
                                 } else if (item.items.isNotEmpty()) {
                                     // No page exists for it (a source that gives none): its songs are all there is to open.
                                     playerViewModel.playQueue(item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }, 0, context = section.id)
-                                } else if (item.artist.isNotBlank()) {
-                                    // Neither a page nor songs: a tap that does nothing reads as a broken app. The artist's page is where it can be found.
-                                    navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.artist))
+                                } else {
+                                    // No album page on the source and no songs came with the tile: a single or a remix has none. Its song, if the source has
+                                    // it, is what to open; failing that, the artist's page, since a tap that does nothing reads as a broken app.
+                                    val song = resolveSong(item)
+                                    if (song != null) playerViewModel.playQueue(listOf(song), 0, context = section.id)
+                                    else if (item.artist.isNotBlank()) navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.artist))
                                 }
                             }
                         }
