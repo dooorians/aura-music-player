@@ -29,6 +29,8 @@ class RotationContext(
     val tasteTags: Map<String, Double> = emptyMap(),
     /** The albums most listened to in each Deezer genre (by its id): what completes a row of a genre the listener's artists do not fill. */
     val chartAlbums: Map<Int, List<SectionAlbum>> = emptyMap(),
+    /** Albums of the device's own library whose analysed songs are slow (under [HomeRotation.SLOW_BPM] BPM): what "Au ralenti" shows. */
+    val slowAlbums: List<SectionAlbum> = emptyList(),
 )
 
 /**
@@ -202,6 +204,27 @@ object HomeRotation {
     }
 
     // ------------------------------------------------------------------------------------------------------------------
+
+    /** The scene of a country: its artists are the ones whose tags say where they come from (Last.fm's nationality tags, and the country MusicBrainz gives). */
+    private class Scene(val id: String, val title: String, val words: List<String>, val not: List<String> = emptyList(), val group: String = "scene:$id")
+
+    /** Slow means under this many beats a minute. */
+    const val SLOW_BPM = 90.0
+
+    private val SCENES = listOf(
+        Scene("be", "Scène belge", listOf("belgian", "belgium", "flemish", "belgian pop", "belgian rock", "belgian hip hop", "brussels")),
+        Scene("jp", "Scène japonaise", listOf("japanese", "japan", "j-pop", "jpop", "j-rock", "japanese rock", "city pop", "shibuya-kei"), not = listOf("k-pop", "kpop"), group = "tag:jpop"),
+        Scene("uk", "Scène britannique", listOf("british", "uk", "britpop", "uk garage", "uk hip hop", "uk drill", "grime", "british indie", "english")),
+        Scene("de", "Scène allemande", listOf("german", "germany", "krautrock", "neue deutsche welle", "deutschrock", "german hip hop", "berlin")),
+        Scene("se", "Scène suédoise", listOf("swedish", "sweden", "swedish pop", "swedish rock")),
+        Scene("ca", "Scène canadienne", listOf("canadian", "canada", "canadian pop", "canadian rock", "canadian hip hop")),
+        Scene("au", "Scène australienne", listOf("australian", "australia", "australian pop", "australian rock", "aussie")),
+        Scene("br", "Scène brésilienne", listOf("brazilian", "brazil", "mpb", "tropicalia", "bossa nova", "samba", "funk carioca")),
+    )
+
+    /** An album of a concert: "Live at…", "Unplugged", "En concert", "(Live)". A song called "Live Forever" is not one. */
+    private val LIVE_TITLE = Regex("(?i)(?:[(\\[]\\s*live\\b|\\blive (?:at|in|from|on|à|au|aux|session|sessions|and|\\d{4})\\b|\\blive[!.]?\\s*$|[-–:]\\s*live\\b|unplugged|en concert|in concert|en direct|\\bconcert\\b)")
+    fun isLiveAlbum(title: String): Boolean = LIVE_TITLE.containsMatchIn(title)
 
     private class Family(val id: String, val titles: List<String>, val subtitle: String? = null, val tags: List<String>, val needs: List<String> = emptyList(), val not: List<String> = emptyList())
 
@@ -412,6 +435,24 @@ object HomeRotation {
             }
         }
         list += Candidate("fav_artists", "fav_artists", "artist") { used -> favoriteArtistsOnline(c, used, albumsByCredit) }
+        // The scenes of the countries: the artists whose tags say where they come from, wherever in their tags it is said.
+        for (s in SCENES) {
+            list += Candidate("scene:${s.id}", s.group, "scene") { used ->
+                val albums = c.external.filter { a ->
+                    a.album == null && tagsOfAlbum(a, c).let { tags -> tags.any { it in s.words } && s.not.none { it in tags } }
+                }
+                row("scene:${s.id}", s.title, ranked(albums, c, "scene:${s.id}") { 1.0 }, used, c.seed, "scene:${s.id}", shuffle = false)
+            }
+        }
+        // The concerts of the artists the listener knows.
+        list += Candidate("live", "live", "live") { used ->
+            val albums = c.external.filter { a -> a.album == null && isLiveAlbum(a.title) && creditKeys(a).any { it in c.knownArtists } }
+            row("live", "En concert", ranked(albums, c, "live") { 1.0 }, used, c.seed, "live", shuffle = false, kicker = "Sur scène")
+        }
+        // The slow albums of the library, by the tempo Automix measured (the sources give none).
+        list += Candidate("tempo:slow", "tempo:slow", "tempo") { used ->
+            row("tempo:slow", "Au ralenti", c.slowAlbums, used, c.seed, "tempo:slow", shuffle = true, kicker = "Moins de ${SLOW_BPM.toInt()} BPM")
+        }
         list += Candidate("radios", "radios", "reco") { used -> radios(c, used) }
         // The themes: albums of the sources whose artist's sound the tags place in them.
         for (f in FAMILIES) {

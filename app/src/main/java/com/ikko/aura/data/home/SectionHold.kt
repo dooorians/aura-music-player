@@ -24,6 +24,20 @@ object SectionHold {
         return false
     }
 
+    /**
+     * The row "En boucle" brought up to date: [loop] (what is looped now) takes the place of the one held, without the albums that show in another
+     * row, completed from its own reserve. Nothing changes when there is not a full line of it: a row held is better than a row cut short.
+     * Called when Home is out of sight, so that the row never moves under the finger.
+     */
+    fun withLoop(held: List<HomeSection>, loop: HomeSection?): List<HomeSection> {
+        if (loop == null) return held
+        val shown = held.filter { it.id != loop.id }.flatMapTo(HashSet()) { s -> s.albums.map { it.key } }
+        val albums = (loop.albums + loop.spare).filter { it.key !in shown }.distinctBy { it.key }.take(HomeSections.PER_ROW)
+        if (albums.size < HomeSections.PER_ROW) return held
+        val fresh = loop.copy(albums = albums, spare = loop.spare.filter { sp -> albums.none { it.key == sp.key } })
+        return if (held.any { it.id == loop.id }) held.map { if (it.id == loop.id) fresh else it } else held
+    }
+
     /** Whether a row is about an artist that is now blocked ("Plus de X", "similar to X"): it goes with them, whatever else it holds. */
     private fun aboutBlockedArtist(s: HomeSection, blocked: Set<String>): Boolean =
         blocked.isNotEmpty() && (s.id.startsWith("artist:") || s.id.startsWith("similar:")) && ArtistNames.key(s.title) in blocked

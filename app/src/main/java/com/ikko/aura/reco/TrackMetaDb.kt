@@ -65,6 +65,9 @@ interface TrackMetaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putIdentity(row: ArtistIdentityEntity)
+
+    @Query("SELECT * FROM artist_identity")
+    suspend fun allIdentities(): List<ArtistIdentityEntity>
 }
 
 /**
