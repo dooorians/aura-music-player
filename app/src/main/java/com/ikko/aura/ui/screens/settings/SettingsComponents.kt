@@ -32,8 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.ikko.aura.ui.components.HeroAnchor
-import com.ikko.aura.ui.components.HeroState
-import com.ikko.aura.ui.components.HeroText
 import com.ikko.aura.ui.components.LocalHero
 import com.ikko.aura.ui.components.heroAnchor
 import com.ikko.aura.ui.components.heroRipple
@@ -91,7 +89,9 @@ internal fun SettingsGroup(
     val pageKey = rememberSettingsPageKey()
     val riseCounter = LocalSettingsRise.current
     val order = remember { if (riseCounter == null) 0 else riseCounter.next++ }
-    Column(Modifier.fillMaxWidth().heroRise(order, rows = true).padding(horizontal = u * 40f)) {
+    // The page's groups arrive on the header's clock (from 90 ms), not on the rows' (170): with no title travelling, a
+    // later start left the page empty but for its title.
+    Column(Modifier.fillMaxWidth().heroRise(order).padding(horizontal = u * 40f)) {
         if (title != null) {
             Text(
                 title,
@@ -148,21 +148,23 @@ internal fun SettingsRow(
     val pageKey = rememberSettingsPageKey()
     val tripKey = tripRoute?.let(::tripKeyOf)
     val rowAnchor = remember { HeroAnchor() }
-    val titleAnchor = remember { HeroAnchor() }
     val titleStyle = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.Bold, fontSize = designSp(42f), lineHeight = designSp(50f))
     Row(
         Modifier
             .fillMaxWidth()
-            // What is on the page steps back and clears from the touched row when a page opens, and returns from it.
-            .heroRipple(tripKey, pageKey = pageKey)
+            // What is on the page steps back and clears from the touched row when a page opens, and returns from it, the nearest
+            // first. No key: no cover or title travels from the touched row, so it must not wait for one to land on the way back.
+            .heroRipple(pageKey = pageKey)
             .then(if (tripKey != null) Modifier.heroAnchor(tripKey, rowAnchor) else Modifier)
             .then(
                 if (onClick != null) Modifier.clickable {
                     if (tripKey == null) onClick()
+                    // No title travels: the page's own rises with it, as the settings' do from Home's picture. A row's words and
+                    // a page's title differ in size, in length and in the lines they take, and a copy crossing between them
+                    // lingered over the old title on the way back; this way nothing depends on the text.
                     else if (hero.begin(
                             key = tripKey, uri = null, cacheKey = null, cover = rowAnchor, radiusPx = 0f,
-                            title = titleAnchor to HeroText(title, androidx.compose.ui.geometry.Rect.Zero, titleStyle, Color.White),
-                            sub = null, drawCover = false,
+                            title = null, sub = null, drawCover = false,
                         )
                     ) onClick()
                 } else Modifier,
@@ -182,7 +184,6 @@ internal fun SettingsRow(
                 title,
                 color = if (danger) DangerColor else Color.White,
                 style = titleStyle,
-                modifier = if (tripKey != null) Modifier.heroAnchor(tripKey, titleAnchor, HeroState.ROLE_TITLE) else Modifier,
             )
             if (summary != null) {
                 Text(
