@@ -91,7 +91,25 @@ object SmartShuffle {
         for (t in tracks) {
             cueOf(analysisOf(t))?.let { cues[t.id] = it }
         }
-        if (cues.isEmpty()) return tracks.shuffled(random)
+        // Nothing analysed: still a shuffle that keeps one artist from following itself (the loop below does both).
+
+        // Two songs of one artist back to back read as a skip in the shuffle, whatever their tempo: the last two artists placed cost something.
+        val artistOf = HashMap<String, String>(tracks.size)
+        for (t in tracks) artistOf[t.id] = com.ikko.aura.reco.ArtistNames.primaryKey(t.artist)
+        val lastArtists = ArrayDeque<String>(2)
+        fun spacing(t: Track): Double {
+            val a = artistOf[t.id].orEmpty()
+            if (a.isEmpty()) return 0.0
+            return when (a) {
+                lastArtists.lastOrNull() -> SAME_ARTIST_PENALTY
+                lastArtists.firstOrNull() -> SAME_ARTIST_PENALTY / 2
+                else -> 0.0
+            }
+        }
+        fun placed(t: Track) {
+            lastArtists.addLast(artistOf[t.id].orEmpty())
+            while (lastArtists.size > 2) lastArtists.removeFirst()
+        }
 
         val remaining = ArrayList<Track>(tracks)
         fun removeAtFast(index: Int): Track {
@@ -108,6 +126,7 @@ object SmartShuffle {
         val ordered = ArrayList<Track>(tracks.size)
         var current = removeAtFast(firstIdx)
         ordered += current
+        placed(current)
 
         val bestIndices = IntArray(CANDIDATE_POOL)
         val bestScores = DoubleArray(CANDIDATE_POOL)
@@ -115,15 +134,20 @@ object SmartShuffle {
         while (remaining.isNotEmpty()) {
             val currentCue = cues[current.id]
             if (currentCue == null || remaining.size == 1) {
-                current = removeAtFast(random.nextInt(remaining.size))
+                // Nothing measured to go by: a random song, but not of the artist just heard when a few draws can avoid it.
+                var idx = random.nextInt(remaining.size)
+                var tries = 1
+                while (tries < RANDOM_TRIES && spacing(remaining[idx]) > 0.0) { idx = random.nextInt(remaining.size); tries++ }
+                current = removeAtFast(idx)
                 ordered += current
+                placed(current)
                 continue
             }
             val count = minOf(remaining.size, SAMPLE_SIZE)
             var poolSize = 0
             for (s in 0 until count) {
                 val idx = if (remaining.size <= SAMPLE_SIZE) s else random.nextInt(remaining.size)
-                val score = compatibility(currentCue, cues[remaining[idx].id])
+                val score = compatibility(currentCue, cues[remaining[idx].id]) - spacing(remaining[idx])
                 if (poolSize < CANDIDATE_POOL) {
                     var pos = poolSize
                     while (pos > 0 && score > bestScores[pos - 1]) {
@@ -148,6 +172,7 @@ object SmartShuffle {
             val chosenIdx = bestIndices[random.nextInt(poolSize)]
             current = removeAtFast(chosenIdx)
             ordered += current
+            placed(current)
         }
         return ordered
     }
@@ -218,6 +243,10 @@ object SmartShuffle {
 
     /** The share of a track's energy curve that counts as its opening, or its ending. */
     private const val EDGE_FRACTION = 0.15
+
+    /** What following the artist just heard costs on the 0..1 compatibility scale (half of it for the one before): more than any tempo match earns. */
+    private const val SAME_ARTIST_PENALTY = 0.6
+    private const val RANDOM_TRIES = 8
 
     private const val TEMPO_WEIGHT = 0.5
     private const val KEY_WEIGHT = 0.3
