@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ikko.aura.data.LyricsRepository
 import com.ikko.aura.data.lyrics.LyricLine
 import com.ikko.aura.data.model.Track
+import com.ikko.aura.util.runCatchingCancellable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
@@ -48,7 +49,8 @@ class LyricsViewModel @Inject constructor(
             // A breath first: a run of skips looks up only the last track's words, and does not keep the CPU busy
             // under the player's own change.
             kotlinx.coroutines.delay(LOOKUP_SETTLE_MS)
-            val result = lyricsRepository.loadLyrics(track)
+            // An error (the settings or the cache unreadable) is "no lyrics", not a crash, nor a page left on Loading.
+            val result = runCatchingCancellable { lyricsRepository.loadLyrics(track) }.getOrNull()
             _uiState.value = if (result == null || result.lines.isEmpty()) {
                 LyricsUiState.Unavailable
             } else {
@@ -61,11 +63,13 @@ class LyricsViewModel @Inject constructor(
     fun refetch(track: Track?) {
         val current = track ?: return
         loadJob?.cancel()
+        // Set now, not once the coroutine runs: a loadFor() of the same track arriving meanwhile took it for another
+        // one, cancelled this refetch before the stored lyrics were dropped, and showed them again from the cache.
+        loadedTrackId = current.id
         _uiState.value = LyricsUiState.Loading
         loadJob = viewModelScope.launch {
             lyricsRepository.forget(current.id)
-            loadedTrackId = current.id
-            val result = lyricsRepository.loadLyrics(current)
+            val result = runCatchingCancellable { lyricsRepository.loadLyrics(current) }.getOrNull()
             _uiState.value = if (result == null || result.lines.isEmpty()) {
                 LyricsUiState.Unavailable
             } else {
