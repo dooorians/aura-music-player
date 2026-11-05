@@ -42,14 +42,18 @@
 
 namespace {
 
-// The analyzer's strings are its own literals -- key names like "C# minor"
-// and candidate types like "main_drop" -- so they are known ASCII with
-// nothing to escape. Anything unexpected is dropped rather than emitted
-// unescaped.
+// The analyzer's strings are its own literals -- key names like "C\u266F minor"
+// and candidate types like "main_drop" -- so they need nothing escaped.
+// Control characters, quotes and backslashes are dropped rather than emitted
+// unescaped. Bytes of a multi-byte UTF-8 sequence are kept: the key names
+// spell sharps and flats as U+266F and U+266D, and dropping those bytes turned
+// "C\u266F minor" into "C minor" -- five of the twelve roots read as their
+// neighbour, and the harmonic rules judged the wrong key.
 void AppendString(std::string& out, const std::string& value) {
   out += '"';
   for (const char character : value) {
-    if (character >= 32 && character < 127 && character != '"' && character != '\\') {
+    const auto byte = static_cast<unsigned char>(character);
+    if (byte >= 32 && byte != 127 && character != '"' && character != '\\') {
       out += character;
     }
   }
