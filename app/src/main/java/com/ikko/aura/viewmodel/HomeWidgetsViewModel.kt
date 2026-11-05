@@ -153,12 +153,14 @@ class HomeWidgetsViewModel @Inject constructor(
             val names = (recommendations.pickedArtists.first() + recommendations.seedArtists.first())
                 .filter { it.isNotBlank() }.distinctBy { com.ikko.aura.reco.ArtistNames.primaryKey(it) }.take(CHOSEN_ARTISTS_ASKED)
             val gate = kotlinx.coroutines.sync.Semaphore(3)
+            val found = java.util.Collections.synchronizedList(ArrayList<com.ikko.aura.data.deezer.DeezerArtistProfile>())
             kotlinx.coroutines.coroutineScope {
                 names.map { name ->
                     async {
                         gate.withPermit {
                             // The artist of that name, among the namesakes (see ArtistAuthority.deezerArtist): never the first answer of a search.
                             val profile = runCatching { artistAuthority.deezerArtist(com.ikko.aura.reco.ArtistNames.askName(name)) }.getOrNull()
+                            profile?.let { found += it }
                             val albums = profile?.let { runCatching { deezer.artistAlbumsWithCovers(it.id, it.name) }.getOrDefault(emptyList()) }.orEmpty()
                             if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
                         }
@@ -166,10 +168,57 @@ class HomeWidgetsViewModel @Inject constructor(
                 }.awaitAll()
             }
             chosenDone.value = true
+            // Home is shown; the stock keeps growing behind it, which is what takes the place of an album that is refused.
+            runCatching { growStock(names, found.toList(), gate) }
         }
     }
 
     private val chosenDone = MutableStateFlow(false)
+
+    /**
+     * More albums for Home, once the first have come in: the artists the listener really plays (the engine's affinity, beyond the ones they
+     * chose), then the artists Deezer lists as close to the ones they like most, with their albums. A few artists at a time and published by
+     * batch, so Home is not drawn again for every one of them. Nothing here is blocked, refused or owned: that is set aside where the albums are used.
+     */
+    private suspend fun growStock(
+        asked: List<String>,
+        chosen: List<com.ikko.aura.data.deezer.DeezerArtistProfile>,
+        gate: kotlinx.coroutines.sync.Semaphore,
+    ) {
+        val blocked = recommendations.blockedArtists.first().mapTo(HashSet()) { it.key }
+        val done = asked.mapTo(HashSet()) { com.ikko.aura.reco.ArtistNames.primaryKey(it) }
+        val played = runCatching { smartDao.allArtists() }.getOrDefault(emptyList())
+            .filter { !it.isBlocked && it.affinityScore > 0.0 && it.artistKey !in done && it.artistKey !in blocked }
+            .sortedByDescending { it.affinityScore }.take(PLAYED_ARTISTS_ASKED)
+        val playedProfiles = java.util.Collections.synchronizedList(ArrayList<com.ikko.aura.data.deezer.DeezerArtistProfile>())
+        played.chunked(STOCK_BATCH).forEach { batch ->
+            val albums = kotlinx.coroutines.coroutineScope {
+                batch.map { meta ->
+                    async {
+                        gate.withPermit {
+                            val profile = runCatching { artistAuthority.deezerArtist(com.ikko.aura.reco.ArtistNames.askName(meta.name)) }.getOrNull()
+                            profile?.let { playedProfiles += it }
+                            profile?.let { runCatching { deezer.artistAlbumsWithCovers(it.id, it.name) }.getOrDefault(emptyList()) }.orEmpty()
+                        }
+                    }
+                }.awaitAll().flatten()
+            }
+            if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
+        }
+        // The artists close to the ones they like most.
+        val seeds = (chosen + playedProfiles).distinctBy { it.id }.sortedByDescending { it.nbFan }.take(RELATED_FROM)
+        val known = (done + played.map { it.artistKey } + blocked).toHashSet()
+        val related = seeds.flatMap { s -> runCatching { gate.withPermit { deezer.getRelatedArtists(s.id, RELATED_PER_ARTIST) } }.getOrDefault(emptyList()) }
+            .distinctBy { it.id }
+            .filter { com.ikko.aura.reco.ArtistNames.primaryKey(it.name).let { k -> k.isNotEmpty() && k !in known } }
+            .take(RELATED_ARTISTS_ASKED)
+        related.chunked(STOCK_BATCH).forEach { batch ->
+            val albums = kotlinx.coroutines.coroutineScope {
+                batch.map { p -> async { gate.withPermit { runCatching { deezer.artistAlbumsWithCovers(p.id, p.name, limit = RELATED_ALBUMS) }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
+            }
+            if (albums.isNotEmpty()) chosenAlbums.value = chosenAlbums.value + albums
+        }
+    }
 
     /** An explicit refresh: another set of rows. */
     fun reshuffleSections() {
@@ -752,7 +801,17 @@ class HomeWidgetsViewModel @Inject constructor(
 private val CHART_GENRES = listOf(132, 152, 116, 106, 113, 169, 464, 144, 466, 98, 153, 2)
 
 /** How many of the chosen artists have their albums looked up. */
-private const val CHOSEN_ARTISTS_ASKED = 36
+private const val CHOSEN_ARTISTS_ASKED = 48
+
+/** The artists the listener plays beyond the chosen ones, how many of the ones they like most are asked for their neighbours, how many each gives, how many neighbours in all, how many albums of each. */
+private const val PLAYED_ARTISTS_ASKED = 40
+private const val RELATED_FROM = 14
+private const val RELATED_PER_ARTIST = 12
+private const val RELATED_ARTISTS_ASKED = 60
+private const val RELATED_ALBUMS = 12
+
+/** Artists whose albums are loaded together before Home is drawn again. */
+private const val STOCK_BATCH = 8
 
 /** The most that Home waits for its rows to settle before showing them. */
 private const val SETTLE_MS = 12_000L

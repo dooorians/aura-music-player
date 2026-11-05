@@ -69,16 +69,16 @@ object QueryPlan {
      */
     fun build(profile: TasteProfile, kinds: Set<RecoKind>, variation: Long, blocked: Set<String>): List<RecoQuery> {
         val out = ArrayList<RecoQuery>()
-        val artists = profile.topArtists(10, excluding = blocked)
+        val artists = profile.topArtists(16, excluding = blocked)
         val extra = profile.topArtists(30, excluding = blocked + artists.toSet()).drop(3)
-            .let { rest -> if (rest.isEmpty()) emptyList() else List(minOf(4, rest.size)) { i -> rest[((variation + i * 7) % rest.size).toInt().coerceAtLeast(0)] } }.distinct()
+            .let { rest -> if (rest.isEmpty()) emptyList() else List(minOf(8, rest.size)) { i -> rest[((variation + i * 7) % rest.size).toInt().coerceAtLeast(0)] } }.distinct()
         (artists + extra).forEach { k -> out += RecoQuery.ByArtist(profile.nameOf(k), profile.affinity(k)) }
         // Songs that say the most about the taste, at most two per artist: "similar to" asked of six songs by one artist
         // is one question asked six times.
         val perArtist = HashMap<String, Int>()
         profile.seeds.filter { s -> ArtistNames.split(s.artist).firstOrNull()?.let { it !in blocked } == true }
             .filter { s -> perArtist.merge(ArtistNames.split(s.artist).first(), 1, Int::plus)!! <= 2 }
-            .take(8).forEach { s -> out += RecoQuery.SimilarTo(s.title, s.artist, profile.creditAffinity(ArtistNames.split(s.artist)).coerceAtLeast(0.3)) }
+            .take(14).forEach { s -> out += RecoQuery.SimilarTo(s.title, s.artist, profile.creditAffinity(ArtistNames.split(s.artist)).coerceAtLeast(0.3)) }
         // The recent releases of the artists played the most: asked for by name, as a search for "<artist>" alone answers
         // with their best-known songs, which are rarely their newest.
         if (RecoKind.NEW in kinds) artists.take(8).forEach { k -> out += RecoQuery.ByArtist(profile.nameOf(k), profile.affinity(k), "new song") }

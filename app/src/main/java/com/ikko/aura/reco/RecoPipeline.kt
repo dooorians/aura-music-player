@@ -181,7 +181,7 @@ class RecoPipeline(
      * one the listener already has, nor a blocked one.
      */
     private suspend fun similarArtistQueries(insight: ArtistInsight?, profile: TasteProfile, blocked: Set<String>): List<RecoQuery> = coroutineScope {
-        val tops = profile.topArtists(8, excluding = blocked)
+        val tops = profile.topArtists(12, excluding = blocked)
         val lastFmLists = if (insight != null) {
             tops.map { k -> async { k to withTimeoutOrNull(8_000L) { insight.similar(profile.nameOf(k)) }.orEmpty() } }.awaitAll()
         } else emptyList()
@@ -347,8 +347,8 @@ class RecoPipeline(
         /** After an attempt that kept the previous playlist, the next automatic one waits this long. */
         const val RETRY_AFTER_MS = 6L * 60 * 60 * 1000
         const val MAX_DATE_LOOKUPS = 24
-        const val MAX_SONG_CHECKS = 60
-        const val MAX_SIMILAR_ARTISTS = 14
+        const val MAX_SONG_CHECKS = 120
+        const val MAX_SIMILAR_ARTISTS = 30
         const val MAX_HIT_LOOKUPS = 16
     }
 }

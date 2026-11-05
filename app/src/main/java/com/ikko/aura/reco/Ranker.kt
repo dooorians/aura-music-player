@@ -134,10 +134,10 @@ object Ranker {
     }
 
     fun specOf(kind: RecoKind) = when (kind) {
-        RecoKind.DAILY -> Spec(target = 30, minimum = 8, maxPerArtist = 1)
-        RecoKind.DISCOVERY -> Spec(target = 25, minimum = 6, maxPerArtist = 2)
-        RecoKind.NEW -> Spec(target = 20, minimum = 4, maxPerArtist = 2)
-        else -> Spec(target = 25, minimum = 6, maxPerArtist = 2)
+        RecoKind.DAILY -> Spec(target = 40, minimum = 8, maxPerArtist = 1)
+        RecoKind.DISCOVERY -> Spec(target = 40, minimum = 6, maxPerArtist = 2)
+        RecoKind.NEW -> Spec(target = 25, minimum = 4, maxPerArtist = 2)
+        else -> Spec(target = 35, minimum = 6, maxPerArtist = 2)
     }
 
     /** A release this recent is "new": a stated release date within [NEW_DAYS] days. */
