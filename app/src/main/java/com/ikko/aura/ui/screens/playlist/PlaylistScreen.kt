@@ -175,7 +175,10 @@ fun PlaylistScreen(
     androidx.compose.runtime.LaunchedEffect(currentCustomBmp, cardArt, ambience, firstTrack?.albumId, firstTrack?.artworkUri, detail != null) {
         if (theme == null || currentCustomBmp != null) {
             theme = when {
-                currentCustomBmp != null -> albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                // A palette pass over the picture: on Default, like the card's below, not on the main thread.
+                currentCustomBmp != null -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                }
                 cardArt != null && (ambience != null || artwork != null) -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     albumThemeFromBitmap(cardArt, seed = artSeed)
                 }
@@ -274,11 +277,13 @@ fun PlaylistScreen(
                             // A recommended playlist says when it was made, and can be made again now: the listener's
                             // answers and the profile are kept.
                             reco?.let { page ->
-                                val updated = if (page.updatedAtMs > 0) {
-                                    "Mis à jour le " + java.time.Instant.ofEpochMilli(page.updatedAtMs)
-                                        .atZone(java.time.ZoneId.systemDefault())
-                                        .format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH))
-                                } else "Pas encore mis à jour"
+                                val updated = remember(page.updatedAtMs) {
+                                    if (page.updatedAtMs > 0) {
+                                        "Mis à jour le " + java.time.Instant.ofEpochMilli(page.updatedAtMs)
+                                            .atZone(java.time.ZoneId.systemDefault())
+                                            .format(UPDATED_DATE_FORMAT)
+                                    } else "Pas encore mis à jour"
+                                }
                                 Row(
                                     modifier = Modifier
                                         .padding(top = com.ikko.aura.ui.components.designUnit() * 10f)
@@ -539,3 +544,7 @@ private fun RecoRowMenu(
         }
     }
 }
+
+/** "d MMMM" in French, for the line saying when a recommended playlist was made; built once, not per recomposition. */
+private val UPDATED_DATE_FORMAT: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH)

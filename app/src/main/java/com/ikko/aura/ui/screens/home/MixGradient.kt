@@ -242,7 +242,10 @@ fun rememberMixArt(ambience: CardAmbience, tracks: List<Track>, sizePx: Int = 51
     val day = remember { java.time.LocalDate.now().toEpochDay() }
     val albums = remember(tracks) { tracks.distinctBy { it.albumId }.take(MixGradients.ALBUMS) }
     if (albums.isEmpty() && tracks.isEmpty()) return null
-    val key = "${ambience.ordinal}:$day:${albums.joinToString(",") { it.albumId.toString() }}:$sizePx"
+    // Built once per set of albums, not on every recomposition of the card that shows it.
+    val key = remember(ambience, day, albums, sizePx) {
+        "${ambience.ordinal}:$day:${albums.joinToString(",") { it.albumId.toString() }}:$sizePx"
+    }
     var art by remember(key) { mutableStateOf(MixArtCache.get(key)) }
     LaunchedEffect(key) {
         if (art != null) return@LaunchedEffect
@@ -252,8 +255,10 @@ fun rememberMixArt(ambience: CardAmbience, tracks: List<Track>, sizePx: Int = 51
                     ?: AlbumArtCache.load(context, t.artworkUri, 96, t.albumId.toString(), shrink = true)
             }
             val seed = day * 104729L + ambience.ordinal * 31L + albums.fold(7L) { h, t -> h * 31L + t.albumId }
-            MixGradients.generate(context, seed, covers, sizePx)
-        } ?: mixGradientBitmap(context, ambience, day, sizePx) // covers with no colour to speak of: the plain gradients
+            // Covers with no colour to speak of: the plain gradients. Made here too, off the main thread: it decodes a
+            // drawable and paints a full-size bitmap, which on the main thread cost the card a frame or two.
+            MixGradients.generate(context, seed, covers, sizePx) ?: mixGradientBitmap(context, ambience, day, sizePx)
+        }
         MixArtCache.put(key, made)
         art = made
     }

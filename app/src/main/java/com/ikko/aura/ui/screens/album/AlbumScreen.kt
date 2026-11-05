@@ -1036,9 +1036,10 @@ private fun DownloadBadge(entry: DownloadEntry?, accent: State<Color>, onDownloa
 /** The album's download as one icon (in the header's capsule): its arrow, its progress ring, its check. */
 @Composable
 internal fun AlbumDownloadChip(tracks: List<Track>, controls: StreamedAlbumControls) {
-    val states = tracks.map { controls.downloads[it.id] }
-    val done = states.count { it?.state == DownloadState.DONE }
-    val busy = states.any { it?.state == DownloadState.QUEUED || it?.state == DownloadState.DOWNLOADING }
+    // Counted once per change of the songs or of their downloads, not on every recomposition of the header.
+    val states = remember(tracks, controls.downloads) { tracks.map { controls.downloads[it.id] } }
+    val done = remember(states) { states.count { it?.state == DownloadState.DONE } }
+    val busy = remember(states) { states.any { it?.state == DownloadState.QUEUED || it?.state == DownloadState.DOWNLOADING } }
     val whole = tracks.isNotEmpty() && done == tracks.size
     var confirmRemove by remember { mutableStateOf(false) }
     Box(
