@@ -395,7 +395,11 @@ class PlayerViewModel @Inject constructor(
 
     init {
         // A download queue the process was killed in the middle of picks up again.
-        viewModelScope.launch(Dispatchers.IO) { runCatching { ytmDownloads.resume() } }
+        // Not needed for the first screen: waits for its first frame.
+        viewModelScope.launch(Dispatchers.IO) {
+            com.ikko.aura.startup.FirstFrame.await()
+            runCatching { ytmDownloads.resume() }
+        }
         viewModelScope.launch {
             // No connection after the retries (see PlayerController): nothing to observe, and not a crash.
             val player = try {

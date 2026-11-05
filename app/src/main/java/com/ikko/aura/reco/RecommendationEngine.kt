@@ -76,6 +76,8 @@ class RecommendationEngine @Inject constructor(
     init {
         scope.launch {
             try {
+                // Built with the home screen: the renewal (network, the database, scoring) waits for its first frame.
+                com.ikko.aura.startup.FirstFrame.await()
                 ensureCurrentRules()
                 if (prefs.consent.first()) {
                     refreshNow()

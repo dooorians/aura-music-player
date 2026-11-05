@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.ikko.aura.data.model.Track
+import com.ikko.aura.startup.FirstFrame
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
@@ -34,7 +35,7 @@ import kotlinx.coroutines.Dispatchers
  */
 @Singleton
 class PlayerController @Inject constructor(
-    @ApplicationContext context: Context,
+    @param:ApplicationContext private val context: Context,
     private val audioSessionIdProvider: AudioSessionIdProvider,
 ) {
     val audioSessionId: Int get() = audioSessionIdProvider.id
@@ -49,7 +50,10 @@ class PlayerController @Inject constructor(
     val connectionFailed: StateFlow<Boolean> = _connectionFailed.asStateFlow()
 
     init {
-        connect(context, attempt = 0)
+        // Created during the first composition, so inside the first frame: starting the service, resolving its token
+        // and binding to it are three calls to the system server that frame would wait on. Made right after it instead;
+        // a command tapped before the connection is up already no-ops (see [player]), and observers wait in [awaitPlayer].
+        FirstFrame.runOnMainAfter { connect(context, attempt = 0) }
     }
 
     /**
