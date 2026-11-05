@@ -77,6 +77,24 @@ object Eligibility {
     const val MIN_DURATION_MS = 45_000L
     const val MAX_DURATION_MS = 15 * 60_000L
 
+    /**
+     * Whether a candidate is junk (a karaoke, a clip, a content farm), remembered: a dozen regular expressions that depend on the song alone, asked
+     * for every playlist, every attempt and every funnel of a renewal. Keyed by everything they read, so a song whose page renamed it is judged again.
+     */
+    private val junkMemo = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private const val JUNK_MEMO_MAX = 50_000
+
+    fun isJunk(c: Candidate): Boolean {
+        val key = "${c.title}\u0000${c.artist}\u0000${c.album}\u0000${c.durationMs}"
+        junkMemo[key]?.let { return it }
+        val junk = c.durationMs in 1 until MIN_DURATION_MS || c.durationMs > MAX_DURATION_MS ||
+            JUNK_TITLE.containsMatchIn(c.title) || videoLike(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album) ||
+            com.ikko.aura.reco.authority.CompilationTitles.matches(c.title) || com.ikko.aura.reco.authority.CompilationTitles.matches(c.album)
+        if (junkMemo.size > JUNK_MEMO_MAX) junkMemo.clear()
+        junkMemo[key] = junk
+        return junk
+    }
+
     fun excluded(c: Candidate, ctx: RankContext): Exclusion? {
         if (ArtistNames.involves(c.credits, c.artist, ctx.blocked) ||
             c.extraCredits.any { ArtistNames.key(it) in ctx.blocked }
@@ -84,10 +102,7 @@ object Eligibility {
         if (c.id in ctx.hidden || c.identity in ctx.hidden) return Exclusion.HIDDEN
         // An album the listener refused: none of its songs, however the source numbers them.
         if (ctx.hidden.isNotEmpty() && AlbumKeys.of(c.albumRef, c.album, c.artist).any { it in ctx.hidden }) return Exclusion.HIDDEN
-        if (c.durationMs in 1 until MIN_DURATION_MS || c.durationMs > MAX_DURATION_MS ||
-            JUNK_TITLE.containsMatchIn(c.title) || videoLike(c.title) || JUNK_ARTIST.containsMatchIn(c.artist) || JUNK_TITLE.containsMatchIn(c.album) ||
-            com.ikko.aura.reco.authority.CompilationTitles.matches(c.title) || com.ikko.aura.reco.authority.CompilationTitles.matches(c.album)
-        ) return Exclusion.JUNK
+        if (isJunk(c)) return Exclusion.JUNK
         if (c.identity in ctx.profile.knownTracks) return Exclusion.KNOWN
         if (ctx.local.contains(TrackIdentity.Entry(c.title, c.artist, c.durationMs, c.extraCredits))) return Exclusion.LOCAL_DUPLICATE
         // An album the listener has: its other songs are not a discovery either.
@@ -174,7 +189,30 @@ object Ranker {
 
     private const val MOOD_MIN_TASTE = 0.12
 
-    private class Scored(val c: Candidate, val score: Double, val reason: Reason, val cluster: String)
+    private class Scored(val c: Candidate, val score: Double, val reason: Reason, val cluster: String) {
+        val primary: String = c.credits.firstOrNull().orEmpty()
+        val albumKey: String = if (c.album.isBlank()) "" else ArtistNames.key(c.album) + "|" + primary
+    }
+
+    /**
+     * How much MMR trades relevance for variety (see [Diversifier]): 1 is the plain ranking, 0 variety alone. At 0.75 a second song of the same seed
+     * comes in only when it is clearly better than a song from somewhere else.
+     */
+    private const val MMR_LAMBDA = 0.75
+
+    /** How alike two candidates are for the purpose of a varied list: same artist, same album, same seed, same family of styles. */
+    private fun likeness(a: Scored, b: Scored, families: (String) -> Set<String>): Double {
+        if (a.primary.isNotEmpty() && a.primary == b.primary) return 1.0
+        if (a.albumKey.isNotEmpty() && a.albumKey == b.albumKey) return 0.8
+        var s = if (a.cluster.isNotEmpty() && a.cluster == b.cluster) 0.45 else 0.0
+        val fa = families(a.primary)
+        val fb = families(b.primary)
+        if (fa.isNotEmpty() && fb.isNotEmpty()) {
+            val inter = fa.count { it in fb }
+            if (inter > 0) s = maxOf(s, 0.3 * inter / (fa.size + fb.size - inter))
+        }
+        return s
+    }
 
     /**
      * The songs of [kind] chosen from [pool] (already merged), in order. [used] holds the identities taken by playlists
@@ -203,25 +241,24 @@ object Ranker {
             perCluster.merge(s.cluster, 1, Int::plus)
             return true
         }
+        // The styles of each artist, by their own tags: what tells two artists of one family from two of different worlds.
+        val familyMemo = HashMap<String, Set<String>>()
+        val families: (String) -> Set<String> = { k -> familyMemo.getOrPut(k) { ctx.artistTags[k]?.let { StyleFit.families(it) }.orEmpty() } }
+        val alike: (Scored, Scored) -> Double = { a, b -> likeness(a, b, families) }
         val chosen = ArrayList<Scored>()
+        // The set is chosen by MMR — the best songs, but a second song of the same artist, album or seed must earn its place against a song
+        // from elsewhere — and then given back best first, which is what the explanations and the sequencing read.
         if (kind == RecoKind.DISCOVERY) {
             // A discovery is mostly artists the listener does not know: those are taken first, and the ones they do
             // know are a minority of the list (30 %), however few strangers there are.
             val strangers = scored.filter { !knownArtist(it.c) }
-            strangers.forEach { if (chosen.size < spec.target && admit(it)) chosen += it }
-            val allowedKnown = (chosen.size * 3) / 7
-            var known = 0
-            for (s in scored.filter { knownArtist(it.c) }) {
-                if (known >= allowedKnown || chosen.size >= spec.target) break
-                if (admit(s)) { chosen += s; known++ }
-            }
-            chosen.sortByDescending { it.score }
+            chosen += Diversifier.select(strangers, spec.target, MMR_LAMBDA, { it.score }, alike, ::admit)
+            val allowedKnown = minOf((chosen.size * 3) / 7, spec.target - chosen.size)
+            chosen += Diversifier.select(scored.filter { knownArtist(it.c) }, allowedKnown, MMR_LAMBDA, { it.score }, alike, ::admit)
         } else {
-            for (s in scored) {
-                if (chosen.size >= spec.target) break
-                if (admit(s)) chosen += s
-            }
+            chosen += Diversifier.select(scored, spec.target, MMR_LAMBDA, { it.score }, alike, ::admit)
         }
+        chosen.sortByDescending { it.score }
         val picks = chosen.map { Pick(it.c, it.reason, it.score) }
         // A cold profile cannot fill a playlist honestly: fewer songs than the minimum is left to the caller, which
         // keeps the previous list rather than padding it.
