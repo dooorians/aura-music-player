@@ -325,7 +325,7 @@ fun AlbumPageContent(
                     contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                     verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    item(key = "header") {
+                    item(key = "header", contentType = "header") {
                         AlbumHeader(
                             onArtist = {
                                 uiState.tracks.firstOrNull()?.let { t ->
@@ -387,7 +387,7 @@ fun AlbumPageContent(
                             },
                         )
                     }
-                    if (uiState.loading) items(SKELETON_ROWS) { index ->
+                    if (uiState.loading) items(SKELETON_ROWS, key = { "skeleton_$it" }, contentType = { "skeleton" }) { index ->
                         // The rows' own measures (a row is 140 design units tall, the number and the time at its two ends).
                         val u = com.ikko.aura.ui.components.designUnit()
                         Row(
@@ -401,7 +401,7 @@ fun AlbumPageContent(
                             com.ikko.aura.ui.components.SkeletonBar(Modifier.width(u * 90f).height(u * 26f))
                         }
                     }
-                    itemsIndexed(uiState.tracks, key = { _, track -> track.id }) { index, track ->
+                    itemsIndexed(uiState.tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                         Box(Modifier.heroRise(index, rows = true)) {
                         AlbumTrackRow(
                             number = index + 1,

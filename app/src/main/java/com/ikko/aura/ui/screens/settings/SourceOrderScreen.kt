@@ -67,7 +67,7 @@ fun SourceOrderScreen(viewModel: SourceOrderViewModel = hiltViewModel()) {
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
-            item {
+            item(key = "source_order_header", contentType = "header") {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp)) {
                     Text(
                         text = "Priorité des sources",
@@ -83,7 +83,7 @@ fun SourceOrderScreen(viewModel: SourceOrderViewModel = hiltViewModel()) {
                     )
                 }
             }
-            itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
+            itemsIndexed(entries, key = { _, entry -> entry.id }, contentType = { _, _ -> "source" }) { index, entry ->
                 val isDragged = draggedIndex == index
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

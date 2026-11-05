@@ -312,7 +312,7 @@ private fun LyricsPanel(
                 end = 22.dp,
             ),
         ) {
-            itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
+            itemsIndexed(lines, key = { index, _ -> index }, contentType = { _, line -> if (line.isWordSynced) "line_words" else "line" }) { index, line ->
                 val isActive by remember(index) { derivedStateOf { activeIndex.intValue == index } }
 
                 val lineHero = com.ikko.aura.ui.components.LocalHero.current

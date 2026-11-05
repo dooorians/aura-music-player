@@ -223,7 +223,7 @@ fun PlaylistScreen(
                 contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                item(key = "header") {
+                item(key = "header", contentType = "header") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -391,7 +391,7 @@ fun PlaylistScreen(
                     }
                 }
                 if (current.tracks.isEmpty() && current.unavailable.isEmpty()) {
-                    item(key = "empty") {
+                    item(key = "empty", contentType = "empty") {
                         Text(
                             text = if (isFavorites) "Touche le cœur dans le lecteur pour ajouter un titre ici"
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
@@ -403,7 +403,7 @@ fun PlaylistScreen(
                         )
                     }
                 }
-                itemsIndexed(current.tracks, key = { _, track -> track.id }) { index, track ->
+                itemsIndexed(current.tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                     Box(Modifier.heroRise(index, rows = true)) {
                     AlbumTrackRow(
                         number = index + 1,
@@ -443,7 +443,7 @@ fun PlaylistScreen(
                     )
                     }
                 }
-                items(current.unavailable, key = { "gone-${it.id}" }) { entry ->
+                items(current.unavailable, key = { "gone-${it.id}" }, contentType = { "unavailable" }) { entry ->
                     Box(Modifier.heroRise(9)) {
                         UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
                     }

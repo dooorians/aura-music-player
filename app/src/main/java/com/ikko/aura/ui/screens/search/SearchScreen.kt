@@ -390,10 +390,10 @@ fun SearchPanel(
                             // One block per source, drawn in the order of the priority the user set (Réglages).
                             val localBlock: LazyListScope.() -> Unit = {
                                 if (showLocal && showOnline && uiState.hasResults) {
-                                    item(key = "group_local") { GroupLabel("Dans ta bibliothèque", Modifier.rise(0)) }
+                                    item(key = "group_local", contentType = "group_label") { GroupLabel("Dans ta bibliothèque", Modifier.rise(0)) }
                                 }
                                 if (uiState.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
-                                    itemsIndexed(uiState.artists, key = { _, a -> "artist_${a.id}" }) { n, artist ->
+                                    itemsIndexed(uiState.artists, key = { _, a -> "artist_${a.id}" }, contentType = { _, _ -> "artist" }) { n, artist ->
                                         SearchRow(
                                             modifier = Modifier.animateItem().rise(n),
                                             title = artist.name, subtitle = "Artiste", query = query, accent = accent,
@@ -406,7 +406,7 @@ fun SearchPanel(
                                     }
                                 }
                                 if (uiState.albums.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ALBUMS)) {
-                                    itemsIndexed(uiState.albums, key = { _, a -> "album_${a.id}" }) { n, album ->
+                                    itemsIndexed(uiState.albums, key = { _, a -> "album_${a.id}" }, contentType = { _, _ -> "album" }) { n, album ->
                                         SearchRow(
                                             modifier = Modifier.animateItem().rise(n + uiState.artists.size.coerceAtMost(3)),
                                             title = album.title, subtitle = "Album · ${album.artist}", query = query, accent = accent,
@@ -420,7 +420,7 @@ fun SearchPanel(
                                     }
                                 }
                                 if (uiState.tracks.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
-                                    itemsIndexed(uiState.tracks, key = { _, t -> "track_${t.id}" }) { index, track ->
+                                    itemsIndexed(uiState.tracks, key = { _, t -> "track_${t.id}" }, contentType = { _, _ -> "track" }) { index, track ->
                                         SearchRow(
                                             modifier = Modifier.animateItem().rise(index),
                                             title = track.title, subtitle = "Titre · ${track.artist}", query = query, accent = accent,
@@ -437,7 +437,7 @@ fun SearchPanel(
                             }
                             val remoteBlock: LazyListScope.(RemoteSection) -> Unit = { section ->
                                 if (section.artists.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ARTISTS)) {
-                                    itemsIndexed(section.artists.take(5), key = { _, n -> "rs_artist_${section.sourceId}_$n" }) { n, name ->
+                                    itemsIndexed(section.artists.take(5), key = { _, n -> "rs_artist_${section.sourceId}_$n" }, contentType = { _, _ -> "remote_artist" }) { n, name ->
                                         SearchRow(
                                             modifier = Modifier.rise(n),
                                             title = name, subtitle = "Artiste", query = query, accent = accent,
@@ -450,7 +450,7 @@ fun SearchPanel(
                                     }
                                 }
                                 if (section.albums.isNotEmpty() && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.ALBUMS)) {
-                                    itemsIndexed(section.albums, key = { _, a -> "rs_album_${a.id}" }) { n, album: YtmAlbumRef ->
+                                    itemsIndexed(section.albums, key = { _, a -> "rs_album_${a.id}" }, contentType = { _, _ -> "remote_album" }) { n, album: YtmAlbumRef ->
                                         SearchRow(
                                             modifier = Modifier.rise(n),
                                             title = album.title, subtitle = "Album · ${album.artist}", query = query, accent = accent,
@@ -466,11 +466,11 @@ fun SearchPanel(
                                     }
                                 }
                                 if (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS) {
-                                    if (section.loading) item(key = "rs_loading_${section.sourceId}") { YtmNote("Recherche…") }
-                                    if (section.error) item(key = "rs_error_${section.sourceId}") {
+                                    if (section.loading) item(key = "rs_loading_${section.sourceId}", contentType = "note") { YtmNote("Recherche…") }
+                                    if (section.error) item(key = "rs_error_${section.sourceId}", contentType = "note") {
                                         YtmNote(if (section.sourceId == "unified") "Aucune source ne répond. Es-tu hors ligne ?" else "${section.name} ne répond pas")
                                     }
-                                    itemsIndexed(section.songs, key = { _, track -> "rs_song_${track.id}" }) { index, track ->
+                                    itemsIndexed(section.songs, key = { _, track -> "rs_song_${track.id}" }, contentType = { _, _ -> "remote_song" }) { index, track ->
                                         SearchRow(
                                             modifier = Modifier.animateItem().rise(index),
                                             title = track.title,
@@ -497,12 +497,12 @@ fun SearchPanel(
                                 if (showLocal) localBlock()
                                 if (showOnline) {
                                     if (showLocal && (unifiedRemote.hasContent || ytm.active)) {
-                                        item(key = "group_online") { GroupLabel("En ligne", Modifier.rise(0)) }
+                                        item(key = "group_online", contentType = "group_label") { GroupLabel("En ligne", Modifier.rise(0)) }
                                     }
                                     remoteBlock(unifiedRemote)
                                 }
                                 if (showOnline && unifiedHasMore && (uiState.filter == SearchFilter.ALL || uiState.filter == SearchFilter.TRACKS)) {
-                                    item(key = "more") {
+                                    item(key = "more", contentType = "more") {
                                         Text(
                                             text = if (unifiedLoadingMore) "Chargement…" else "Afficher plus de résultats",
                                             style = MaterialTheme.typography.labelLarge,

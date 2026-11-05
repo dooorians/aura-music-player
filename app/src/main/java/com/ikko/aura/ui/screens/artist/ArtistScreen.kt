@@ -182,7 +182,7 @@ fun ArtistPageContent(
                 .heroPageOut(),
             contentPadding = PaddingValues(top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
-            item {
+            item(key = "artist_header", contentType = "artist_header") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
                     // As the album pages: the picture on the left, the name and the counts beside it, then one row of actions.
                     val u = com.ikko.aura.ui.components.designUnit()
@@ -290,7 +290,7 @@ fun ArtistPageContent(
             }
 
             if (uiState.albums.isNotEmpty() || loading) {
-                item {
+                item(key = "artist_albums_title", contentType = "section_title") {
                     Text(
                         text = "Albums",
                         style = MaterialTheme.typography.headlineMedium,
@@ -298,7 +298,7 @@ fun ArtistPageContent(
                         modifier = Modifier.heroRise(2).padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
-                item {
+                item(key = "artist_albums_row", contentType = "album_row") {
                     // From the player, the playing song's album is already there, with its own cover, for the copy to
                     // land on; the others are grey until the page has them.
                     val landingId = if (hero.fromPlayer) hero.coverAlbumId else null
@@ -307,7 +307,7 @@ fun ArtistPageContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         if (loading) {
-                            itemsIndexed(List(4) { it }, key = { _, it -> "loading$it" }) { index, _ ->
+                            items(4, key = { "loading$it" }, contentType = { "album_card_loading" }) { index ->
                                 if (index == 0 && landingId != null) {
                                     ArtistAlbumCard(
                                         album = Album(
@@ -331,7 +331,7 @@ fun ArtistPageContent(
                                 }
                             }
                         }
-                        if (!loading) itemsIndexed(uiState.albums, key = { _, it -> it.id }) { index, album ->
+                        if (!loading) itemsIndexed(uiState.albums, key = { _, it -> it.id }, contentType = { _, _ -> "album_card" }) { index, album ->
                             ArtistAlbumCard(
                                 album = album,
                                 index = index,
@@ -349,11 +349,11 @@ fun ArtistPageContent(
                         }
                     }
                 }
-                item { Spacer(Modifier.height(16.dp)) }
+                item(key = "artist_albums_gap", contentType = "gap") { Spacer(Modifier.height(16.dp)) }
             }
 
             if (uiState.singles.isNotEmpty() && !loading) {
-                item {
+                item(key = "artist_singles_title", contentType = "section_title") {
                     Text(
                         text = "Singles & EP",
                         style = MaterialTheme.typography.headlineMedium,
@@ -361,12 +361,12 @@ fun ArtistPageContent(
                         modifier = Modifier.heroRise(4).padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
-                item {
+                item(key = "artist_singles_row", contentType = "album_row") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        itemsIndexed(uiState.singles, key = { _, it -> "single${it.id}" }) { index, album ->
+                        itemsIndexed(uiState.singles, key = { _, it -> "single${it.id}" }, contentType = { _, _ -> "album_card" }) { index, album ->
                             ArtistAlbumCard(
                                 album = album,
                                 index = index,
@@ -383,10 +383,10 @@ fun ArtistPageContent(
                         }
                     }
                 }
-                item { Spacer(Modifier.height(16.dp)) }
+                item(key = "artist_singles_gap", contentType = "gap") { Spacer(Modifier.height(16.dp)) }
             }
 
-            item {
+            item(key = "artist_tracks_title", contentType = "section_title") {
                 Text(
                     text = "Titres",
                     style = MaterialTheme.typography.headlineMedium,
@@ -395,7 +395,7 @@ fun ArtistPageContent(
                 )
             }
 
-            if (loading) items(6) { index ->
+            if (loading) items(6, key = { "track_skeleton_$it" }, contentType = { "track_skeleton" }) { index ->
                 // The row's own measures (68 dp, the cover 4 dp in, the words 12 dp after it, 20.4 and 16 dp lines).
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heroRise(index, rows = true),
@@ -409,7 +409,7 @@ fun ArtistPageContent(
                     }
                 }
             }
-            if (!loading) itemsIndexed(uiState.tracks, key = { _, it -> it.id }) { index, track ->
+            if (!loading) itemsIndexed(uiState.tracks, key = { _, it -> it.id }, contentType = { _, _ -> "track" }) { index, track ->
                 TrackListItem(
                     track = track,
                     onClick = {

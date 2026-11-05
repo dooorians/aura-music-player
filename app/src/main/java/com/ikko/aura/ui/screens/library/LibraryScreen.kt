@@ -943,7 +943,7 @@ private fun ArtistList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
     ) {
-        itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, pair ->
+        itemsIndexed(rows, key = { _, r -> r.first().id }, contentType = { _, _ -> "track_pair" }) { rowIndex, pair ->
             Row(
                 modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth().height(u * 132f),
                 horizontalArrangement = Arrangement.spacedBy(u * 40f),
@@ -1041,7 +1041,7 @@ internal fun PlaylistsList(
         contentPadding = PaddingValues(start = u * 40f, end = u * 40f, top = u * 236f, bottom = listBottomPadding() + 12.dp),
         verticalArrangement = Arrangement.spacedBy(u * 32f),
     ) {
-        if (creating) item {
+        if (creating) item(key = "create_playlist", contentType = "create_playlist") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = newName,
@@ -1067,7 +1067,7 @@ internal fun PlaylistsList(
         }
 
         if (playlists.isEmpty() && !creating) {
-            item {
+            item(key = "no_playlists", contentType = "empty") {
                 Text(
                     text = "Aucune playlist pour le moment",
                     style = MaterialTheme.typography.bodyLarge,
@@ -1076,7 +1076,7 @@ internal fun PlaylistsList(
             }
         }
 
-        itemsIndexed(rows, key = { _, r -> r.first().id }) { rowIndex, trio ->
+        itemsIndexed(rows, key = { _, r -> r.first().id }, contentType = { _, _ -> "playlist_trio" }) { rowIndex, trio ->
             Row(
                 modifier = Modifier.tabStagger(rowIndex, 12, 300, risePx = 16f, baseMs = 0).fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(u * 26f),

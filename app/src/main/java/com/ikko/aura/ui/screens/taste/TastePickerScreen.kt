@@ -99,7 +99,7 @@ internal fun TastePickerContent(state: TastePickerUiState, onToggle: (PickerArti
                 horizontalArrangement = Arrangement.spacedBy(u * 26f),
                 verticalArrangement = Arrangement.spacedBy(u * 34f),
             ) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "header") {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "header", contentType = "header") {
                     // The header of the settings pages, as it is: 112 down, 40 in, 84 design px, ExtraBold, 72 % white.
                     Column(Modifier.padding(top = u * 112f, bottom = u * 24f)) {
                         Text(
@@ -117,11 +117,11 @@ internal fun TastePickerContent(state: TastePickerUiState, onToggle: (PickerArti
                         )
                     }
                 }
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "search") {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "search", contentType = "search") {
                     SearchField(state.query, onQuery, Modifier.padding(bottom = u * 10f))
                 }
                 if (state.query.isNotBlank() && !state.searching && state.results.isEmpty()) {
-                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "none") {
+                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "none", contentType = "empty") {
                         Text(
                             "Aucun artiste trouvé pour « ${state.query.trim()} »", color = Muted,
                             style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = designSp(34f), lineHeight = designSp(44f)),
@@ -129,7 +129,7 @@ internal fun TastePickerContent(state: TastePickerUiState, onToggle: (PickerArti
                         )
                     }
                 }
-                items(state.shown, key = { it.key }) { artist ->
+                items(state.shown, key = { it.key }, contentType = { "artist" }) { artist ->
                     ArtistBubbleItem(
                         artist = artist,
                         selected = artist.key in state.selected,

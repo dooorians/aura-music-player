@@ -114,12 +114,12 @@ fun AddToPlaylistDialog(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 ) {
                     if (recent.isNotEmpty()) {
-                        item(key = "h-recent") { SectionTitle("Récentes") }
-                        items(recent, key = { "r${it.id}" }) { PlaylistRow(it) { add(it) } }
+                        item(key = "h-recent", contentType = "section_title") { SectionTitle("Récentes") }
+                        items(recent, key = { "r${it.id}" }, contentType = { "playlist_row" }) { PlaylistRow(it) { add(it) } }
                     }
-                    item(key = "h-all") { SectionTitle("Toutes les playlists") }
+                    item(key = "h-all", contentType = "section_title") { SectionTitle("Toutes les playlists") }
                     if (shown.isEmpty()) {
-                        item(key = "none") {
+                        item(key = "none", contentType = "empty") {
                             Text(
                                 text = if (playlists.isEmpty()) "Aucune playlist pour le moment" else "Aucun résultat",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -128,7 +128,7 @@ fun AddToPlaylistDialog(
                             )
                         }
                     }
-                    items(shown, key = { "a${it.id}" }) { PlaylistRow(it) { add(it) } }
+                    items(shown, key = { "a${it.id}" }, contentType = { "playlist_row" }) { PlaylistRow(it) { add(it) } }
                 }
             }
             Box(Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 24.dp)) {
