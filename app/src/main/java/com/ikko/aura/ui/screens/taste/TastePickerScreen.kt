@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -234,14 +235,15 @@ fun ArtistBubbleItem(
 @Composable
 private fun ConfirmBar(state: TastePickerUiState, onConfirm: () -> Unit, modifier: Modifier, height: androidx.compose.ui.unit.Dp) {
     val u = designUnit()
-    val progress by animateFloatAsState(
+    // Read while measuring the gauge below: its 220 ms fill resizes the gauge alone, the bar is not recomposed.
+    val progress = animateFloatAsState(
         (state.selected.size.toFloat() / state.minSelection).coerceIn(0f, 1f), tween(220, easing = FastOutSlowInEasing), label = "progress",
     )
     val accent = LocalEctoPalette.current.cols[3]
     Row(
         modifier.fillMaxWidth().height(height)
             // The bubbles fade under the bar rather than showing through it.
-            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f), Color.Black.copy(alpha = 0.9f))))
+            .background(CONFIRM_BAR_FADE)
             .padding(horizontal = u * 40f, vertical = u * 28f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(u * 28f),
@@ -259,7 +261,18 @@ private fun ConfirmBar(state: TastePickerUiState, onConfirm: () -> Unit, modifie
             )
             // A gauge to the minimum, in the page's accent.
             Box(Modifier.fillMaxWidth().height(u * 10f).clip(CircleShape).background(Color.White.copy(alpha = 0.16f))) {
-                Box(Modifier.fillMaxWidth(progress).height(u * 10f).clip(CircleShape).background(accent))
+                Box(
+                    Modifier
+                        // Modifier.fillMaxWidth(progress.value), read at measure time.
+                        .layout { measurable, constraints ->
+                            val w = if (constraints.hasBoundedWidth) {
+                                Math.round(constraints.maxWidth * progress.value).coerceIn(constraints.minWidth, constraints.maxWidth)
+                            } else -1
+                            val placeable = measurable.measure(if (w >= 0) constraints.copy(minWidth = w, maxWidth = w) else constraints)
+                            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                        }
+                        .height(u * 10f).clip(CircleShape).background(accent),
+                )
             }
         }
         AuraButton(
@@ -312,3 +325,8 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, modifier: Modi
         }
     }
 }
+
+/** The confirm bar's fade from the bubbles into its dark foot; one brush, not one per recomposition. */
+private val CONFIRM_BAR_FADE = androidx.compose.ui.graphics.Brush.verticalGradient(
+    listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f), Color.Black.copy(alpha = 0.9f)),
+)

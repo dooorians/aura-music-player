@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -152,13 +153,14 @@ private fun SourceSwitch(
 @Composable
 private fun Segment(label: String, selected: Boolean, enabled: Boolean, fill: Color, ink: Color, onClick: () -> Unit) {
     val u = designUnit()
-    val background by animateColorAsState(if (selected) fill else Color.Transparent, label = "segment-fill")
+    // Read while drawing: the fill's fade redraws the segment, it does not recompose it.
+    val background = animateColorAsState(if (selected) fill else Color.Transparent, label = "segment-fill")
     val text by animateColorAsState(if (selected) ink else Color.White.copy(alpha = 0.78f), label = "segment-ink")
     Box(
         modifier = Modifier
             .height(u * (BUTTON_U - 14f))
             .clip(CircleShape)
-            .background(background)
+            .drawBehind { drawRect(background.value) }
             .alpha(if (enabled) 1f else 0.4f)
             .clickable(enabled = enabled && !selected, onClick = onClick)
             .padding(horizontal = u * 30f),

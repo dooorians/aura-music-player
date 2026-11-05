@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -216,12 +217,13 @@ internal fun IosSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val unitPx = with(androidx.compose.ui.platform.LocalDensity.current) { u.toPx() }
     val accent = settingsAccent()
     val t by animateFloatAsState(if (checked) 1f else 0f, tween(220), label = "ios-switch")
-    val track by animateColorAsState(if (checked) accent else Color.White.copy(alpha = 0.2f), tween(220), label = "ios-switch-track")
+    // Read while drawing, like the knob's offset: the 220 ms turn of the switch recomposes nothing.
+    val track = animateColorAsState(if (checked) accent else Color.White.copy(alpha = 0.2f), tween(220), label = "ios-switch-track")
     Box(
         Modifier
             .size(width = u * 112f, height = u * 68f)
             .clip(CircleShape)
-            .background(track)
+            .drawBehind { drawRect(track.value) }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

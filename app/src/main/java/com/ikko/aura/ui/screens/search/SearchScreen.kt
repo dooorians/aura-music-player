@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,7 +23,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -636,13 +636,14 @@ private fun InitialCover(name: String) {
 @Composable
 private fun SearchFilterChip(text: String, selected: Boolean, accent: Color, onClick: () -> Unit) {
     val u = designUnit()
-    val bg by animateColorAsState(if (selected) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(200), label = "chip-bg")
+    // The fill is read while drawing: its 200 ms fade redraws the chip, it does not recompose it.
+    val bg = animateColorAsState(if (selected) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(200), label = "chip-bg")
     val fg by animateColorAsState(if (selected) accent else Color(0xFFE6E6EC), tween(200), label = "chip-fg")
     Box(
         modifier = Modifier
             .height(u * 76f)
             .clip(CircleShape)
-            .background(bg)
+            .drawBehind { drawRect(bg.value) }
             .clickable(onClick = onClick)
             .padding(horizontal = u * 34f),
         contentAlignment = Alignment.Center,
@@ -655,13 +656,13 @@ private fun SearchFilterChip(text: String, selected: Boolean, accent: Color, onC
 @Composable
 private fun SourceChip(name: String, on: Boolean, accent: Color, onClick: () -> Unit) {
     val u = designUnit()
-    val bg by animateColorAsState(if (on) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(200), label = "src-bg")
+    val bg = animateColorAsState(if (on) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(200), label = "src-bg")
     val fg by animateColorAsState(if (on) accent else Color(0xFF8E93A1), tween(200), label = "src-fg")
     Row(
         modifier = Modifier
             .height(u * 76f)
             .clip(CircleShape)
-            .background(bg)
+            .drawBehind { drawRect(bg.value) }
             .clickable(onClick = onClick)
             .padding(horizontal = u * 30f),
         verticalAlignment = Alignment.CenterVertically,
@@ -676,20 +677,29 @@ private fun SourceChip(name: String, on: Boolean, accent: Color, onClick: () -> 
 @Composable
 private fun ScopeSelector(scope: SearchScope, onScope: (SearchScope) -> Unit, modifier: Modifier = Modifier) {
     val u = designUnit()
-    val options = listOf(SearchScope.LOCAL to "Local", SearchScope.ONLINE to "En ligne", SearchScope.ALL to "Tout")
-    BoxWithConstraints(
+    val options = SCOPE_OPTIONS
+    // Which third the thumb is over, animated: the same 300 ms as the thumb's offset it stands for (u * 8 + cell * slot).
+    val slot = animateFloatAsState(options.indexOfFirst { it.first == scope }.toFloat(), tween(300, easing = Morph), label = "scope-thumb")
+    // A plain Box: the cell's width is worked out while measuring the thumb, not by subcomposing the whole selector.
+    Box(
         modifier = modifier.height(u * 84f).clip(CircleShape).background(Color(0xFF15151B)),
     ) {
-        val inner = maxWidth - u * 16f
-        val cell = inner / 3
-        val x by animateDpAsState(u * 8f + cell * options.indexOfFirst { it.first == scope }, tween(300, easing = Morph), label = "scope-thumb")
         Box(
             Modifier
-                .graphicsLayer {
-                    translationX = x.toPx()
-                    translationY = (u * 8f).toPx()
+                .layout { measurable, constraints ->
+                    val cell = (constraints.maxWidth.toDp() - u * 16f) / 3
+                    // Modifier.size(cell, u * 68f), held inside what the selector allows.
+                    val w = cell.roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
+                    val h = (u * 68f).roundToPx().coerceIn(constraints.minHeight, constraints.maxHeight)
+                    val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, h))
+                    layout(placeable.width, placeable.height) {
+                        // The slide is a layer property: a frame of it moves the thumb without measuring anything again.
+                        placeable.placeWithLayer(0, 0) {
+                            translationX = (u * 8f).toPx() + cell.toPx() * slot.value
+                            translationY = (u * 8f).toPx()
+                        }
+                    }
                 }
-                .size(cell, u * 68f)
                 .clip(CircleShape)
                 .background(Color(0xFF30303C)),
         )
@@ -949,10 +959,11 @@ private fun androidx.compose.ui.graphics.GraphicsLayerScope.rise(
 @Composable
 private fun SourceSwitch(on: Boolean, accent: Color) {
     val u = designUnit()
-    val bg by animateColorAsState(if (on) accent else Color(0xFF3A3A46), tween(220), label = "sw-bg")
-    val knob by animateColorAsState(if (on) Color(0xFF241810) else Color(0xFF9A9AA6), tween(220), label = "sw-knob")
+    // Both colours read while drawing, like the knob's slide: the switch's 220 ms turn recomposes nothing.
+    val bg = animateColorAsState(if (on) accent else Color(0xFF3A3A46), tween(220), label = "sw-bg")
+    val knob = animateColorAsState(if (on) Color(0xFF241810) else Color(0xFF9A9AA6), tween(220), label = "sw-knob")
     val x by animateDpAsState(if (on) u * 56f else u * 8f, tween(220, easing = Morph), label = "sw-x")
-    Box(Modifier.size(u * 112f, u * 64f).clip(CircleShape).background(bg)) {
+    Box(Modifier.size(u * 112f, u * 64f).clip(CircleShape).drawBehind { drawRect(bg.value) }) {
         Box(
             Modifier
                 .graphicsLayer {
@@ -961,7 +972,7 @@ private fun SourceSwitch(on: Boolean, accent: Color) {
                 }
                 .size(u * 48f)
                 .clip(CircleShape)
-                .background(knob),
+                .drawBehind { drawRect(knob.value) },
         )
     }
 }
@@ -1027,3 +1038,5 @@ private fun YtmNote(text: String) {
     )
 }
 
+/** The three scopes of the selector, made once rather than on every recomposition of it. */
+private val SCOPE_OPTIONS = listOf(SearchScope.LOCAL to "Local", SearchScope.ONLINE to "En ligne", SearchScope.ALL to "Tout")
