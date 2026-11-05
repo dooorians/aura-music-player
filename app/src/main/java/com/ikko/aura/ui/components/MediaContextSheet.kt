@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /** What a long press landed on. The menu's contents follow from it. */
+@androidx.compose.runtime.Immutable
 sealed interface LibraryContextTarget {
     data class TrackTarget(val track: Track) : LibraryContextTarget
     data class AlbumTarget(val album: Album, val tracks: List<Track>) : LibraryContextTarget

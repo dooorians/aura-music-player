@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+@androidx.compose.runtime.Immutable
 sealed interface LyricsUiState {
     data object Loading : LyricsUiState
     data object Unavailable : LyricsUiState
