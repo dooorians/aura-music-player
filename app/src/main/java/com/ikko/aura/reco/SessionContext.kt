@@ -80,15 +80,20 @@ class SessionContext {
 
     /** What the song that just ended sounded like, when it has been analysed. */
     fun recordAcoustics(bpm: Double, energy: Double) = synchronized(lock) {
-        if (bpm <= 0.0 && energy <= 0.0) return@synchronized
-        acoustics.addLast(Acoustic(bpm, energy))
+        // A tempo no song has (0, NaN, a tag that says 999) and an energy that is not a number are "not known", never a value.
+        val b = Tempo.sanitize(bpm) ?: 0.0
+        val e = energy.takeIf { it.isFinite() && it > 0.0 } ?: 0.0
+        if (b <= 0.0 && e <= 0.0) return@synchronized
+        acoustics.addLast(Acoustic(b, e))
         while (acoustics.size > RecommendationConfig.SESSION_ACOUSTICS) acoustics.removeFirst()
     }
 
     /** Null until enough songs have been analysed to say anything. */
     fun acousticProfile(): AcousticProfile? = synchronized(lock) {
         val c = RecommendationConfig
-        val bpms = acoustics.map { it.bpm }.filter { it > 0.0 }
+        // Half and double time are one pulse: every tempo is brought to the octave of the first before they are compared.
+        val raw = acoustics.map { it.bpm }.filter { it > 0.0 }
+        val bpms = raw.firstOrNull()?.let { ref -> raw.map { alignOctave(ref, it) } }.orEmpty()
         val energies = acoustics.map { it.energy }.filter { it > 0.0 }
         if (bpms.size < c.COHERENCE_MIN_SAMPLES && energies.size < c.COHERENCE_MIN_SAMPLES) return@synchronized null
         val bpmMean = bpms.takeIf { it.size >= c.COHERENCE_MIN_SAMPLES }?.average() ?: 0.0
@@ -105,22 +110,43 @@ class SessionContext {
      * What a song costs for breaking the rhythm of the session: only when the last songs agree on a tempo (or an energy) and this
      * one is far from it. Half and double time are the same pulse, so they are not a break.
      */
-    fun coherencePenalty(bpm: Double?, energy: Double?): Double {
-        val c = RecommendationConfig
-        val p = acousticProfile() ?: return 0.0
-        var penalty = 0.0
-        if (p.bpmSettled && bpm != null && bpm > 0.0) {
-            val gap = listOf(bpm, bpm * 2, bpm / 2).minOf { abs(it - p.bpm) }
-            penalty += max(0.0, gap - c.COHERENCE_BPM_TOLERANCE) * c.COHERENCE_BPM_PENALTY_PER
-        }
-        if (p.energySettled && energy != null && energy > 0.0) {
-            val gap = abs(energy - p.energy) / p.energy
-            penalty += (gap - 0.35).coerceIn(0.0, 1.0) * c.COHERENCE_ENERGY_PENALTY
-        }
-        return min(c.COHERENCE_MAX, penalty)
-    }
+    fun coherencePenalty(bpm: Double?, energy: Double?): Double = coherencePenaltyOf(acousticProfile(), bpm, energy)
 
     fun recentTrackIds(): Set<String> = synchronized(lock) { recentTracks.toHashSet() }
     fun lastArtists(): Set<String> = synchronized(lock) { recentArtists.toHashSet() }
     fun penalizedGenres(): Set<String> = synchronized(lock) { penalized.toHashSet() }
+
+    companion object {
+        /** [bpm] times or divided by two until it is within a tritone of [ref] (×0.71..×1.41). */
+        fun alignOctave(ref: Double, bpm: Double): Double {
+            if (!(ref > 0.0) || !(bpm > 0.0) || !ref.isFinite() || !bpm.isFinite()) return bpm
+            var x = bpm
+            while (x / ref >= SQRT2) x /= 2
+            while (x / ref < 1 / SQRT2) x *= 2
+            return x
+        }
+
+        private const val SQRT2 = 1.4142135623730951
+
+        /**
+         * [coherencePenalty] against a profile read once: what a ranker scoring thousands of songs uses, so the session is not locked and its
+         * profile not rebuilt for each of them. An unknown tempo or energy costs nothing.
+         */
+        fun coherencePenaltyOf(p: AcousticProfile?, rawBpm: Double?, rawEnergy: Double?): Double {
+            val c = RecommendationConfig
+            if (p == null) return 0.0
+            val bpm = Tempo.sanitize(rawBpm)
+            val energy = rawEnergy?.takeIf { it.isFinite() }
+            var penalty = 0.0
+            if (p.bpmSettled && bpm != null && bpm > 0.0) {
+                val gap = listOf(bpm, bpm * 2, bpm / 2).minOf { abs(it - p.bpm) }
+                penalty += max(0.0, gap - c.COHERENCE_BPM_TOLERANCE) * c.COHERENCE_BPM_PENALTY_PER
+            }
+            if (p.energySettled && energy != null && energy > 0.0) {
+                val gap = abs(energy - p.energy) / p.energy
+                penalty += (gap - 0.35).coerceIn(0.0, 1.0) * c.COHERENCE_ENERGY_PENALTY
+            }
+            return min(c.COHERENCE_MAX, penalty)
+        }
+    }
 }

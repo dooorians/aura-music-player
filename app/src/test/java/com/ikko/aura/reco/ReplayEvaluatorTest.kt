@@ -49,6 +49,14 @@ class ReplayEvaluatorTest {
         assertTrue("coverage ${report.coverageAt10}", report.coverageAt10 > 0.4)
     }
 
+    @Test fun `the kept measures judge only the plays that were not left at once`() {
+        val report = ReplayEvaluator.run(library, listener(seed = 5, n = 500))
+        assertTrue("$report", report.keptSteps in 1 until report.steps)
+        assertTrue(report.keptHitAt10 in 0.0..1.0 && report.keptMeanReciprocalRank in 0.0..1.0 && report.skippedInTop10 in 0.0..1.0)
+        // What the listener keeps is what a ranker that learned them puts up: better than on all plays, skips included.
+        assertTrue("$report", report.keptHitAt10 > report.hitAt10)
+    }
+
     @Test fun `nothing to judge before the warm-up and in an empty library`() {
         assertEquals(0, ReplayEvaluator.run(library, listener(1, 10), warmup = 20).steps)
         assertEquals(0.0, ReplayEvaluator.run(emptyList(), listener(1, 50)).hitAt10, 0.0)

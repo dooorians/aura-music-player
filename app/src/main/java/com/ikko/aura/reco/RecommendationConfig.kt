@@ -92,6 +92,36 @@ object RecommendationConfig {
     /** An artist Last.fm lists as close to one the listener blocked: it is much less likely to please. */
     const val BLOCKED_NEIGHBOR_PENALTY = 30.0
 
+    /**
+     * Skip rate, smoothed: (early skips + [SKIP_PRIOR]·[SKIP_PRIOR_PLAYS]) / (plays + [SKIP_PRIOR_PLAYS]). What it is above the prior costs
+     * [W_SKIP_RATE] per unit: a song left early four times out of five is set back, one left once in ten plays is not.
+     */
+    const val W_SKIP_RATE = 6.0
+    const val SKIP_PRIOR = 0.15
+    const val SKIP_PRIOR_PLAYS = 4.0
+    /**
+     * Cold start: a song never played inherits what its styles earned, the mean affinity of the songs of each of its genres (shrunk toward zero with
+     * [COLD_GENRE_SHRINK] imaginary songs), times [W_COLD_START]. Clamped to [COLD_GENRE_MIN]..[COLD_GENRE_MAX] affinity points.
+     */
+    const val W_COLD_START = 0.35
+    const val COLD_GENRE_SHRINK = 5.0
+    const val COLD_GENRE_MIN = -10.0
+    const val COLD_GENRE_MAX = 18.0
+    /**
+     * Serendipity: an upper-confidence bonus for what was rarely heard, [W_UCB] · √(ln(1 + plays of the library) / (1 + plays of the song)),
+     * capped at [UCB_MAX]: the less a song was heard, the less is known of it, and the more a listen of it teaches.
+     */
+    const val W_UCB = 1.5
+    const val UCB_MAX = 5.0
+    /**
+     * Transition from the song playing to the next one: [W_TRANSITION_TEMPO] · (tempo affinity − ½) (see [Tempo], half and double time included),
+     * [W_TRANSITION_ENERGY] · (energy fit − ½). A side whose tempo or energy is unknown adds exactly nothing.
+     */
+    const val W_TRANSITION_TEMPO = 8.0
+    const val W_TRANSITION_ENERGY = 4.0
+    /** Two energies whose relative gap is this share keep e⁻¹ of their fit. */
+    const val TRANSITION_ENERGY_SIGMA = 0.35
+
     // --- phase 3: distribution ---
     const val SHARE_EXPLOIT = 0.70
     const val SHARE_EXPLORE = 0.20

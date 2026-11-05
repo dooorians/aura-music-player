@@ -43,6 +43,15 @@ object ReplayEvaluator {
         val randomHitAt10: Double,
         /** Distinct songs that appeared in a top 10, over the library: a ranker that always proposes the same few has a low one. */
         val coverageAt10: Double,
+        /**
+         * The same measures over the plays the listener kept (not left within [RecommendationConfig.QUICK_SKIP_MS]): putting first a song they skip
+         * at once is no success, so a ranker that learns from skips is judged here on what it should predict.
+         */
+        val keptSteps: Int = 0,
+        val keptHitAt10: Double = 0.0,
+        val keptMeanReciprocalRank: Double = 0.0,
+        /** Share of the judged top 10s that held a song the listener then skipped at once: lower is better. */
+        val skippedInTop10: Double = 0.0,
     ) {
         /** How much better than the best of the two baselines the ranker does at 10; above 1 it has learned something. */
         val liftAt10: Double get() = if (maxOf(popularityHitAt10, randomHitAt10) == 0.0) 0.0 else hitAt10 / maxOf(popularityHitAt10, randomHitAt10)
@@ -59,6 +68,7 @@ object ReplayEvaluator {
         var chance = 0.0
         var h1 = 0; var h5 = 0; var h10 = 0; var pop10 = 0
         var rr = 0.0
+        var kept = 0; var keptH10 = 0; var keptRr = 0.0; var skipShown = 0
         val shown = HashSet<String>()
         val firstAt = history.firstOrNull()?.atMs ?: 0L
 
@@ -83,6 +93,14 @@ object ReplayEvaluator {
                     if (rank <= 10) h10++
                     rr += 1.0 / rank
                     shown += ranked.take(10)
+                    val skippedAtOnce = e.transition == Transition.USER_SKIP && e.playedMs < RecommendationConfig.QUICK_SKIP_MS
+                    if (skippedAtOnce) {
+                        if (rank <= 10) skipShown++
+                    } else {
+                        kept++
+                        if (rank <= 10) keptH10++
+                        keptRr += 1.0 / rank
+                    }
                     // The same candidates, ordered by plays so far, and by chance.
                     val popular = ranked.sortedWith(compareByDescending<String> { stats[it]?.playCount ?: 0 }.thenBy { it }).take(10)
                     if (e.trackId in popular) pop10++
@@ -108,6 +126,10 @@ object ReplayEvaluator {
             popularityHitAt10 = share(pop10),
             randomHitAt10 = if (steps == 0) 0.0 else chance / steps,
             coverageAt10 = if (library.isEmpty()) 0.0 else shown.size.toDouble() / library.size,
+            keptSteps = kept,
+            keptHitAt10 = if (kept == 0) 0.0 else keptH10.toDouble() / kept,
+            keptMeanReciprocalRank = if (kept == 0) 0.0 else keptRr / kept,
+            skippedInTop10 = share(skipShown),
         )
     }
 }
