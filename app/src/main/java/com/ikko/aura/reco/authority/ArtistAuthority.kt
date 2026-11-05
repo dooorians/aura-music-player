@@ -192,32 +192,40 @@ class ArtistAuthority(
             score += 25
         }
 
-        // Tag overlap with Last.fm tags or listener context tags
-        val candTagNames = cand.tags.map { it.first.lowercase() }.toSet()
-        val tagOverlap = candTagNames.intersect(contextTags).size
-        score += tagOverlap * 30
+        // What the listener's context says (tags, a hint in the disambiguation, a country): it breaks a tie between namesakes, it never overturns the
+        // catalogue's own ranking. A Japanese "Blood Orange" the search ranked 13 points under Dev Hynes' was taken for him because its tags happened to share a word with
+        // his, the two sources not spelling "R&B" the same way.
+        val context = tagsContext(cand, contextTags)
+        return score + context.coerceAtMost(CONTEXT_CAP)
+    }
 
+    /** How much the context favours [cand]: tags in common (spelt the same way on both sides), the disambiguation, the country. */
+    private fun tagsContext(cand: MusicBrainzArtist, contextTags: Set<String>): Int {
+        fun canon(t: String) = com.ikko.aura.reco.GenreNormalizer.normalize(t)?.lowercase() ?: t.trim().lowercase()
+        val context = contextTags.map(::canon).toSet()
+        var bonus = 0
+        // Tag overlap with Last.fm tags or listener context tags
+        bonus += cand.tags.map { canon(it.first) }.toSet().intersect(context).size * 30
         // Disambiguation hint bonus
         if (!cand.disambiguation.isNullOrBlank()) {
             val disLower = cand.disambiguation.lowercase()
-            if (contextTags.any { t -> disLower.contains(t) }) {
-                score += 25
-            }
+            if (contextTags.any { t -> disLower.contains(t) }) bonus += 25
         }
-
         // Country correlation
         if (cand.country == "KR" && (contextTags.contains("k-pop") || contextTags.contains("korean"))) {
-            score += 40
+            bonus += 40
         } else if (cand.country == "JP" && (contextTags.contains("j-pop") || contextTags.contains("japanese") || contextTags.contains("anime"))) {
-            score += 40
+            bonus += 40
         } else if (cand.country == "FR" && (contextTags.contains("french") || contextTags.contains("chanson francaise"))) {
-            score += 40
+            bonus += 40
         }
-
-        return score
+        return bonus
     }
 
     companion object {
+        /** The most the listener's context may add to a candidate: less than the gap between a catalogue's best match and its runner-up. */
+        const val CONTEXT_CAP = 10
+
         fun hasAccentMismatch(s1: String, s2: String): Boolean {
             val n1 = java.text.Normalizer.normalize(s1.trim(), java.text.Normalizer.Form.NFD)
             val n2 = java.text.Normalizer.normalize(s2.trim(), java.text.Normalizer.Form.NFD)

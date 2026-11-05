@@ -169,4 +169,23 @@ class HomeNewRowsTest {
         assertEquals("rock", com.ikko.aura.reco.GenreNormalizer.family("indie"))
         assertEquals("hip-hop", com.ikko.aura.reco.GenreNormalizer.family("french rap").let { if (it == "chanson") "hip-hop" else it })
     }
+
+    @Test fun `an artist is in one scene, the country their tags name first, never two`() {
+        val brits = (1..3).map { "Uk$it" }
+        val blood = "Blood Orange"
+        val albums = (brits + blood).mapIndexed { i, a -> album("Disc $i", a) } + (1..3).map { album("J$it", "Jp$it") }
+        // Blood Orange: British by Last.fm, and a Japanese namesake's country mixed in last.
+        val tags = brits.associate { ArtistNames.key(it) to linkedSetOf("indie", "british") } +
+            (ArtistNames.key(blood) to linkedSetOf("chillwave", "indie", "rnb", "british", "japanese")) +
+            (1..3).associate { ArtistNames.key("Jp$it") to linkedSetOf("indie", "japanese") }
+        val rows = seen { ctx(it, albums, tags) }
+        assertTrue(rows.filter { it.id == "scene:jp" }.all { r -> r.albums.none { it.artist == blood } })
+        assertTrue("Blood Orange is in the British scene", rows.filter { it.id == "scene:uk" }.any { r -> r.albums.any { it.artist == blood } })
+    }
+
+    @Test fun `a country named far down the tags does not make a scene`() {
+        val albums = (1..4).map { album("Disc $it", "Odd$it") }
+        val tags = (1..4).associate { ArtistNames.key("Odd$it") to linkedSetOf("a", "b", "c", "d", "e", "f", "g", "h", "japanese") }
+        assertTrue(seen { ctx(it, albums, tags) }.none { it.id == "scene:jp" })
+    }
 }

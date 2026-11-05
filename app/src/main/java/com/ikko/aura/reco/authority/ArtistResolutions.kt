@@ -17,7 +17,8 @@ class ArtistResolutionRoom @Inject constructor(private val dao: TrackMetaDao) : 
 
     override suspend fun get(key: String, nowMs: Long): DisambiguatedArtist? {
         val row = dao.identity(key) ?: return null
-        if (nowMs - row.resolvedAt > TTL_MS) return null
+        // Resolved before the scoring was fixed (a namesake could be picked over the best match): asked again.
+        if (row.resolvedAt < VALID_SINCE_MS || nowMs - row.resolvedAt > TTL_MS) return null
         return DisambiguatedArtist(
             canonicalKey = com.ikko.aura.reco.ArtistNames.key(row.canonicalName),
             canonicalName = row.canonicalName,
@@ -41,5 +42,10 @@ class ArtistResolutionRoom @Inject constructor(private val dao: TrackMetaDao) : 
         )
     }
 
-    companion object { const val TTL_MS = 90L * 86_400_000L }
+    companion object {
+        const val TTL_MS = 90L * 86_400_000L
+
+        /** 2026-11-05 02:00 (Europe/Brussels): what was kept before is not trusted. */
+        const val VALID_SINCE_MS = 1_793_840_400_000L
+    }
 }

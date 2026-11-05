@@ -222,6 +222,20 @@ object HomeRotation {
         Scene("br", "Scène brésilienne", listOf("brazilian", "brazil", "mpb", "tropicalia", "bossa nova", "samba", "funk carioca")),
     )
 
+    /** How far down an artist's tags a country is looked for: nationality comes after the styles, but a tag far down is a listener's whim. */
+    private const val SCENE_TAGS = 8
+
+    /**
+     * The one country an artist belongs to: the first of their tags that names one. An artist tagged for two (a namesake mixed in, a band that moved)
+     * is placed by the one their tags put first, not in both; one the K-pop tags put in a Japanese scene is left out of it.
+     */
+    private fun sceneOf(tags: Set<String>): Scene? {
+        val ordered = tags.take(SCENE_TAGS)
+        val first = ordered.firstOrNull { t -> SCENES.any { t in it.words } } ?: return null
+        val scene = SCENES.first { first in it.words }
+        return scene.takeIf { s -> s.not.none { it in ordered } }
+    }
+
     /** An album of a concert: "Live at…", "Unplugged", "En concert", "(Live)". A song called "Live Forever" is not one. */
     private val LIVE_TITLE = Regex("(?i)(?:[(\\[]\\s*live\\b|\\blive (?:at|in|from|on|à|au|aux|session|sessions|and|\\d{4})\\b|\\blive[!.]?\\s*$|[-–:]\\s*live\\b|unplugged|en concert|in concert|en direct|\\bconcert\\b)")
     fun isLiveAlbum(title: String): Boolean = LIVE_TITLE.containsMatchIn(title)
@@ -464,9 +478,7 @@ object HomeRotation {
         // The scenes of the countries: the artists whose tags say where they come from, wherever in their tags it is said.
         for (s in SCENES) {
             list += Candidate("scene:${s.id}", s.group, "scene") { used ->
-                val albums = c.external.filter { a ->
-                    a.album == null && tagsOfAlbum(a, c).let { tags -> tags.any { it in s.words } && s.not.none { it in tags } }
-                }
+                val albums = c.external.filter { a -> a.album == null && sceneOf(tagsOfAlbum(a, c))?.id == s.id }
                 row("scene:${s.id}", s.title, ranked(albums, c, "scene:${s.id}") { 1.0 }, used, c.seed, "scene:${s.id}", shuffle = false)
             }
         }

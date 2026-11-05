@@ -147,4 +147,28 @@ class ArtistAuthorityTest {
         assertEquals(4518789L, resolved.deezerId)
         assertEquals("Troye Sivan", resolved.canonicalName)
     }
+
+    @Test
+    fun theCataloguesBestMatchIsNotOverturnedByTagsThatHappenToOverlap() = runBlocking {
+        // Dev Hynes (GB, 100) against a Japanese namesake (87) whose tags share "indie" and "chillwave" with what Last.fm says.
+        val mbClient = MusicBrainzClient(httpGet = {
+            """
+            { "count": 2, "artists": [
+              { "id": "3d254f1e-0000-0000-0000-000000000001", "name": "Blood Orange", "country": "GB", "disambiguation": "singer/songwriter Devonté Hynes", "score": 100,
+                "tags": [ { "count": 9, "name": "r&b" }, { "count": 5, "name": "funk" } ], "aliases": [] },
+              { "id": "c74877e0-0000-0000-0000-000000000002", "name": "Blood Orange", "country": "JP", "disambiguation": "KING MUSIC", "score": 87,
+                "tags": [ { "count": 2, "name": "indie" }, { "count": 1, "name": "chillwave" } ], "aliases": [] }
+            ] }
+            """.trimIndent()
+        })
+        val deezerClient = DeezerClient(httpGet = { """{ "data": [] }""" })
+        val authority = ArtistAuthority(
+            mbClient = mbClient, deezerClient = deezerClient,
+            lastFmTagsProvider = { listOf("chillwave", "indie", "rnb", "alternative rnb") }, lastFmMbidProvider = { null },
+        )
+        val resolved = authority.resolve("Blood Orange", listenerContextTags = setOf("indie", "japanese"))
+        assertNotNull(resolved)
+        assertEquals("GB", resolved!!.country)
+        assertTrue(resolved.mbid!!.startsWith("3d254f1e"))
+    }
 }

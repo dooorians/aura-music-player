@@ -115,7 +115,6 @@ class HomeWidgetsViewModel @Inject constructor(
     private val enricher: com.ikko.aura.reco.LastFmEnricher,
     private val deezer: com.ikko.aura.data.deezer.DeezerClient,
     private val acoustics: com.ikko.aura.reco.AcousticBridge,
-    private val trackMeta: com.ikko.aura.reco.TrackMetaDao,
 ) : ViewModel() {
 
     /**
@@ -628,8 +627,7 @@ class HomeWidgetsViewModel @Inject constructor(
                 }
                 val now = System.currentTimeMillis()
                 val zone = java.time.ZoneId.systemDefault()
-                // Where the artists come from (MusicBrainz, kept on the device), and which albums of the library are slow (Automix's tempo).
-                val countries = runCatching { trackMeta.allIdentities() }.getOrDefault(emptyList()).filter { !it.country.isNullOrBlank() }.associate { it.artistKey to it.country.orEmpty() }
+                // Which albums of the library are slow (Automix's tempo).
                 val slowAlbums = runCatching { slowAlbumsOf(allTracks, albumsById) }.getOrDefault(emptyList())
                 val loop = com.ikko.aura.data.home.ListeningAlbums.looped(listenRows, now, zone, ::place).map { it.album }
                 val everything = com.ikko.aura.data.home.ListeningAlbums.group(listenRows, zone, ::place)
@@ -652,7 +650,7 @@ class HomeWidgetsViewModel @Inject constructor(
                                         com.ikko.aura.reco.AlbumKeys.ofName(a.title, a.artist) !in refusedAlbums
                                 }.map { a -> com.ikko.aura.data.home.SectionAlbum(a.title, a.artist, artworkUrl = a.coverXl) }
                             ).distinctBy { it.sameAs }.filter { it.sameAs !in owned },
-                        artistTags = withCountries(sourceTags, countries), recoItems = offered, nowMs = now, seed = seed, zone = zone,
+                        artistTags = sourceTags, recoItems = offered, nowMs = now, seed = seed, zone = zone,
                         slowAlbums = slowAlbums,
                         tasteTags = tasteTags,
                         // What the genres' charts offer, without any album already in the library, of a blocked artist, or refused as a whole.
@@ -779,16 +777,6 @@ class HomeWidgetsViewModel @Inject constructor(
         }
     }
 
-    /** The tags of the artists with their country added as the nationality tag the rows of scenes look for. */
-    private fun withCountries(tags: Map<String, Set<String>>, countries: Map<String, String>): Map<String, Set<String>> {
-        if (countries.isEmpty()) return tags
-        val out = HashMap(tags)
-        for ((artistKey, code) in countries) {
-            val adjective = NATIONALITY[code.uppercase()] ?: continue
-            out[artistKey] = (out[artistKey].orEmpty() + adjective)
-        }
-        return out
-    }
 
     /** One card. [kind] is a selection the resolver knows; [pick] a selection made here, from the library's songs. */
     private class Spec(
@@ -875,11 +863,6 @@ private const val SLOW_MIN_SONGS = 3
 /** The artists whose tags are asked for in one go. */
 private const val TAGS_PER_ROUND = 160
 
-/** MusicBrainz's country codes as the nationality tag Last.fm uses for the same artists. */
-private val NATIONALITY = mapOf(
-    "BE" to "belgian", "JP" to "japanese", "GB" to "british", "DE" to "german", "SE" to "swedish",
-    "CA" to "canadian", "AU" to "australian", "BR" to "brazilian",
-)
 
 /** The most that Home waits for its rows to settle before showing them. */
 private const val SETTLE_MS = 12_000L
