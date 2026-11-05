@@ -119,7 +119,7 @@ import com.ikko.aura.ui.components.PermissionGate
 import com.ikko.aura.ui.screens.album.AlbumScreen
 import com.ikko.aura.ui.screens.album.AlbumListScreen
 import com.ikko.aura.ui.screens.artist.ArtistScreen
-import com.ikko.aura.ui.screens.equalizer.EqualizerScreen
+import com.ikko.aura.ui.equalizer.EqualizerScreen
 import com.ikko.aura.ui.screens.home.HomeScreen
 import com.ikko.aura.ui.screens.library.LibraryScreen
 import com.ikko.aura.ui.screens.lyrics.LyricsScreen

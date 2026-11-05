@@ -82,6 +82,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var streamCache: StreamCache
     @Inject lateinit var trackResolver: TrackResolver
     @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
+    @Inject lateinit var dspController: com.ikko.aura.core.audio.dsp.DspController
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -328,6 +329,9 @@ class PlaybackService : MediaSessionService() {
             }
             // Both players share one session id so the equaliser applies to whichever is
             // audible, including through the overlap where both are.
+            .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
+            // Both players share one session id, so anything attached to the session (a system
+            // visualiser, an external effect) follows whichever of them is audible.
             .apply { setAudioSessionId(audioSessionIdProvider.id) }
 
     /**
@@ -366,6 +370,25 @@ class PlaybackService : MediaSessionService() {
                     ),
                 )
                 .build(), beat)
+            ): AudioSink {
+                // The app's equaliser, normaliser and limiter, last in the chain: see DspAudioProcessorChain.
+                val dsp = com.ikko.aura.core.audio.dsp.DspAudioProcessor(dspController.parameters)
+                val sink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
+                    .setAudioProcessorChain(
+                        com.ikko.aura.core.audio.dsp.DspAudioProcessorChain(
+                            DefaultAudioSink.DefaultAudioProcessorChain(
+                                arrayOf(transition),
+                                SilenceSkippingAudioProcessor(),
+                                SonicAudioProcessor(),
+                            ),
+                            dsp,
+                        ),
+                    )
+                    .build(), beat)
+                return com.ikko.aura.core.audio.dsp.DspAudioSink(sink, dsp)
+            }
         }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

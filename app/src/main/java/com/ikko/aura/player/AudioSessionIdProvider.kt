@@ -8,12 +8,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The audio session id needs to exist before [PlaybackService] builds its `ExoPlayer` (so the
- * player can be told to use it) and also needs to reach [com.ikko.aura.viewmodel.EqualizerViewModel]
- * (so `android.media.audiofx.Equalizer`/`BassBoost` can attach to that same session) — two call
- * sites that otherwise wouldn't share a dependency. Generating it once here, independent of where
- * the player itself lives, means both sides just read the same [Int] rather than one having to
- * reach into the other's internals.
+ * One audio session id for the app, generated before [PlaybackService] builds its players so both of them can be
+ * told to use it: anything attached to the session (a system visualiser, an external effect) then follows whichever
+ * player is audible. The equaliser no longer needs it — it is the app's own processor in the audio sink
+ * ([com.ikko.aura.core.audio.dsp.DspAudioProcessor]), not `android.media.audiofx`.
  */
 @Singleton
 class AudioSessionIdProvider @Inject constructor(@ApplicationContext context: Context) {
