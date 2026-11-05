@@ -9,8 +9,6 @@ import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 
@@ -57,21 +55,10 @@ class PlaylistRepository @Inject constructor(
     private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
     private val settingsStore: com.ikko.aura.data.SettingsStore,
 ) {
-    val playlists: Flow<List<PlaylistSummary>> = playlistDao.observePlaylists()
+    /** One observed query (with its Room relation) for every playlist and its entries, rather than one per playlist. */
+    val playlists: Flow<List<PlaylistSummary>> = playlistDao.observePlaylistsWithEntries()
         .onStart { ensureFavorites() }
-        .flatMapLatest { entities ->
-            if (entities.isEmpty()) {
-                flowOf(emptyList())
-            } else {
-                combine(entities.map { entity -> countFlow(entity) }) { it.toList() }
-            }
-        }
-        // Favoris first, whenever it was made; the others newest first, as before.
-        // Also eliminate duplicate "Tes préférés" playlist so it doesn't repeat with Favoris.
-        .map { list ->
-            list.filter { p: PlaylistSummary -> p.id == FAVORITES_PLAYLIST_ID || (!p.name.equals("Tes préférés", ignoreCase = true) && !p.name.equals("Favoris", ignoreCase = true)) }
-                .sortedByDescending { it.isFavorites }
-        }
+        .map(::summariesOf)
 
     /** The ids of the tracks with a heart. */
     val favoriteTrackIds: Flow<Set<String>> = playlistDao.observeTracksForPlaylist(FAVORITES_PLAYLIST_ID)
@@ -86,26 +73,8 @@ class PlaylistRepository @Inject constructor(
     /** Gives [trackId] a heart, or takes it away. The newest heart goes to the top of Favoris. */
     suspend fun toggleFavorite(trackId: String) {
         ensureFavorites()
-        if (playlistDao.containsTrack(FAVORITES_PLAYLIST_ID, trackId) > 0) {
-            playlistDao.removeTrackFromPlaylist(FAVORITES_PLAYLIST_ID, trackId)
-        } else {
-            val position = playlistDao.firstPosition(FAVORITES_PLAYLIST_ID)
-            playlistDao.insertPlaylistTrack(
-                PlaylistTrackEntity(FAVORITES_PLAYLIST_ID, trackId, position, System.currentTimeMillis()),
-            )
-        }
+        playlistDao.toggleTrackAtTop(FAVORITES_PLAYLIST_ID, trackId, System.currentTimeMillis())
     }
-
-    private fun countFlow(entity: PlaylistEntity) =
-        playlistDao.observeTracksForPlaylist(entity.id).map { tracks ->
-            val orderedIds = tracks.sortedBy { it.position }.map { it.trackId }
-            PlaylistSummary(
-                id = entity.id,
-                name = entity.name,
-                trackCount = tracks.size,
-                trackIds = orderedIds,
-            )
-        }
 
     fun playlistDetail(playlistId: Long): Flow<PlaylistDetail?> = combine(
         playlistDao.observePlaylist(playlistId),
@@ -172,7 +141,8 @@ class PlaylistRepository @Inject constructor(
         if (trackIds.isEmpty()) return
         for (key in AUTO_KEYS) {
             val id = autoPlaylistId(key) ?: continue
-            trackIds.forEach { playlistDao.removeTrackFromPlaylist(id, it) }
+            // One statement per playlist instead of one per track.
+            trackIds.chunked(SQL_IN_CHUNK).forEach { playlistDao.removeTracksFromPlaylist(id, it) }
         }
     }
 
@@ -186,8 +156,7 @@ class PlaylistRepository @Inject constructor(
         return playlistDao.allEntries().filter { it.playlistId != FAVORITES_PLAYLIST_ID && it.playlistId !in auto }
     }
 
-    suspend fun favoriteEntries(): List<PlaylistTrackEntity> =
-        playlistDao.allEntries().filter { it.playlistId == FAVORITES_PLAYLIST_ID }
+    suspend fun favoriteEntries(): List<PlaylistTrackEntity> = playlistDao.entriesOf(FAVORITES_PLAYLIST_ID)
 
     /** Which Home card ("disc", "top", "style"…) this playlist is the list of, or null if it is not one. */
     suspend fun autoKeyOf(playlistId: Long): String? =
@@ -206,10 +175,8 @@ class PlaylistRepository @Inject constructor(
         playlistDao.renamePlaylist(playlistId, name)
     }
 
-    suspend fun addTrack(playlistId: Long, trackId: String) {
-        val position = playlistDao.nextPosition(playlistId)
-        playlistDao.insertPlaylistTrack(PlaylistTrackEntity(playlistId, trackId, position, System.currentTimeMillis()))
-    }
+    suspend fun addTrack(playlistId: Long, trackId: String) =
+        playlistDao.appendTrack(playlistId, trackId, System.currentTimeMillis())
 
     suspend fun removeTrack(playlistId: Long, trackId: String) = playlistDao.removeTrackFromPlaylist(playlistId, trackId)
 
@@ -223,6 +190,29 @@ class PlaylistRepository @Inject constructor(
 }
 
 private const val AUTO_PLAYLIST_PERIOD_MS = 7L * 24 * 60 * 60 * 1000
+
+/** Well under SQLite's bound-parameter limit, so a long list of ids never makes a statement fail. */
+private const val SQL_IN_CHUNK = 500
+
+/**
+ * The library's playlist list: entries in their order, Favoris first, the others newest first as the query gave them,
+ * and the old duplicates of Favoris ("Tes préférés", a second "Favoris") left out.
+ */
+internal fun summariesOf(rows: List<PlaylistWithEntries>): List<PlaylistSummary> = rows
+    .filter { row ->
+        val p = row.playlist
+        p.id == FAVORITES_PLAYLIST_ID ||
+            (!p.name.equals("Tes préférés", ignoreCase = true) && !p.name.equals(FAVORITES_PLAYLIST_NAME, ignoreCase = true))
+    }
+    .map { row ->
+        PlaylistSummary(
+            id = row.playlist.id,
+            name = row.playlist.name,
+            trackCount = row.entries.size,
+            trackIds = row.entries.sortedBy { it.position }.map { it.trackId },
+        )
+    }
+    .sortedByDescending { it.isFavorites }
 
 /** The cards that have a playlist of their own. */
 private val AUTO_KEYS = listOf("disc", "top", "style", "night", "energy", "new", "chill", "daily")
