@@ -178,6 +178,11 @@ fun ArtistPageContent(
         // The whole page steps back when an album opens from it, and returns from the touched card outwards, as a Home card does;
         // not when the trip is this page's own (it rises by itself).
         val rippleKey = heroKey ?: "artist:page"
+        // The first title under the line sits where an album page's first row does (the line to the top of the letters: the
+        // same on both pages); the sections after it keep the gap they had.
+        val hasAlbumsSection = uiState.albums.isNotEmpty() || loading
+        val hasSinglesSection = uiState.singles.isNotEmpty() && !loading
+        fun sectionTitlePadding(first: Boolean) = PaddingValues(start = 16.dp, end = 16.dp, top = if (first) 5.dp else 12.dp, bottom = 12.dp)
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -300,7 +305,7 @@ fun ArtistPageContent(
                         text = "Albums",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(2).padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(2).padding(sectionTitlePadding(first = hasAlbumsSection)),
                     )
                 }
                 item(key = "artist_albums_row", contentType = "album_row") {
@@ -363,7 +368,7 @@ fun ArtistPageContent(
                         text = "Singles & EP",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(4).padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(4).padding(sectionTitlePadding(first = !hasAlbumsSection)),
                     )
                 }
                 item(key = "artist_singles_row", contentType = "album_row") {
@@ -396,7 +401,7 @@ fun ArtistPageContent(
                     text = "Titres",
                     style = MaterialTheme.typography.headlineMedium,
                     color = AuraColors.TextPrimary,
-                    modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(5).padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(5).padding(sectionTitlePadding(first = !hasAlbumsSection && !hasSinglesSection)),
                 )
             }
 
