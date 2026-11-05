@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -1641,19 +1642,20 @@ fun Modifier.verticalFadingEdge(
     bottomFade: Dp = 36.dp,
 ): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
+    // The mask is made once per size, not on every frame the list scrolls.
+    .drawWithCache {
         val h = size.height.coerceAtLeast(1f)
         val topStop = (topFade.toPx() / h).coerceIn(0f, 0.25f)
         val bottomStop = (1f - (bottomFade.toPx() / h).coerceIn(0f, 0.25f)).coerceAtLeast(topStop)
-        drawRect(
-            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                0f to Color.Transparent,
-                topStop to Color.Black,
-                bottomStop to Color.Black,
-                1f to Color.Transparent,
-            ),
-            blendMode = BlendMode.DstIn,
+        val mask = androidx.compose.ui.graphics.Brush.verticalGradient(
+            0f to Color.Transparent,
+            topStop to Color.Black,
+            bottomStop to Color.Black,
+            1f to Color.Transparent,
         )
+        onDrawWithContent {
+            drawContent()
+            drawRect(brush = mask, blendMode = BlendMode.DstIn)
+        }
     }
 

@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.Shape
@@ -1043,7 +1044,8 @@ fun MainLayout() {
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(dockTotalHeight + screenCorner)
-                    .drawBehind {
+                    // The shape is worked out once per size (three paths and a path operation), not on every frame drawn.
+                    .drawWithCache {
                         val corner = screenCorner.toPx()
                         val pageBottom = size.height - dockTotalHeight.toPx()
                         val strip = androidx.compose.ui.graphics.Path().apply { addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)) }
@@ -1058,7 +1060,7 @@ fun MainLayout() {
                         }
                         val bare = androidx.compose.ui.graphics.Path()
                         bare.op(strip, page, androidx.compose.ui.graphics.PathOperation.Difference)
-                        drawPath(bare, Color.Black)
+                        onDrawBehind { drawPath(bare, Color.Black) }
                     },
             )
         }
