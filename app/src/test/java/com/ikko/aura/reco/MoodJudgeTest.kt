@@ -10,7 +10,7 @@ class MoodJudgeTest {
     private fun verdict(mood: Mood, f: SongFeatures?, artist: List<String> = emptyList(), title: String = "Song") = MoodJudge.verdict(mood, f, artist, title)
 
     // Deezer's numbers for real songs (see the lookups made when this was written).
-    private val allNightIve = SongFeatures(bpm = null, gainDb = -6.7, trackTags = emptyList())
+    private val allNightIve = SongFeatures(bpm = null, gainDb = -6.7, trackTags = listOf("k-pop", "dance"))
     private val gymnopedie = SongFeatures(bpm = 123.8, gainDb = -18.4, trackTags = listOf("piano", "classical"))
     private val weightless = SongFeatures(bpm = 119.8, gainDb = -13.4, trackTags = listOf("ambient", "chill"))
     private val oceanEyes = SongFeatures(bpm = 145.07, gainDb = -8.4, trackTags = listOf("sad", "chill"))
@@ -20,6 +20,16 @@ class MoodJudgeTest {
         assertNull(verdict(Mood.NIGHT, allNightIve, tags, "All Night"))
         assertNull(verdict(Mood.CHILL, allNightIve, tags, "All Night"))
         assertNotNull(verdict(Mood.ENERGY, allNightIve, tags, "All Night"))
+    }
+
+    @Test fun `K-pop is not energetic by its genre, a K-pop ballad is calm`() {
+        val ballad = SongFeatures(bpm = 72.0, gainDb = -13.0, trackTags = listOf("ballad", "sad"))
+        val tags = listOf("k-pop", "korean", "pop")
+        assertNotNull(verdict(Mood.CHILL, ballad, tags, "Spring Day"))
+        assertNull(verdict(Mood.ENERGY, ballad, tags, "Spring Day"))
+        // The genre alone says nothing of the song: no ambience on it.
+        assertNull(verdict(Mood.ENERGY, null, tags, "Any"))
+        assertNull(verdict(Mood.CHILL, null, tags, "Any"))
     }
 
     @Test fun `the name alone never puts a song in an ambience`() {

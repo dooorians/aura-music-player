@@ -52,9 +52,12 @@ object MoodJudge {
         "ambient", "chillout", "downtempo", "lo-fi", "lofi", "new age", "classical", "neoclassical", "acoustic", "singer-songwriter", "folk", "indie folk",
         "dream pop", "slowcore", "trip-hop", "easy listening", "lounge", "instrumental", "piano", "bedroom pop", "soft rock", "chamber pop", "ballad",
     )
+    /**
+     * Styles that are loud by definition. Broad ones (K-pop, pop, hip-hop, R&B, funk, afrobeats...) are not here: they hold as many ballads as club songs, so
+     * the song itself (its tempo, its loudness, its tags) decides.
+     */
     private val ENERGETIC_ARTIST = setOf(
-        "metal", "punk", "hardcore", "hip-hop", "hip hop", "rap", "trap", "drill", "dance", "edm", "house", "techno", "trance", "k-pop", "kpop",
-        "hyperpop", "eurodance", "reggaeton", "dubstep", "drum and bass", "dancehall", "dance-pop", "dance pop", "pop punk", "afrobeats", "funk",
+        "metal", "punk", "hardcore", "drill", "edm", "house", "techno", "trance", "eurodance", "dubstep", "drum and bass", "hardstyle", "pop punk",
     )
     private val CALM_TITLE = setOf("lullaby", "sleep", "night", "moon", "dream", "quiet", "calm", "slow", "lune", "nuit", "dormir", "berceuse", "reve", "rêve")
     private val ENERGETIC_TITLE = setOf("party", "dance", "club", "bang", "fire", "run", "jump", "bounce", "crazy")
