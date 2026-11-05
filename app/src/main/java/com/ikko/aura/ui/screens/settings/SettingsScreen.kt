@@ -316,7 +316,7 @@ private fun PlaybackPage(vm: SettingsViewModel, navController: NavHostController
         )
         SettingsDivider()
         SettingsRow(
-            title = "Égaliseur", summary = "Bandes de fréquences et Bass Boost",
+            title = "Égaliseur", summary = "10 bandes, AutoEq et normalisation R128",
             icon = CupertinoIcons.Sort,
             onClick = { navController.navigate(AuraDestination.Equalizer.route) },
             trailing = { ChevronTrailing() },
