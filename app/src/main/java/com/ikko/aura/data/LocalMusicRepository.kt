@@ -97,6 +97,9 @@ class LocalMusicRepository @Inject constructor(
         repositoryScope.launch { catalog.forgetKeys(trackIds) }
     }
 
+    override suspend fun awaitScannedTracks(): List<Track> =
+        awaitLibrary(_scanned) { _tracks.value + _saved.value }
+
     override suspend fun refresh(forceRescan: Boolean) {
         if (_isScanning.value || (hasScanned && !forceRescan)) return
         _isScanning.value = true
@@ -225,7 +228,12 @@ class LocalMusicRepository @Inject constructor(
         val stamps = HashMap<String, String>()
         val files = ArrayList<ScannedFile>()
         val extras = HashMap<String, FileExtras>()
-        context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->
+        // A null cursor is the provider failing to answer (media process restarting, storage not mounted yet), not
+        // an empty device: read as empty, it would have every local track of a restored queue taken for deleted.
+        // Thrown, the scan counts as failed and the library is tried again.
+        val cursor = context.contentResolver.query(collection, projection, selection, null, sortOrder)
+            ?: throw java.io.IOException("MediaStore did not answer")
+        cursor.use {
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
             val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -251,8 +259,10 @@ class LocalMusicRepository @Inject constructor(
 
                 val track = Track(
                     id = id.toString(),
-                    title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
-                        ?: cursor.getString(nameCol)?.substringBeforeLast('.')
+                    // Every tag goes through TagText: a corrupted or wrongly-encoded ID3 frame (NULs, control
+                    // characters, lone surrogates) must not reach the library, its sorting or the JSON on disk.
+                    title = TagText.clean(cursor.getString(titleCol))
+                        ?: TagText.clean(cursor.getString(nameCol)?.substringBeforeLast('.'))
                         ?: "Titre inconnu",
                     // MediaStore does not return null for a missing tag: it returns the literal "<unknown>".
                     artist = cursor.getString(artistCol).knownOr("Artiste inconnu"),
@@ -270,7 +280,7 @@ class LocalMusicRepository @Inject constructor(
                 )
                 results += track
                 extras[track.id] = FileExtras(
-                    albumArtist = cursor.getString(albumArtistCol)?.takeIf { it.isNotBlank() },
+                    albumArtist = TagText.clean(cursor.getString(albumArtistCol))?.takeIf { it != MediaStore.UNKNOWN_STRING },
                     dir = cursor.getString(pathCol),
                 )
                 // What survives a re-index that gives the file a new id: its name, size and length.
@@ -418,7 +428,7 @@ class LocalMusicRepository @Inject constructor(
 }
 
 private fun String?.knownOr(fallback: String): String =
-    if (this == null || isBlank() || this == MediaStore.UNKNOWN_STRING) fallback else this
+    TagText.clean(this)?.takeIf { it != MediaStore.UNKNOWN_STRING } ?: fallback
 
 /** What the probe made of a file, unless it could not name the codec: then what MediaStore said it was. */
 internal fun preferKnownFormat(probed: AudioFormat, fromMediaStore: AudioFormat): AudioFormat =

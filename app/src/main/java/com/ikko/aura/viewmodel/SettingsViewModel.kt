@@ -39,6 +39,7 @@ class SettingsViewModel @Inject constructor(
     private val sleepTimer: SleepTimer,
     private val streamCache: StreamCache,
     private val ytmDownloads: com.ikko.aura.source.ytm.YtmDownloads,
+    private val uriAccessGuard: com.ikko.aura.data.UriAccessGuard,
 ) : ViewModel() {
 
     /**
@@ -117,7 +118,13 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setProfileImageUri(uri: String?) {
-        viewModelScope.launch { settingsStore.setProfileImageUri(uri) }
+        viewModelScope.launch {
+            // The grant first: a photo whose grant could not be kept would be gone after the next restart.
+            if (uri != null) uriAccessGuard.keep(uri)
+            settingsStore.setProfileImageUri(uri)
+            // The photo it replaces no longer needs its grant (see UriAccessGuard.releaseOrphanedGrants).
+            uriAccessGuard.releaseOrphanedGrants()
+        }
     }
 
     fun setProfileFirstName(name: String) {

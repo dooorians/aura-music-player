@@ -8,7 +8,11 @@ import com.ikko.aura.playback.QueueSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
@@ -24,6 +28,9 @@ class QueueSnapshotStore @Inject constructor(
     private val key = stringPreferencesKey("queue_snapshot")
     private val files = QueueSnapshotFiles(java.io.File(context.filesDir, "queue"))
     @Volatile private var legacyCleared = false
+
+    /** Lives as long as the process, not as long as whoever asked: see [writeDetached]. */
+    private val detached = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     suspend fun read(): QueueSnapshot? = files.read() ?: readLegacy()
 
@@ -41,4 +48,12 @@ class QueueSnapshotStore @Inject constructor(
     private suspend fun readLegacy(): QueueSnapshot? = withContext(Dispatchers.Default) {
         QueueSnapshot.fromJson(runCatching { context.settingsDataStore.data.first()[key] }.getOrNull())
     }
+
+    /**
+     * Writes [snapshot] even if the caller's scope is cancelled right after: the last word of a service being
+     * destroyed, whose own scope goes in the same breath. Without it the final position — up to ten seconds of a
+     * track, or the pause just made — was dropped, and the system killing the process next brought the queue back
+     * from an older place.
+     */
+    fun writeDetached(snapshot: QueueSnapshot): Job = detached.launch { runCatching { write(snapshot) } }
 }

@@ -27,6 +27,7 @@ class PlaylistDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val playlistRepository: PlaylistRepository,
     private val recommendations: com.ikko.aura.reco.RecommendationEngine,
+    private val uriAccessGuard: com.ikko.aura.data.UriAccessGuard,
 ) : ViewModel() {
 
     private val playlistId: Long = savedStateHandle.get<String>("playlistId")?.toLongOrNull() ?: -1L
@@ -88,6 +89,10 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun setCustomArtwork(uri: String?) {
-        viewModelScope.launch { playlistRepository.setPlaylistCustomArtwork(playlistId, uri) }
+        viewModelScope.launch {
+            if (uri != null) uriAccessGuard.keep(uri)
+            playlistRepository.setPlaylistCustomArtwork(playlistId, uri)
+            uriAccessGuard.releaseOrphanedGrants()
+        }
     }
 }

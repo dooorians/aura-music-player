@@ -97,6 +97,7 @@ data class RemoteSection(
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
+    savedStateHandle: androidx.lifecycle.SavedStateHandle,
     private val repository: MusicRepository,
     private val settings: SettingsStore,
     private val ytmClient: YtmClient,
@@ -125,8 +126,10 @@ class SearchViewModel @Inject constructor(
     private var remoteJob: Job? = null
     private var jioSaavnJob: Job? = null
 
-    private val query = MutableStateFlow("")
-    private val filter = MutableStateFlow(SearchFilter.ALL)
+    /** Survives process death: see [SearchSavedState]. */
+    private val saved = SearchSavedState(savedStateHandle)
+    private val query = MutableStateFlow(saved.query)
+    private val filter = MutableStateFlow(saved.filter)
 
     private val ytmSearch = MutableStateFlow(YtmSearchState())
     private var nextPage: Page? = null
@@ -371,6 +374,7 @@ class SearchViewModel @Inject constructor(
 
     fun setQuery(value: String) {
         query.value = value
+        saved.query = value
     }
 
     /** The online sources, YouTube Music first, then the ones the user added. */
@@ -399,10 +403,12 @@ class SearchViewModel @Inject constructor(
     
     fun setFilter(newFilter: SearchFilter) {
         filter.value = newFilter
+        saved.filter = newFilter
     }
     
     fun clearSearch() {
         query.value = ""
+        saved.query = ""
     }
 
     private companion object {

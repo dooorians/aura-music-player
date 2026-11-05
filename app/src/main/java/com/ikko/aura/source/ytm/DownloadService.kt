@@ -33,7 +33,15 @@ class DownloadService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Téléchargements", NotificationManager.IMPORTANCE_LOW),
         )
-        startForeground(NOTIFICATION_ID, notification("Téléchargement…", 0, 0), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        val inForeground = com.ikko.aura.util.ForegroundStart.attempt {
+            startForeground(NOTIFICATION_ID, notification("Téléchargement…", 0, 0), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        }
+        if (!inForeground) {
+            // Refused (the app went to the background first): the queue stays pending and YtmDownloads.resume picks it
+            // up at the next launch. Running on without the foreground would get the process killed mid-file.
+            if (job?.isActive != true) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (job?.isActive != true) {
             job = scope.launch {
                 downloads.runQueue { done, total, title ->
@@ -55,6 +63,17 @@ class DownloadService : Service() {
             .setOnlyAlertOnce(true)
             .setProgress(total, done, total == 0)
             .build()
+
+    /**
+     * Android 15+ gives a dataSync service six hours a day. When they are spent this is called, and a service still in
+     * the foreground a few seconds later crashes the app (ForegroundServiceDidNotStopInTimeException). The download
+     * in flight is put back in the queue by YtmDownloads.resume at the next launch.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        job?.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     override fun onDestroy() {
         scope.cancel()

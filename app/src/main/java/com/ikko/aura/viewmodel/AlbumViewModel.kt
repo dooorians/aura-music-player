@@ -150,7 +150,7 @@ private fun readFileTags(context: Context, track: Track): FileTags {
     val retriever = MediaMetadataRetriever()
     return try {
         retriever.setDataSource(context, track.contentUri)
-        val genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)?.trim()?.takeIf { it.isNotEmpty() }
+        val genre = com.ikko.aura.data.TagText.clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE))
         val year = track.year.takeIf { it > 0 }
             ?: (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)
                 ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
@@ -160,6 +160,7 @@ private fun readFileTags(context: Context, track: Track): FileTags {
     } catch (_: Exception) {
         FileTags(null, track.year)
     } finally {
-        retriever.release()
+        // release() is declared to throw IOException since API 29: thrown from here it would escape the catch above.
+        runCatching { retriever.release() }
     }
 }

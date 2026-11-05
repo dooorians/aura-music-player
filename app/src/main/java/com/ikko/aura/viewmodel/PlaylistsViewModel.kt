@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 class PlaylistsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val settingsStore: com.ikko.aura.data.SettingsStore,
+    private val uriAccessGuard: com.ikko.aura.data.UriAccessGuard,
 ) : ViewModel() {
 
     val recentIds: StateFlow<List<Long>> = settingsStore.recentPlaylistIds
@@ -33,6 +34,7 @@ class PlaylistsViewModel @Inject constructor(
         viewModelScope.launch {
             val id = playlistRepository.createPlaylist(trimmed)
             if (customArtworkUri != null) {
+                uriAccessGuard.keep(customArtworkUri)
                 playlistRepository.setPlaylistCustomArtwork(id, customArtworkUri)
             }
         }

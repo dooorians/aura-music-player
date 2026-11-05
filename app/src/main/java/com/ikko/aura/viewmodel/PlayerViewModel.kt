@@ -517,7 +517,7 @@ class PlayerViewModel @Inject constructor(
             ids = ids,
             idOf = Track::id,
             streamed = { ytmLibrary.known() },
-            local = { musicRepository.tracks.first { it.isNotEmpty() } },
+            local = { musicRepository.awaitScannedTracks() },
         )
         // This view model's queue mirrors the player's position for position, so an item the library does not know
         // (a file deleted since the queue was written) is taken out of the player as well, not just left out here:
@@ -558,7 +558,7 @@ class PlayerViewModel @Inject constructor(
             ids = saved.items.map { it.id },
             idOf = Track::id,
             streamed = { ytmLibrary.known() },
-            local = { musicRepository.tracks.first { it.isNotEmpty() } },
+            local = { musicRepository.awaitScannedTracks() },
         )
         val snapshot = saved.surviving { it in byId } ?: return
         // Something may have started playing while the library was loading (a media button, say): that is the queue

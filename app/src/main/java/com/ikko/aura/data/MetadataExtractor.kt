@@ -55,8 +55,18 @@ object MetadataExtractor {
         }
     }
 
-    private fun MediaFormat.getIntOrNull(key: String): Int? =
-        if (containsKey(key)) getInteger(key) else null
+    /**
+     * Some extractors store a key as a long or a float (a corrupted or exotic header): `getInteger` then throws a
+     * ClassCastException, which used to throw away the whole probe. The value is read whatever its number type, and
+     * a nonsensical one (negative, zero) is no value at all.
+     */
+    private fun MediaFormat.getIntOrNull(key: String): Int? = runCatching {
+        if (!containsKey(key)) return@runCatching null
+        when (val value = getNumber(key)) {
+            null -> null
+            else -> value.toLong().takeIf { it in 1..Int.MAX_VALUE }?.toInt()
+        }
+    }.getOrNull()
 
     private fun resolveFormat(codecMime: String?, containerMime: String?): AudioFormat = when {
         codecMime == "audio/alac" -> AudioFormat.ALAC

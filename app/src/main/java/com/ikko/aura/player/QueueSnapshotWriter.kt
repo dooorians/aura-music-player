@@ -63,13 +63,11 @@ class QueueSnapshotWriter(
     fun release() {
         pending?.cancel()
         ticker?.cancel()
-        val last = capture()
+        val last = runCatching { capture() }.getOrNull()
         player?.removeListener(this)
         player = null
-        if (last != null) finalWrite.launch { runCatching { store.write(last) } }
+        if (last != null) store.writeDetached(last)
     }
-
-    private val finalWrite = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
         entriesDirty = true
@@ -127,18 +125,34 @@ class QueueSnapshotWriter(
     private fun capture(): QueueSnapshot? {
         val p = player ?: return null
         if (entriesDirty) rebuildEntries()
-        if (p.mediaItemCount == 0 || entries.size != p.mediaItemCount) return null
-        return QueueSnapshot(
-            items = entries,
-            index = p.currentMediaItemIndex,
-            positionMs = p.currentPosition.coerceAtLeast(0L),
-            shuffle = shuffleActive,
-            repeat = p.repeatMode,
-        )
+        return snapshotOf(entries, p.mediaItemCount, p.currentMediaItemIndex, p.currentPosition, shuffleActive, p.repeatMode)
     }
 
-    private companion object {
-        const val DEBOUNCE_MS = 600L
-        const val POSITION_TICK_MS = 10_000L
+    internal companion object {
+        /**
+         * The snapshot for a player in this state, or null when it should not be written: an empty queue (it would
+         * erase the one about to be restored) or items not yet rebuilt for the queue the player now has. A player
+         * between items reports an index past the end and a position below zero; neither is written as such.
+         */
+        fun snapshotOf(
+            entries: List<QueueSnapshot.Entry>,
+            itemCount: Int,
+            index: Int,
+            positionMs: Long,
+            shuffle: Boolean,
+            repeat: Int,
+        ): QueueSnapshot? {
+            if (itemCount == 0 || entries.size != itemCount) return null
+            return QueueSnapshot(
+                items = entries,
+                index = index.coerceIn(0, entries.lastIndex),
+                positionMs = positionMs.coerceAtLeast(0L),
+                shuffle = shuffle,
+                repeat = repeat,
+            )
+        }
+
+        private const val DEBOUNCE_MS = 600L
+        private const val POSITION_TICK_MS = 10_000L
     }
 }
