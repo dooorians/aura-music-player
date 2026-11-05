@@ -198,6 +198,11 @@ class PlaybackService : MediaSessionService() {
         settingsStore.automixEnabled
             .onEach { AutomixSettings.smartFadeEnabled.value = it }
             .launchIn(scope)
+        // Read by both trimmers on the audio thread, buffer by buffer: a change applies at once, with
+        // no restart of the players.
+        settingsStore.trimSilenceEnabled
+            .onEach { SilenceTrim.enabled = it }
+            .launchIn(scope)
 
         // Applied to both players, the idle one included: it is the one the next transition will
         // start a track on, and a route set only on the audible player would be lost at the lap.

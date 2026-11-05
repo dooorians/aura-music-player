@@ -27,6 +27,8 @@ data class SettingsUiState(
     val sleepMinutesLeft: Int? = null,
     val albumLayoutMode: AlbumLayoutMode = AlbumLayoutMode.GRID_3,
     val trackLayoutMode: TrackLayoutMode = TrackLayoutMode.GRID_2,
+    /** Silence at the edges of local tracks is skipped. */
+    val trimSilenceEnabled: Boolean = true,
 )
 
 @HiltViewModel
@@ -60,6 +62,7 @@ class SettingsViewModel @Inject constructor(
         settingsStore.ytmEnabled,
         settingsStore.albumLayoutMode,
         settingsStore.trackLayoutMode,
+        settingsStore.trimSilenceEnabled,
     ) { values ->
         SettingsUiState(
             isScanning = values[0] as Boolean,
@@ -69,6 +72,7 @@ class SettingsViewModel @Inject constructor(
             ytmEnabled = values[4] as Boolean,
             albumLayoutMode = values[5] as AlbumLayoutMode,
             trackLayoutMode = values[6] as TrackLayoutMode,
+            trimSilenceEnabled = values[7] as Boolean,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -97,6 +101,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setAutomixEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsStore.setAutomixEnabled(enabled) }
+    }
+
+    fun setTrimSilenceEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setTrimSilenceEnabled(enabled) }
     }
 
     fun setAlbumLayoutMode(mode: AlbumLayoutMode) {

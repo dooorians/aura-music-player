@@ -79,14 +79,15 @@ class EdgeSilenceTrimProcessor : BaseAudioProcessor() {
         if (detector.config != config) detector = EdgeSilenceDetector(config)
         val (item, durationUs) = describe(streamMetadata)
         val local = if (item != null) SilenceTrim.isLocal(item.localConfiguration?.uri) else fallbackIsLocal
-        val active = SilenceTrim.enabled && local
         val startUs = streamMetadata.positionOffsetUs
         detector.begin(
             sampleRate = inputAudioFormat.sampleRate.coerceAtLeast(1),
             startPositionUs = startUs,
-            durationUs = if (active) durationUs else EdgeSilenceDetector.UNKNOWN,
+            // Followed whenever the track is local, so switching trimming on mid-track still
+            // catches its end; whether anything is done about it is decided buffer by buffer.
+            durationUs = if (local) durationUs else EdgeSilenceDetector.UNKNOWN,
             // From the very start only: a seek into the track lands where the listener asked.
-            trimLead = active && startUs <= LEAD_ARM_US,
+            trimLead = SilenceTrim.enabled && local && startUs <= LEAD_ARM_US,
         )
         mediaId = item?.mediaId
         droppedFrames = 0L
@@ -107,6 +108,8 @@ class EdgeSilenceTrimProcessor : BaseAudioProcessor() {
         val size = limit - start
         if (size <= 0 || bytesPerFrame == 0) return
         val output = replaceOutputBuffer(size)
+        // Switched off in the settings while a track's opening was being trimmed: let the rest through.
+        if (!SilenceTrim.enabled) detector.stopLeadTrim()
 
         // The body of a track: one bookkeeping call and a bulk copy.
         if (!detector.needsLevel()) {
@@ -143,7 +146,7 @@ class EdgeSilenceTrimProcessor : BaseAudioProcessor() {
     }
 
     private fun publishTrailing() {
-        val startUs = detector.trailingSilenceStartUs()
+        val startUs = detector.trailingSilenceStartUs()?.takeIf { SilenceTrim.enabled }
         val id = mediaId
         if (startUs == null || id == null) {
             if (trailing != null) trailing = null

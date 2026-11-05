@@ -91,6 +91,11 @@ class EdgeSilenceDetector(val config: SilenceTrimConfig = SilenceTrimConfig()) {
         phase = if (trimLead && config.maxLeadTrimMs > 0) Phase.LEADING else Phase.MUSIC
     }
 
+    /** Ends leading trimming where it is: everything from here passes. */
+    fun stopLeadTrim() {
+        if (phase == Phase.LEADING) phase = Phase.MUSIC
+    }
+
     /** Frames in one measuring window at the current rate. */
     fun windowFrames(): Int = (sampleRate.toLong() * config.windowMs / 1000L).toInt().coerceAtLeast(1)
 

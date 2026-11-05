@@ -56,6 +56,16 @@ class EdgeSilenceDetectorTest {
     }
 
     @Test
+    fun `switching trimming off mid-opening lets the rest through`() {
+        val d = detector()
+        assertEquals(10, d.feed(100, quiet))
+        d.stopLeadTrim()
+        assertEquals(EdgeSilenceDetector.Phase.MUSIC, d.phase)
+        assertEquals(0, d.feed(100, quiet))
+        assertEquals(100L, d.droppedFrames)
+    }
+
+    @Test
     fun `a stream that is not ours to trim keeps its opening`() {
         val d = detector(trimLead = false)
         assertEquals(0, d.feed(300, quiet))
