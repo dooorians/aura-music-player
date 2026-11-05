@@ -127,7 +127,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setAmoledBackgroundEnabled(enabled) }
     }
 
-    fun startSleepTimer(minutes: Int) = sleepTimer.start(minutes * 60_000L)
+    /**
+     * Starts the sleep timer. With [finishCurrentTrack] (the default) the music stops at the end of
+     * the track playing when the time is up, never in the middle of a song; either way it fades out
+     * over the last 30 seconds.
+     */
+    fun startSleepTimer(minutes: Int, finishCurrentTrack: Boolean = true) =
+        sleepTimer.start(minutes * 60_000L, finishCurrentTrack)
 
     fun cancelSleepTimer() = sleepTimer.cancel()
 
