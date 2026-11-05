@@ -486,13 +486,14 @@ fun GlassPlayerPill(
             },
             contentAlignment = Alignment.Center,
         ) {
-            val sink = 1f - 0.12f * (playHalo.value / HALO_ALPHA).coerceIn(0f, 1f)
+            // The press's sink, read inside the layers below: the halo fading out redraws the glyphs, it does not recompose them.
+            val sink = { 1f - 0.12f * (playHalo.value / HALO_ALPHA).coerceIn(0f, 1f) }
             Icon(
                 imageVector = CupertinoIcons.Play,
                 contentDescription = if (isPlaying) null else "Lecture",
                 tint = accent,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val sc = (1f - 0.65f * playMorph) * sink
+                    val sc = (1f - 0.65f * playMorph) * sink()
                     scaleX = sc; scaleY = sc; alpha = 1f - playMorph
                 },
             )
@@ -501,7 +502,7 @@ fun GlassPlayerPill(
                 contentDescription = if (isPlaying) "Pause" else null,
                 tint = accent,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val sc = (0.35f + 0.65f * playMorph) * sink
+                    val sc = (0.35f + 0.65f * playMorph) * sink()
                     scaleX = sc; scaleY = sc; alpha = playMorph
                 },
             )
