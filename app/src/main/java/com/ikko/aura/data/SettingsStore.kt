@@ -52,6 +52,7 @@ class SettingsStore @Inject constructor(
     private val onlineLyricsKey = booleanPreferencesKey("online_lyrics")
     private val automixKey = booleanPreferencesKey("automix")
     private val ytmKey = booleanPreferencesKey("ytm_enabled")
+    private val trimSilenceKey = booleanPreferencesKey("trimSilenceEnabled")
     private val profileImageUriKey = stringPreferencesKey("profile_image_uri")
     private val profileFirstNameKey = stringPreferencesKey("profile_first_name")
     private val amoledBackgroundKey = booleanPreferencesKey("amoled_background")
@@ -176,6 +177,9 @@ class SettingsStore @Inject constructor(
         prefs[automixKey] ?: false
     }
 
+    /** Skips the silence at the start and end of local tracks. On by default. */
+    val trimSilenceEnabled = setting { prefs -> prefs[trimSilenceKey] ?: true }
+
     /**
      * The YouTube Music source. Off by default and unofficial: it is a switch the user turns on knowing what it is,
      * and the way to stop it at once.
@@ -212,6 +216,10 @@ class SettingsStore @Inject constructor(
 
     suspend fun setAutomixEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[automixKey] = enabled }
+    }
+
+    suspend fun setTrimSilenceEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[trimSilenceKey] = enabled }
     }
 
     fun playlistCustomArtwork(id: Long): Flow<String?> = setting { prefs ->

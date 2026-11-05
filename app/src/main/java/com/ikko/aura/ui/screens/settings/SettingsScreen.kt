@@ -297,6 +297,13 @@ private fun PlaybackPage(vm: SettingsViewModel, navController: NavHostController
             detail = "Analyse le tempo, l'énergie et la structure de chaque titre pour enchaîner en mesure, au lieu d'un fondu de longueur fixe.",
             checked = ui.automixEnabled, onCheckedChange = vm::setAutomixEnabled,
         )
+        SettingsDivider()
+        SettingsSwitchRow(
+            title = "Ignorer les silences",
+            summary = "Passe directement les silences d'introduction et de conclusion des pistes locales",
+            detail = "Les blancs sous -50 dBFS au début et à la fin des fichiers locaux sont sautés, sans coupure ni décalage des paroles.",
+            checked = ui.trimSilenceEnabled, onCheckedChange = vm::setTrimSilenceEnabled,
+        )
     }
     SettingsGroup(title = "Paroles") {
         SettingsSwitchRow(

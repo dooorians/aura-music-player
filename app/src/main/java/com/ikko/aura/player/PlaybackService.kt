@@ -38,6 +38,11 @@ import com.ikko.aura.player.smart.AutomixSettings
 import com.ikko.aura.player.smart.TrackAnalyzer
 import com.ikko.aura.player.smart.TransitionFilterProcessor
 import com.ikko.aura.player.smart.TransitionFilters
+import com.ikko.aura.player.silence.EdgeSilenceTrimProcessor
+import com.ikko.aura.player.silence.SilenceTrim
+import com.ikko.aura.player.silence.TrailingSilenceSkipper
+import com.ikko.aura.player.silence.TrimmingAudioProcessorChain
+import com.ikko.aura.player.sleep.SleepFadeProcessor
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -96,6 +101,19 @@ class PlaybackService : MediaSessionService() {
     private var activeBeat = com.ikko.aura.player.beat.BeatDetector()
     private var spareBeat = com.ikko.aura.player.beat.BeatDetector()
 
+    /** One edge-silence trimmer per player, swapped with them like the filters. */
+    private var activeTrimmer = EdgeSilenceTrimProcessor()
+    private var spareTrimmer = EdgeSilenceTrimProcessor()
+
+    /** Moves on from a local track's trailing silence; follows the session's player like [recovery]. */
+    private val trailingSkipper by lazy {
+        TrailingSilenceSkipper(scope) {
+            // A crossfade that can be armed owns the end of the track.
+            !canArm(AutomixSettings.smartFadeEnabled.value, AutomixSettings.crossfadeSeconds.value) &&
+                crossfade?.isTransitioning() != true
+        }
+    }
+
     /** Automix's DSP analyzer. Constructed lazily — see [TrackAnalyzer]'s note about contexts. */
     private val trackAnalyzer by lazy { TrackAnalyzer(this) }
 
@@ -118,13 +136,14 @@ class PlaybackService : MediaSessionService() {
                 .apply { setSmallIcon(R.drawable.ic_cu_headphones) },
         )
 
-        val active = buildPlayer(activeFilter, activeBeat, ownsSession = true)
-        val standby = buildPlayer(spareFilter, spareBeat, ownsSession = false)
+        val active = buildPlayer(activeFilter, activeBeat, activeTrimmer, ownsSession = true)
+        val standby = buildPlayer(spareFilter, spareBeat, spareTrimmer, ownsSession = false)
         player = active
         spare = standby
         com.ikko.aura.player.beat.BeatGrids.active = activeBeat
         recovery.attach(active)
         snapshotWriter.attach(active)
+        trailingSkipper.attach(active, activeTrimmer)
 
         val controller = CrossfadeController(
             scope = scope,
@@ -180,6 +199,11 @@ class PlaybackService : MediaSessionService() {
         settingsStore.automixEnabled
             .onEach { AutomixSettings.smartFadeEnabled.value = it }
             .launchIn(scope)
+        // Read by both trimmers on the audio thread, buffer by buffer: a change applies at once, with
+        // no restart of the players.
+        settingsStore.trimSilenceEnabled
+            .onEach { SilenceTrim.enabled = it }
+            .launchIn(scope)
 
         // Applied to both players, the idle one included: it is the one the next transition will
         // start a track on, and a route set only on the audible player would be lost at the lap.
@@ -223,6 +247,10 @@ class PlaybackService : MediaSessionService() {
         activeBeat = spareBeat
         spareBeat = heldBeat
         com.ikko.aura.player.beat.BeatGrids.active = activeBeat
+        val heldTrimmer = activeTrimmer
+        activeTrimmer = spareTrimmer
+        spareTrimmer = heldTrimmer
+        trailingSkipper.attach(incoming, activeTrimmer)
 
         crossfade?.let { mediaSession?.player = SkipAwarePlayer(incoming, it) }
     }
@@ -237,8 +265,13 @@ class PlaybackService : MediaSessionService() {
         target.setHandleAudioBecomingNoisy(owns)
     }
 
-    private fun buildPlayer(filter: TransitionFilterProcessor, beat: com.ikko.aura.player.beat.BeatDetector, ownsSession: Boolean): ExoPlayer =
-        ExoPlayer.Builder(this, filteredRenderers(filter, beat))
+    private fun buildPlayer(
+        filter: TransitionFilterProcessor,
+        beat: com.ikko.aura.player.beat.BeatDetector,
+        trimmer: EdgeSilenceTrimProcessor,
+        ownsSession: Boolean,
+    ): ExoPlayer =
+        ExoPlayer.Builder(this, filteredRenderers(filter, beat, trimmer))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
                     DefaultDataSource.Factory(
@@ -276,22 +309,42 @@ class PlaybackService : MediaSessionService() {
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
+            // Wake and Wi-Fi locks held only while this player is actually playing or buffering, and
+            // let go of the moment it pauses — the sleep timer's pause included. Without them a
+            // screen-off phone may suspend the CPU mid-stream.
             // Held only while this player is playing or buffering, so the idle spare holds nothing. Without it the CPU
             // and the Wi-Fi could sleep with the screen off while a streamed track was still buffering, and playback
             // stalled until the phone woke up.
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
+            .also {
+                it.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        beat.reset()
+                        // Only a net under the trimmer, which reads the item off the stream itself.
+                        trimmer.fallbackIsLocal = SilenceTrim.isLocal(mediaItem?.localConfiguration?.uri)
+                    }
+                })
+            }
+            // Both players share one session id so the equaliser applies to whichever is
+            // audible, including through the overlap where both are.
             .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
             // Both players share one session id, so anything attached to the session (a system
             // visualiser, an external effect) follows whichever of them is audible.
             .apply { setAudioSessionId(audioSessionIdProvider.id) }
 
     /**
-     * The stock renderer chain with [TransitionFilterProcessor] spliced into the audio sink.
-     * That is what makes a transition's low-pass and high-pass audible rather than advisory.
+     * The stock renderer chain with Aura's processors spliced into the audio sink:
+     * [EdgeSilenceTrimProcessor] (silence at the edges of local tracks), [TransitionFilterProcessor]
+     * (what makes a transition's low-pass and high-pass audible rather than advisory) and
+     * [SleepFadeProcessor] (the sleep timer's fade-out).
      */
-    private fun filteredRenderers(transition: TransitionFilterProcessor, beat: com.ikko.aura.player.beat.BeatDetector) =
+    private fun filteredRenderers(
+        transition: TransitionFilterProcessor,
+        beat: com.ikko.aura.player.beat.BeatDetector,
+        trimmer: EdgeSilenceTrimProcessor,
+    ) =
         object : io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory(this@PlaybackService) {
             // The phone's own codecs first; FFmpeg only for the formats they refuse, so a file that plays
             // silently in the gallery still plays here.
@@ -301,6 +354,22 @@ class PlaybackService : MediaSessionService() {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
+                .setAudioProcessorChain(
+                    // Edge trimming first, so nothing after it spends time on silence that is about to
+                    // be dropped; the sleep fade last, on exactly what is about to be heard.
+                    TrimmingAudioProcessorChain(
+                        DefaultAudioSink.DefaultAudioProcessorChain(
+                            arrayOf(trimmer, transition, SleepFadeProcessor()),
+                            SilenceSkippingAudioProcessor(),
+                            SonicAudioProcessor(),
+                        ),
+                        trimmer,
+                    ),
+                )
+                .build(), beat)
             ): AudioSink {
                 // The app's equaliser, normaliser and limiter, last in the chain: see DspAudioProcessorChain.
                 val dsp = com.ikko.aura.core.audio.dsp.DspAudioProcessor(dspController.parameters)
@@ -326,6 +395,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         recovery.release()
+        trailingSkipper.release()
         snapshotWriter.release()
         crossfade?.release()
         crossfade = null

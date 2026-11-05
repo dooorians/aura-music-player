@@ -28,6 +28,8 @@ data class SettingsUiState(
     val sleepMinutesLeft: Int? = null,
     val albumLayoutMode: AlbumLayoutMode = AlbumLayoutMode.GRID_3,
     val trackLayoutMode: TrackLayoutMode = TrackLayoutMode.GRID_2,
+    /** Silence at the edges of local tracks is skipped. */
+    val trimSilenceEnabled: Boolean = true,
 )
 
 @HiltViewModel
@@ -61,6 +63,7 @@ class SettingsViewModel @Inject constructor(
         settingsStore.ytmEnabled,
         settingsStore.albumLayoutMode,
         settingsStore.trackLayoutMode,
+        settingsStore.trimSilenceEnabled,
     ) { values ->
         SettingsUiState(
             isScanning = values[0] as Boolean,
@@ -70,6 +73,7 @@ class SettingsViewModel @Inject constructor(
             ytmEnabled = values[4] as Boolean,
             albumLayoutMode = values[5] as AlbumLayoutMode,
             trackLayoutMode = values[6] as TrackLayoutMode,
+            trimSilenceEnabled = values[7] as Boolean,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -100,6 +104,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setAutomixEnabled(enabled) }
     }
 
+    fun setTrimSilenceEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setTrimSilenceEnabled(enabled) }
+    }
+
     fun setAlbumLayoutMode(mode: AlbumLayoutMode) {
         viewModelScope.launch { settingsStore.setAlbumLayoutMode(mode) }
     }
@@ -128,7 +136,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setAmoledBackgroundEnabled(enabled) }
     }
 
-    fun startSleepTimer(minutes: Int) = sleepTimer.start(minutes * 60_000L)
+    /**
+     * Starts the sleep timer. With [finishCurrentTrack] (the default) the music stops at the end of
+     * the track playing when the time is up, never in the middle of a song; either way it fades out
+     * over the last 30 seconds.
+     */
+    fun startSleepTimer(minutes: Int, finishCurrentTrack: Boolean = true) =
+        sleepTimer.start(minutes * 60_000L, finishCurrentTrack)
 
     fun cancelSleepTimer() = sleepTimer.cancel()
 
