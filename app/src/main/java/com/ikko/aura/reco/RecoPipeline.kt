@@ -131,7 +131,8 @@ class RecoPipeline(
         // The songs the ambiances may draw from are measured (their tempo, their loudness, the tags of the song): the closest to the listener first.
         val moodsAsked = kinds.any { it == RecoKind.ENERGY || it == RecoKind.NIGHT || it == RecoKind.CHILL }
         val songFeatures = if (moodsAsked && features != null) {
-            val toMeasure = pool.filter { Eligibility.excluded(it, ctxBase0) == null }.sortedByDescending { tieOf(it, profile) }.take(MAX_FEATURE_LOOKUPS)
+            // From as many artists as possible, the closest first: the closest alone are the hits of the few artists played most.
+            val toMeasure = FeatureSelection.spread(pool.filter { Eligibility.excluded(it, ctxBase0) == null }, MAX_FEATURE_LOOKUPS) { tieOf(it, profile) }
             runCatching { features?.featuresOf(toMeasure, FEATURE_BUDGET_MS) }.getOrNull().orEmpty()
         } else emptyMap()
         log("tags=${artistTags.size} measured=${songFeatures.size} heard=${songFeatures.values.count { it.probe != null }}")
