@@ -145,6 +145,9 @@ class RecommendationEngine @Inject constructor(
         if (prefs.algorithmVersion() >= RULES_VERSION) return
         dao.clearAllItems()
         dao.clearStates()
+        // The playlists themselves too: one the new rules cannot fill again must not stay as the old rules left it.
+        val now = System.currentTimeMillis()
+        for (kind in RecoKind.entries) if (playlists.autoPlaylistId(kind.key) != null) runCatching { playlists.replaceAutoPlaylist(kind.key, kind.title, emptyList(), now) }
         prefs.setAlgorithmVersion(RULES_VERSION)
     }
 
@@ -312,7 +315,7 @@ class RecommendationEngine @Inject constructor(
 
     private companion object {
         /** Bumped when the rules that choose songs change in a way that makes earlier playlists wrong. */
-        const val RULES_VERSION = 16
+        const val RULES_VERSION = 17
         /** What a source puts in the artist field when an album has none: nobody to block. */
         val NOT_AN_ARTIST = Regex("^(?:various(?: artists)?|va|v a|divers|artistes? divers|youtube music|jiosaavn|unknown|unknown artist|artiste inconnu)$")
     }

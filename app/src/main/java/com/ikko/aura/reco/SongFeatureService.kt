@@ -28,6 +28,7 @@ class SongFeatureService @Inject constructor(
     private val dao: TrackMetaDao,
     private val deezer: DeezerClient,
     private val lastFm: LastFm,
+    private val previews: PreviewAnalyzer,
 ) : SongFeatureSource {
 
     override suspend fun featuresOf(songs: List<Candidate>, budgetMs: Long): Map<String, SongFeatures> {
@@ -38,12 +39,15 @@ class SongFeatureService @Inject constructor(
         val todo = ArrayList<Candidate>()
         for (c in wanted) {
             val row = kept[c.identity]
-            val fresh = row != null && now - row.fetchedAt < if (row.found) FOUND_TTL_MS else MISSING_TTL_MS
+            // A song found before the previews were listened to is looked up again, to hear its preview.
+            val fresh = row != null && now - row.fetchedAt < (if (row.found) FOUND_TTL_MS else MISSING_TTL_MS) && !(row.found && row.probed == 0)
             if (!fresh) todo += c else if (row!!.found) out[c.identity] = row.toFeatures()
         }
         val learned = Collections.synchronizedList(ArrayList<SongFeaturesEntity>())
         withTimeoutOrNull(budgetMs) {
             val gate = Semaphore(4)
+            // Listening to a preview is the heavy part (download, decode, analysis): two at a time.
+            val listening = Semaphore(2)
             coroutineScope {
                 todo.map { c ->
                     async {
@@ -51,11 +55,17 @@ class SongFeatureService @Inject constructor(
                             var failed = false
                             val d = try { deezer.trackFeatures(c.title, c.artist) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { failed = true; null }
                             val tags = try { lastFm.trackTags(c.title, c.artist) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }.orEmpty()
-                            val f = SongFeatures(bpm = d?.bpm?.takeIf { it > 0.0 } ?: c.bpm, gainDb = d?.gainDb, trackTags = tags)
+                            val url = d?.previewUrl
+                            val probe = if (url != null) listening.withPermit { try { previews.probe(url) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null } } else null
+                            val f = SongFeatures(bpm = d?.bpm?.takeIf { it > 0.0 } ?: c.bpm, gainDb = d?.gainDb, trackTags = tags, probe = probe)
                             val found = d != null || tags.isNotEmpty()
                             if (found) out[c.identity] = f
                             // A network failure is not an answer: it is not kept as one.
-                            if (!failed) learned += SongFeaturesEntity(c.identity, f.bpm ?: 0.0, f.gainDb, tags.joinToString("\u0000"), found, System.currentTimeMillis())
+                            if (!failed) learned += SongFeaturesEntity(
+                                c.identity, f.bpm ?: 0.0, f.gainDb, tags.joinToString("\u0000"), found, System.currentTimeMillis(),
+                                probeBpm = probe?.bpm ?: 0.0, probeConf = probe?.beatConfidence ?: 0.0, probeRmsDb = probe?.rmsDb ?: 0.0,
+                                probeLow = probe?.lowShare ?: 0.0, probeVar = probe?.variability ?: 0.0, probed = if (probe != null) 1 else 2,
+                            )
                         }
                     }
                 }.awaitAll()
@@ -66,7 +76,10 @@ class SongFeatureService @Inject constructor(
     }
 
     private fun SongFeaturesEntity.toFeatures() =
-        SongFeatures(bpm.takeIf { it > 0.0 }, gainDb, trackTags.split('\u0000').filter { it.isNotEmpty() })
+        SongFeatures(
+            bpm.takeIf { it > 0.0 }, gainDb, trackTags.split('\u0000').filter { it.isNotEmpty() },
+            probe = if (probed == 1) AudioProbe(probeBpm, probeConf, probeRmsDb, probeLow, probeVar) else null,
+        )
 
     private companion object {
         const val FOUND_TTL_MS = 120L * 86_400_000L

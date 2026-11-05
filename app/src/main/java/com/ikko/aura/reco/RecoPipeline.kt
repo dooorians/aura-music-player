@@ -134,7 +134,7 @@ class RecoPipeline(
             val toMeasure = pool.filter { Eligibility.excluded(it, ctxBase0) == null }.sortedByDescending { tieOf(it, profile) }.take(MAX_FEATURE_LOOKUPS)
             runCatching { features?.featuresOf(toMeasure, FEATURE_BUDGET_MS) }.getOrNull().orEmpty()
         } else emptyMap()
-        log("tags=${artistTags.size} measured=${songFeatures.size}")
+        log("tags=${artistTags.size} measured=${songFeatures.size} heard=${songFeatures.values.count { it.probe != null }}")
         val ctxBase = ctxBase0.copy(artistTags = artistTags, songFeatures = songFeatures)
         // Dates of recent releases are not in a search result: asked for the few that could be new.
         if (RecoKind.NEW in kinds) {
@@ -380,6 +380,6 @@ class RecoPipeline(
         const val MAX_HIT_LOOKUPS = 16
         const val MAX_TAG_LOOKUPS = 150
         const val MAX_FEATURE_LOOKUPS = 160
-        const val FEATURE_BUDGET_MS = 100_000L
+        const val FEATURE_BUDGET_MS = 240_000L
     }
 }

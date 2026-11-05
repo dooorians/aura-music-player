@@ -76,4 +76,43 @@ class MoodJudgeTest {
         assertNull(verdict(Mood.ENERGY, calm))
         assertEquals(null, verdict(Mood.CHILL, SongFeatures(bpm = 140.0, gainDb = -6.0, trackTags = listOf("party", "dance"))))
     }
+
+    // --- what the app heard of the previews, judged against the others ---
+
+    private fun heard(rms: Double, bpm: Double, low: Double, movement: Double, gain: Double = -10.0) =
+        SongFeatures(gainDb = gain, probe = AudioProbe(bpm, beatConfidence = 0.8, rmsDb = rms, lowShare = low, variability = movement))
+
+    /** Twelve songs from steady and soft (0) to loud and driving (11). */
+    private val pool = (0 until 12).map { heard(rms = -26.0 + it * 1.5, bpm = 70.0 + it * 8, low = 0.1 + it * 0.05, movement = 0.2 + it * 0.1) }
+    private val stats = MoodJudge.PoolStats.of(pool)
+
+    @Test fun `the calmest of the songs heard is calm and the most driving is energetic`() {
+        assertNotNull(MoodJudge.verdict(Mood.CHILL, pool.first(), emptyList(), "Song", stats))
+        assertNull(MoodJudge.verdict(Mood.ENERGY, pool.first(), emptyList(), "Song", stats))
+        assertNotNull(MoodJudge.verdict(Mood.ENERGY, pool.last(), emptyList(), "Song", stats))
+        assertNull(MoodJudge.verdict(Mood.CHILL, pool.last(), emptyList(), "Song", stats))
+    }
+
+    @Test fun `about a third of a pool is chill, fewer are night, and a song is never both energetic and chill`() {
+        val chill = pool.count { MoodJudge.verdict(Mood.CHILL, it, emptyList(), "S", stats) != null }
+        val night = pool.count { MoodJudge.verdict(Mood.NIGHT, it, emptyList(), "S", stats) != null }
+        val energy = pool.count { MoodJudge.verdict(Mood.ENERGY, it, emptyList(), "S", stats) != null }
+        assertTrue("chill $chill", chill in 2..7)
+        assertTrue("night $night <= chill $chill", night in 1..chill)
+        assertTrue("energy $energy", energy in 2..7)
+        assertTrue(pool.none { MoodJudge.verdict(Mood.CHILL, it, emptyList(), "S", stats) != null && MoodJudge.verdict(Mood.ENERGY, it, emptyList(), "S", stats) != null })
+    }
+
+    @Test fun `a tempo the app heard beats the one a catalogue states, unless it is not sure`() {
+        val sure = SongFeatures(bpm = 70.0, gainDb = -16.0, probe = AudioProbe(130.0, 0.9, -14.0, 0.2, 0.3))
+        val unsure = SongFeatures(bpm = 70.0, gainDb = -16.0, probe = AudioProbe(130.0, 0.1, -14.0, 0.2, 0.3))
+        assertTrue(MoodJudge.read(sure, emptyList(), "S").bpm!! >= 100.0)
+        assertEquals(70.0, MoodJudge.read(unsure, emptyList(), "S").bpm!!, 0.0)
+    }
+
+    @Test fun `a pool too small to compare with falls back on the fixed scale`() {
+        val loud = heard(rms = -8.0, bpm = 128.0, low = 0.5, movement = 1.0, gain = -6.0)
+        assertNull(MoodJudge.verdict(Mood.CHILL, loud, emptyList(), "S", MoodJudge.PoolStats.of(listOf(loud))))
+        assertNotNull(MoodJudge.verdict(Mood.ENERGY, loud, emptyList(), "S", MoodJudge.PoolStats.of(listOf(loud))))
+    }
 }

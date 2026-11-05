@@ -52,6 +52,13 @@ data class SongFeaturesEntity(
     val trackTags: String,
     val found: Boolean,
     val fetchedAt: Long,
+    /** What the app heard of the preview ([AudioProbe]); [probed]: 0 not tried yet, 1 heard, 2 tried and could not. */
+    val probeBpm: Double = 0.0,
+    val probeConf: Double = 0.0,
+    val probeRmsDb: Double = 0.0,
+    val probeLow: Double = 0.0,
+    val probeVar: Double = 0.0,
+    val probed: Int = 0,
 )
 
 data class TagMark(val trackId: String, val readVersion: Int)
@@ -111,5 +118,17 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
             "CREATE TABLE IF NOT EXISTS song_features (identity TEXT NOT NULL PRIMARY KEY, bpm REAL NOT NULL, gainDb REAL, trackTags TEXT NOT NULL, " +
                 "found INTEGER NOT NULL, fetchedAt INTEGER NOT NULL)",
         )
+    }
+}
+
+/** What the app heard of the previews of the songs recommended; additive only. */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probeBpm REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probeConf REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probeRmsDb REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probeLow REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probeVar REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE song_features ADD COLUMN probed INTEGER NOT NULL DEFAULT 0")
     }
 }

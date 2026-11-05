@@ -28,6 +28,9 @@ data class RankContext(
     /** Song identity → what was measured of it (tempo, loudness, the tags of the song): what the ambiances are judged on. */
     val songFeatures: Map<String, SongFeatures> = emptyMap(),
 ) {
+    /** The songs measured, to judge each against the others (see [MoodJudge.PoolStats]). */
+    val moodPool: MoodJudge.PoolStats by lazy { MoodJudge.PoolStats.of(songFeatures.values) }
+
     /** The broad families of what the listener plays, from the genres their library and their artists carry; empty when there is not enough to tell. */
     val likedFamilies: Set<String> by lazy {
         profile.genres.entries.sortedByDescending { it.value }.take(8).mapNotNull { GenreNormalizer.family(it.key) }.toSet()
@@ -351,7 +354,7 @@ object Ranker {
                 // K-pop song called "All Night" is no calm night song. Night is the stricter of the calm ones, so a song fits one and is kept from the other.
                 val features = ctx.songFeatures[c.identity] ?: c.bpm?.let { SongFeatures(bpm = it) }
                 val artistTags = c.credits.firstOrNull()?.let { ctx.artistTags[it] }.orEmpty()
-                val verdict = MoodJudge.verdict(mood, features, artistTags, c.title) ?: return null
+                val verdict = MoodJudge.verdict(mood, features, artistTags, c.title, ctx.moodPool) ?: return null
                 // The ambience decides what goes in, but only among songs with a tie to the listener: a query for "chill"
                 // answers with whatever its source ranks first, and that is not the listener's music.
                 if (taste < MOOD_MIN_TASTE) return null
