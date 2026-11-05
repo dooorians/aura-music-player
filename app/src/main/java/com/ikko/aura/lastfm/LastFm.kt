@@ -45,9 +45,8 @@ object LastFmRules {
  * sent to Last.fm to get a session and is not kept.
  */
 @Singleton
-class LastFm @Inject constructor(@param:ApplicationContext private val context: Context) : com.ikko.aura.reco.ArtistInsight {
 class LastFm @Inject constructor(
-    @ApplicationContext context: Context,
+    @param:ApplicationContext private val context: Context,
     remoteCache: com.ikko.aura.data.cache.RemoteCacheDao,
 ) : com.ikko.aura.reco.ArtistInsight {
     private val prefs = context.getSharedPreferences("lastfm", Context.MODE_PRIVATE)
@@ -329,38 +328,25 @@ class LastFm @Inject constructor(
         val body = (all + ("api_sig" to LastFmRules.sign(all, secret)) + ("format" to "json")).entries
             .joinToString("&") { URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }
         // Through the breaker: offline or after repeated failures nothing is sent — the listen stays queued, and
-        // [ScrobbleFlushWorker] sends it once the system says there is a network.
-        return com.ikko.aura.net.NetGuard.exchange(
-            ENDPOINT,
-            setup = { connection ->
-                connection.requestMethod = "POST"
-                connection.doOutput = true
-                connection.connectTimeout = 8_000
-                connection.readTimeout = 12_000
-                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                connection.outputStream.use { it.write(body.toByteArray()) }
-            },
-        ) { connection, code ->
-            val text = (if (code < 400) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            val json = JSONObject(text)
-            if (json.has("error")) throw LastFmError(json.getInt("error"), json.optString("message"))
-            json
-        val connection = URL("https://ws.audioscrobbler.com/2.0/").openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 8_000
-        connection.readTimeout = 12_000
-        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        // [ScrobbleFlushWorker] sends it once the system says there is a network. Still cancellable: a caller's
+        // timeout closes the connection instead of waiting for the read timeout.
+        var open: java.net.HttpURLConnection? = null
         val (status, text) = try {
-            com.ikko.aura.util.abortableBlocking(abort = connection::disconnect) {
-                try {
-                    connection.outputStream.use { it.write(body.toByteArray()) }
-                    val code = connection.responseCode
+            com.ikko.aura.util.abortableBlocking(abort = { open?.disconnect() }) {
+                com.ikko.aura.net.NetGuard.exchange(
+                    ENDPOINT,
+                    setup = { connection ->
+                        open = connection
+                        connection.requestMethod = "POST"
+                        connection.doOutput = true
+                        connection.connectTimeout = 8_000
+                        connection.readTimeout = 12_000
+                        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                        connection.outputStream.use { it.write(body.toByteArray()) }
+                    },
+                ) { connection, code ->
                     code to (if (code < 400) connection.inputStream else connection.errorStream)
                         ?.bufferedReader()?.use { it.readText() }.orEmpty()
-                } finally {
-                    connection.disconnect()
                 }
             }
         } catch (e: java.io.IOException) {
