@@ -71,6 +71,7 @@ fun PlaylistsOverviewScreen(
     val tracksById = remember(uiState.tracks) { uiState.tracks.associateBy { it.id } }
     val listState = rememberLazyListState()
     var creatingPlaylist by remember { mutableStateOf(false) }
+    var composingWithAi by remember { mutableStateOf(false) }
     val searchOpener = LocalSearchOpener.current
     val scope = rememberCoroutineScope()
     val headerVisible = remember { androidx.compose.animation.core.Animatable(1f) }
@@ -164,6 +165,23 @@ fun PlaylistsOverviewScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(u * 16f),
                 ) {
+                    // The playlist assistant: a playlist composed from a sentence, on the device.
+                    Box(
+                        Modifier
+                            .size(u * 96f)
+                            .glassSurface(CircleShape)
+                            .clip(CircleShape)
+                            .clickable { composingWithAi = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            CupertinoIcons.AutoAwesome,
+                            contentDescription = "Composer une playlist avec l'IA",
+                            tint = Color.White,
+                            modifier = Modifier.size(u * 44f),
+                        )
+                    }
+
                     Box(
                         Modifier
                             .size(u * 96f)
@@ -197,6 +215,14 @@ fun PlaylistsOverviewScreen(
                     }
                 }
             }
+        }
+
+        if (composingWithAi) {
+            com.ikko.aura.ui.playlist.ai.AiPlaylistSheet(
+                playerViewModel = playerViewModel,
+                onDismiss = { composingWithAi = false },
+                onOpenPlaylist = { id -> navController.navigate(AuraDestination.PlaylistPattern.route(id.toString())) },
+            )
         }
 
         if (creatingPlaylist) {

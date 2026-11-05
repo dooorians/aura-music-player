@@ -114,6 +114,8 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun smartDao(): com.ikko.aura.reco.SmartDao
     abstract fun verifiedDiscographyDao(): com.ikko.aura.reco.VerifiedDiscographyDao
     abstract fun trackMetaDao(): com.ikko.aura.reco.TrackMetaDao
+    /** Reads only (track_tags, track_stats, artist_meta): no table of its own, so no migration. */
+    abstract fun aiPlaylistDao(): com.ikko.aura.ai.playlist.AiPlaylistDao
 }
 
 /**

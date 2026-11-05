@@ -11,7 +11,7 @@
 # to that same tree without duplicating this module.
 
 cmake_minimum_required(VERSION 3.22.1)
-project(aura_analysis LANGUAGES CXX)
+project(aura_analysis LANGUAGES C CXX)
 
 get_filename_component(AURA_NATIVE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native"
@@ -42,3 +42,16 @@ target_compile_options(aura_analysis PRIVATE -O3 -fvisibility=hidden)
 
 find_library(log-lib log)
 target_link_libraries(aura_analysis ${log-lib})
+
+# The playlist assistant: a small instruction model run on the CPU through a pruned llama.cpp (native/slm, see its
+# CMakeLists.txt). Its own library, loaded only when the assistant is opened, so the app's start and the Automix
+# analyser carry none of it.
+set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
+add_subdirectory(${AURA_NATIVE_DIR}/slm ${CMAKE_CURRENT_BINARY_DIR}/slm)
+
+add_library(aura_llm SHARED jni/llama_bridge.cpp)
+target_compile_options(aura_llm PRIVATE -O2 -fvisibility=hidden)
+target_link_libraries(aura_llm PRIVATE aura_slm_engine ${log-lib})
+# Only the two JNI entry points are exported; ggml and llama stay internal to the library. Segments are aligned on 16 KB
+# so the library loads on devices with 16 KB pages (Android 15 and later).
+target_link_options(aura_llm PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,-z,max-page-size=16384)
