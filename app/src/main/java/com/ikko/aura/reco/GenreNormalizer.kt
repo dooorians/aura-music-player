@@ -75,7 +75,7 @@ object GenreNormalizer {
         "metal" to listOf("metal", "metalcore", "deathcore"),
         "punk" to listOf("punk", "emo", "grunge", "hardcore", "ska"),
         "hip-hop" to listOf("hip-hop", "hip hop", "rap", "trap", "drill", "grime", "boom bap"),
-        "rnb" to listOf("r&b", "soul", "funk", "motown", "neo-soul", "disco"),
+        "rnb" to listOf("r&b", "rnb", "soul", "funk", "motown", "neo-soul", "disco"),
         "electronic" to listOf("electro", "house", "techno", "trance", "dubstep", "drum and bass", "drum & bass", "idm", "ambient", "downtempo", "trip-hop", "edm", "dance", "synthwave", "garage", "breakbeat", "lo-fi"),
         "jazz" to listOf("jazz", "bossa", "swing", "bebop"),
         "blues" to listOf("blues", "gospel"),

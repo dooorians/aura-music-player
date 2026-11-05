@@ -23,7 +23,14 @@ data class RankContext(
     val sourceOrder: List<String> = emptyList(),
     /** Artist key → the title keys of their most played songs, most played first (Last.fm): what tells a hit from a deep cut. */
     val hits: Map<String, List<String>> = emptyMap(),
+    /** Artist key → their tags (Last.fm), most telling first: what tells a metal band from a pop star, whatever a source says of their song. */
+    val artistTags: Map<String, List<String>> = emptyMap(),
 ) {
+    /** The broad families of what the listener plays, from the genres their library and their artists carry; empty when there is not enough to tell. */
+    val likedFamilies: Set<String> by lazy {
+        profile.genres.entries.sortedByDescending { it.value }.take(8).mapNotNull { GenreNormalizer.family(it.key) }.toSet()
+    }
+
     val today: LocalDate get() = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
 }
 
@@ -243,6 +250,23 @@ object Ranker {
         }
     }
 
+    /** Ambiances an artist is plainly not of: a metal band is not "Chill" or "Nuit", a symphony is not "Ça bouge !". */
+    private val FORBIDDEN = mapOf(
+        RecoKind.CHILL to setOf("metal", "punk"), RecoKind.NIGHT to setOf("metal", "punk"), RecoKind.ENERGY to setOf("classical", "soundtrack"),
+    )
+
+    /**
+     * Whether a candidate's artist is of the playlist's style: "Dans ton style" holds the families the listener plays; the ambiances turn away an artist
+     * plainly of another world. An artist whose tags are not known is not turned away: the rest of the ranking still has to find them close to the listener.
+     */
+    internal fun suits(kind: RecoKind, c: Candidate, ctx: RankContext): Boolean {
+        val tags = c.credits.firstOrNull()?.let { ctx.artistTags[it] }.orEmpty()
+        if (tags.isEmpty()) return true
+        FORBIDDEN[kind]?.let { if (StyleFit.forbidden(it, tags)) return false }
+        if (kind == RecoKind.STYLE && ctx.likedFamilies.isNotEmpty()) return StyleFit.belongs(ctx.likedFamilies, tags, unknownOk = true)
+        return true
+    }
+
     private fun decadeMatch(c: Candidate, profile: TasteProfile): Double {
         val year = c.release.year.takeIf { it > 0 } ?: return 0.0
         return profile.decades[year / 10 * 10] ?: 0.0
@@ -290,6 +314,9 @@ object Ranker {
         // energetic playlist only, where a remix is the point.
         val variantOfKnown = TrackIdentity.baseIdentity(c.title, c.artist) in profile.knownBases
         if (variantOfKnown && kind != RecoKind.ENERGY) return null
+
+        // The playlist's own style, judged as Home judges its rows: on the artist's tags.
+        if (!suits(kind, c, ctx)) return null
 
         return when (kind) {
             RecoKind.DISCOVERY -> {

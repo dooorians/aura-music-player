@@ -69,9 +69,9 @@ object QueryPlan {
      */
     fun build(profile: TasteProfile, kinds: Set<RecoKind>, variation: Long, blocked: Set<String>): List<RecoQuery> {
         val out = ArrayList<RecoQuery>()
-        val artists = profile.topArtists(16, excluding = blocked)
+        val artists = profile.topArtists(24, excluding = blocked)
         val extra = profile.topArtists(30, excluding = blocked + artists.toSet()).drop(3)
-            .let { rest -> if (rest.isEmpty()) emptyList() else List(minOf(8, rest.size)) { i -> rest[((variation + i * 7) % rest.size).toInt().coerceAtLeast(0)] } }.distinct()
+            .let { rest -> if (rest.isEmpty()) emptyList() else List(minOf(16, rest.size)) { i -> rest[((variation + i * 7) % rest.size).toInt().coerceAtLeast(0)] } }.distinct()
         (artists + extra).forEach { k -> out += RecoQuery.ByArtist(profile.nameOf(k), profile.affinity(k)) }
         // Songs that say the most about the taste, at most two per artist: "similar to" asked of six songs by one artist
         // is one question asked six times.
@@ -106,9 +106,9 @@ data class Gathered(val candidates: List<Candidate>, val health: List<SourceHeal
 
 object CandidateGatherer {
     private const val CALL_TIMEOUT_MS = 12_000L
-    private const val TOTAL_TIMEOUT_MS = 70_000L
+    private const val TOTAL_TIMEOUT_MS = 120_000L
 
-    suspend fun gather(sources: List<CandidateSource>, queries: List<RecoQuery>, parallelism: Int = 4): Gathered = coroutineScope {
+    suspend fun gather(sources: List<CandidateSource>, queries: List<RecoQuery>, parallelism: Int = 6): Gathered = coroutineScope {
         val gate = Semaphore(parallelism)
         val requests = HashMap<String, Int>()
         val failures = HashMap<String, Int>()

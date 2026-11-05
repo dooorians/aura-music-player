@@ -394,20 +394,9 @@ object HomeRotation {
         "folk" to setOf("folk"), "classical" to setOf("classical", "soundtrack"), "blues" to setOf("blues"), "chill" to setOf("electronic"),
     )
 
-    /** How many of an artist's first tags say what they are; the rest is what is left of whatever else they are. */
-    private const val LEADING_TAGS = 3
-
-    /**
-     * Whether an artist belongs in a row of [allowed] families: one of their first [LEADING_TAGS] tags is of one of them. An artist with no tags known
-     * cannot be placed, so is not: a row of "Rock" with Katy Perry in it (pop, female vocalists, dance first) is worse than a row without her. [unknownOk] is
-     * for when no artist has any tag (Last.fm cannot be asked): the genre's chart then stands as Deezer made it, or Home would have no row of a style at all.
-     * No restriction for a row that has no family (a style of its own, a country, a mood).
-     */
-    private fun belongs(allowed: Set<String>?, tags: Set<String>, unknownOk: Boolean = false): Boolean {
-        if (allowed == null) return true
-        if (tags.isEmpty()) return unknownOk
-        return tags.take(LEADING_TAGS).any { com.ikko.aura.reco.GenreNormalizer.family(it) in allowed }
-    }
+    /** Whether an artist belongs in a row of [allowed] families, judged on their own tags (see [com.ikko.aura.reco.StyleFit]). */
+    private fun belongs(allowed: Set<String>?, tags: Set<String>, unknownOk: Boolean = false): Boolean =
+        com.ikko.aura.reco.StyleFit.belongs(allowed, tags, unknownOk)
 
     /** How much of the listener's own taste an album carries: an artist they own or play first, then what the engine found for the artists they play, and the loosest last. */
     private fun tie(a: SectionAlbum, c: RotationContext): Double {

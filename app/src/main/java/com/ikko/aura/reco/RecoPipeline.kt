@@ -101,7 +101,7 @@ class RecoPipeline(
         val hidden = store.hidden()
         // What the artists' best-known songs are, so that a discovery is not their hit again.
         val hits = insight?.let { i -> runCatching { hitsOf(i, gathered.candidates) }.getOrDefault(emptyMap()) }.orEmpty()
-        val ctxBase = RankContext(
+        val ctxBase0 = RankContext(
             profile = profile,
             local = store.localIndex(),
             blocked = blocked,
@@ -122,6 +122,8 @@ class RecoPipeline(
             pool = runCatching { TasteGate(i, profile, store.blockedNames()).apply(pool) }.getOrDefault(pool)
             log("taste gate: $before -> ${pool.size}")
         }
+        // What the artists of the candidates are, by their own tags: what every playlist judges its style on (see [StyleFit]).
+        val ctxBase = ctxBase0.copy(artistTags = runCatching { tagsOf(insight, pool, profile) }.getOrDefault(emptyMap()))
         // Dates of recent releases are not in a search result: asked for the few that could be new.
         if (RecoKind.NEW in kinds) {
             lookUp(pool.filter { needsDate(it, ctxBase) }.sortedByDescending { tieOf(it, profile) }.take(MAX_DATE_LOOKUPS), sourcesById, checked)
@@ -242,6 +244,18 @@ class RecoPipeline(
         verifiedSimilar
     }
 
+    /** The tags of the artists the candidates are by, the ones with the closest tie to the listener first. */
+    private suspend fun tagsOf(insight: ArtistInsight?, pool: List<Candidate>, profile: TasteProfile): Map<String, List<String>> = coroutineScope {
+        if (insight == null) return@coroutineScope emptyMap()
+        val gate = Semaphore(6)
+        pool.groupBy { it.credits.firstOrNull().orEmpty() }.filterKeys { it.isNotEmpty() }.entries
+            .sortedByDescending { (_, list) -> list.maxOf { tieOf(it, profile) } }.take(MAX_TAG_LOOKUPS)
+            .map { (key, list) ->
+                async { gate.withPermit { key to withTimeoutOrNull(6_000L) { insight.tags(ArtistNames.primary(list.first().artist)) } } }
+            }.awaitAll()
+            .mapNotNull { (key, tags) -> tags?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }?.let { key to it } }.toMap()
+    }
+
     /** The most played songs of the artists the candidates are by (the most represented first), as title keys. */
     private suspend fun hitsOf(insight: ArtistInsight, candidates: List<Candidate>): Map<String, List<String>> = coroutineScope {
         val gate = Semaphore(4)
@@ -348,7 +362,8 @@ class RecoPipeline(
         const val RETRY_AFTER_MS = 6L * 60 * 60 * 1000
         const val MAX_DATE_LOOKUPS = 24
         const val MAX_SONG_CHECKS = 120
-        const val MAX_SIMILAR_ARTISTS = 30
+        const val MAX_SIMILAR_ARTISTS = 40
         const val MAX_HIT_LOOKUPS = 16
+        const val MAX_TAG_LOOKUPS = 150
     }
 }
