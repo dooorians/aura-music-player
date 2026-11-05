@@ -21,15 +21,27 @@ object TagMap {
     private val MBID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     private val ISRC = Regex("^[A-Z]{2}[A-Z0-9]{3}\\d{7}$")
     private val GAIN = Regex("^\\s*([+-]?\\d+(?:[.,]\\d+)?)\\s*(?:dB)?\\s*$", RegexOption.IGNORE_CASE)
+    private val CONTROL = Regex("[\\p{Cc}&&[^\\u0000]]")
     private val YEAR = Regex("(?:^|\\D)((?:19|20)\\d{2})(?:\\D|$)")
+
+    /**
+     * A value as a tagger may have left it: a byte-order mark kept from a UTF-16 frame, the NUL that ends an ID3 string
+     * (or separates its values), control characters. Removed before anything is compared.
+     */
+    internal fun clean(value: String): String = value
+        .replace("\uFEFF", "")
+        // Kept: NUL, which separates the values of one frame. A tab or a line break separates words.
+        .replace(CONTROL, " ")
+        .trim { it.isWhitespace() || it == '\u0000' }
 
     fun parse(pairs: List<Pair<String, String>>): ParsedTags {
         fun values(vararg names: String): List<String> {
             val wanted = names.map(::fold).toSet()
-            return pairs.filter { fold(it.first) in wanted }.map { it.second.trim() }.filter { it.isNotEmpty() }
+            return pairs.filter { fold(it.first) in wanted }.map { clean(it.second) }.filter { it.isNotEmpty() }
         }
-        // The recording's id: Vorbis "MUSICBRAINZ_TRACKID", or the ID3 UFID frame the adapter hands over as "UFID:musicbrainz.org".
-        val mbid = values("musicbrainz_trackid", "ufid:musicbrainz.org", "musicbrainz track id", "musicbrainz recording id")
+        // The recording's id: Vorbis "MUSICBRAINZ_TRACKID", or the ID3 UFID frame the adapter hands over as "UFID:<owner>". Picard
+        // writes the owner "http://musicbrainz.org", which folds to another name than the bare host: both are read.
+        val mbid = values("musicbrainz_trackid", "ufid:musicbrainz.org", "ufid:http://musicbrainz.org", "musicbrainz track id", "musicbrainz recording id")
             .firstNotNullOfOrNull { v -> MBID.find(v)?.value?.lowercase() }.orEmpty()
         val isrc = values("isrc", "tsrc").map { it.uppercase().replace("-", "").replace(" ", "") }.firstOrNull { ISRC.matches(it) }.orEmpty()
         fun gain(vararg names: String) = values(*names).firstNotNullOfOrNull { v -> GAIN.find(v)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() }

@@ -267,11 +267,18 @@ class PlaybackService : MediaSessionService() {
                             }
                         },
                     ),
-                    DefaultExtractorsFactory(),
+                    // A raw AAC (ADTS) or AMR file has no seek table, nor does an MP3 whose Xing header carries none:
+                    // without this they play but cannot be seeked, and the progress bar snaps back. Seeking by the
+                    // average bitrate is approximate on variable-bitrate files, which is still far better than nothing.
+                    DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true),
                 ),
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
+            // Held only while this player is playing or buffering, so the idle spare holds nothing. Without it the CPU
+            // and the Wi-Fi could sleep with the screen off while a streamed track was still buffering, and playback
+            // stalled until the phone woke up.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
             .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }

@@ -93,9 +93,7 @@ class LastFmEnricher @Inject constructor(
         }
         mutex.withLock {
             val before = dao.artist(key) ?: ArtistMetaEntity(key, name)
-            dao.putArtist(before.copy(genresJson = JSONArray(genres).toString(), lastFmFetchedTimestamp = System.currentTimeMillis()))
-            dao.clearSimilarities(key)
-            if (rows.isNotEmpty()) dao.putSimilarities(rows)
+            dao.replaceArtistGraph(before.copy(genresJson = JSONArray(genres).toString(), lastFmFetchedTimestamp = System.currentTimeMillis()), rows)
         }
     }
 
