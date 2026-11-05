@@ -155,6 +155,9 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.palette)
     implementation(libs.androidx.datastore.preferences)
+    // Background work the system runs when its constraints hold (a network, an unmetered one, a battery not low):
+    // pending scrobbles and the library's Last.fm enrichment, instead of the app polling for those conditions.
+    implementation(libs.androidx.work.runtime)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

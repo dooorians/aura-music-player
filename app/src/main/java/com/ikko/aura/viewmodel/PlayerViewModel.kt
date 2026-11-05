@@ -339,6 +339,15 @@ class PlayerViewModel @Inject constructor(
             tickerWake.trySend(Unit)
         }
 
+        // Told just before the item changes: where the song being left actually stopped. With the ticker slowed down in
+        // the background, this keeps what the listening history records of it exact.
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            val leaving = oldPosition.mediaItem?.mediaId ?: return
+            if (leaving != newPosition.mediaItem?.mediaId && leaving == _uiState.value.currentTrack?.id) {
+                _positionMs.value = oldPosition.positionMs.coerceAtLeast(0L)
+            }
+        }
+
         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
             tickerWake.trySend(Unit)
             val player = boundPlayer ?: return
@@ -400,6 +409,10 @@ class PlayerViewModel @Inject constructor(
             // Listening and ticking start now. Rebuilding the queue may wait for the device's first scan (when it holds
             // local files), and the screens must not wait with it.
             player.addListener(playerListener)
+            // A screen coming back into view wants the position now, not at the end of the background sleep.
+            launch {
+                _positionMs.subscriptionCount.collect { if (it > 0) tickerWake.trySend(Unit) }
+            }
             launch {
                 adoptExistingQueue(player)
                 restoreSavedQueue(player)
@@ -410,7 +423,14 @@ class PlayerViewModel @Inject constructor(
             // only ever starts once per app session — any race that drops that single start (e.g.
             // a transient buffering blip right at the first play() call) leaves position frozen
             // for the rest of the session with no further event to recover it.
-            while (isActive) {
+            //
+            // Paused, or with no screen showing the position (app in the background), it does not wake twice a second: it
+            // sleeps until the player says something changed, or a screen starts watching again. See [PositionTickPolicy].
+            PositionTickPolicy.run(
+                isPlaying = { player.isPlaying },
+                watched = { _positionMs.subscriptionCount.value > 0 },
+                wake = tickerWake,
+            ) {
                 val expectedId = _uiState.value.currentTrack?.id
                 val playerMediaId = player.currentMediaItem?.mediaId
                 if (expectedId == null || playerMediaId == expectedId) {
@@ -421,14 +441,6 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
                 reconcileCurrentItem(player)
-                // Paused, nothing moves: rather than waking twice a second for the whole time the app is
-                // open, it sleeps until the player says something changed (play, pause, a new item, a
-                // state change), and still looks in every few seconds in case an event never came.
-                if (player.isPlaying) {
-                    kotlinx.coroutines.delay(POSITION_TICK_MS)
-                } else {
-                    withTimeoutOrNull(PAUSED_TICK_MS) { tickerWake.receive() }
-                }
             }
         }
         viewModelScope.launch {
@@ -1033,8 +1045,6 @@ class PlayerViewModel @Inject constructor(
     }
 
     companion object {
-        private const val POSITION_TICK_MS = 500L
-        private const val PAUSED_TICK_MS = 5_000L
         /**
          * The same size the backdrop loads at, deliberately — and therefore the same cache
          * entry. At 256 this decoded the identical cover a second time on every track change,

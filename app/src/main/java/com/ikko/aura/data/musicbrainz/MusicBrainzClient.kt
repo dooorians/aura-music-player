@@ -1,7 +1,5 @@
 package com.ikko.aura.data.musicbrainz
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -48,6 +46,8 @@ class MusicBrainzClient(
 
     private suspend fun fetch(urlString: String): String {
         httpGet?.let { return it(urlString) }
+        // A kept answer skips the one-per-second queue altogether: MusicBrainz's data hardly ever changes.
+        com.ikko.aura.net.NetGuard.fresh(urlString, CACHE_MAX_AGE_MS)?.let { return it }
         return rateMutex.withLock {
             val now = System.currentTimeMillis()
             val elapsed = now - lastRequestTimeMs
@@ -57,23 +57,15 @@ class MusicBrainzClient(
             lastRequestTimeMs = System.currentTimeMillis()
 
             withContext(Dispatchers.IO) {
-                val connection = URL(urlString).openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 8_000
-                connection.readTimeout = 12_000
-                connection.setRequestProperty("User-Agent", USER_AGENT)
-                connection.setRequestProperty("Accept", "application/json")
-                try {
-                    val code = connection.responseCode
-                    if (code in 200..299) {
-                        connection.inputStream.bufferedReader().use { it.readText() }
-                    } else {
-                        val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                        throw Exception("MusicBrainz HTTP $code: $error")
-                    }
-                } finally {
-                    connection.disconnect()
-                }
+                val answer = com.ikko.aura.net.NetGuard.get(
+                    urlString,
+                    maxAgeMs = CACHE_MAX_AGE_MS,
+                    headers = mapOf("User-Agent" to USER_AGENT, "Accept" to "application/json"),
+                    connectTimeoutMs = 8_000,
+                    readTimeoutMs = 12_000,
+                )
+                if (answer.code !in 200..299) throw Exception("MusicBrainz HTTP ${answer.code}: ${answer.body}")
+                answer.body
             }
         }
     }
@@ -184,6 +176,7 @@ class MusicBrainzClient(
         const val BASE_URL = "https://musicbrainz.org/ws/2"
         const val USER_AGENT = "AuraMusicPlayer/1.0.0 ( dooorians15@gmail.com )"
         const val MIN_INTERVAL_MS = 1000L // MusicBrainz limit: 1 request/second
+        const val CACHE_MAX_AGE_MS = 7L * 24 * 3600 * 1000
         const val MAX_RELEASE_GROUPS = 500
         const val MAX_RECORDINGS = 500
     }

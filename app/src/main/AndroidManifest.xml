@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- ExoPlayer's WAKE_MODE_NETWORK: a partial wake lock and a Wi-Fi lock held only while a stream plays, released on pause. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".AuraApplication"

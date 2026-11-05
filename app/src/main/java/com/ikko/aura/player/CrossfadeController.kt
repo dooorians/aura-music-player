@@ -386,7 +386,7 @@ class CrossfadeController(
                 tick()
                 // Idle and paused, there is nothing to arm or run: it sleeps until playback starts again
                 // instead of ticking four times a second on the main thread for as long as the service
-                // lives. It still looks in every couple of seconds, in case a wake-up was ever missed.
+                // lives. It still looks in now and then (PAUSED_STEP_MS), in case a wake-up was ever missed.
                 if (phase == Phase.IDLE && !active().isPlaying) {
                     withTimeoutOrNull(PAUSED_STEP_MS) { wake.receive() }
                     continue
@@ -1673,7 +1673,8 @@ class CrossfadeController(
         const val BLEND_EXIT_LOW_PASS_HZ = 2_200.0
 
         const val IDLE_STEP_MS = 250L
-        const val PAUSED_STEP_MS = 2_000L
+        // Only a net under onIsPlayingChanged, which wakes it at once: paused for an hour, it looks in 240 times, not 1800.
+        const val PAUSED_STEP_MS = 15_000L
         const val DISABLED_STEP_MS = 30_000L
 
         /**

@@ -4,8 +4,6 @@ import android.media.MediaDataSource
 import android.util.Log
 import com.ikko.aura.player.smart.AudioDecoder
 import com.ikko.aura.player.smart.TrackFeatures
-import java.net.HttpURLConnection
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.log10
@@ -83,26 +81,22 @@ class PreviewAnalyzer @Inject constructor(private val recco: RecoBeatsClient) {
         }.onFailure { Log.w(TAG, "Preview not analysed", it) }.getOrNull()
     }
 
-    private fun download(url: String): ByteArray? {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 8_000
-        connection.readTimeout = 10_000
-        return try {
-            if (connection.responseCode !in 200..299) return null
-            val out = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(16 * 1024)
-            connection.inputStream.use { input ->
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    out.write(buffer, 0, n)
-                    if (out.size() > MAX_BYTES) return null
-                }
+    private fun download(url: String): ByteArray? = com.ikko.aura.net.NetGuard.exchange(
+        url,
+        setup = { it.connectTimeout = 8_000; it.readTimeout = 10_000; it.useCaches = false },
+    ) { connection, code ->
+        if (code !in 200..299) return@exchange null
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        connection.inputStream.use { input ->
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                out.write(buffer, 0, n)
+                if (out.size() > MAX_BYTES) return@exchange null
             }
-            out.toByteArray()
-        } finally {
-            connection.disconnect()
         }
+        out.toByteArray()
     }
 
     private fun rmsDb(samples: FloatArray): Double {

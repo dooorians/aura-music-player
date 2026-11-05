@@ -1,7 +1,5 @@
 package com.ikko.aura.data.deezer
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -80,6 +78,8 @@ class DeezerClient(
      * that nothing is cached from it.
      */
     private suspend fun fetch(urlString: String): String {
+        // A kept answer needs no turn in the queue: browsing what was already seen is instant, and free on data.
+        if (httpGet == null) com.ikko.aura.net.NetGuard.fresh(urlString, CACHE_MAX_AGE_MS)?.let { return it }
         repeat(QUOTA_TRIES) { attempt ->
             spacing.withLock {
                 val wait = minIntervalMs - (System.currentTimeMillis() - lastRequestAt)
@@ -101,23 +101,17 @@ class DeezerClient(
     private suspend fun rawFetch(urlString: String): String {
         httpGet?.let { return it(urlString) }
         return withContext(Dispatchers.IO) {
-            val connection = URL(urlString).openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 8_000
-            connection.readTimeout = 10_000
-            connection.setRequestProperty("User-Agent", USER_AGENT)
-            connection.setRequestProperty("Accept", "application/json")
-            try {
-                val code = connection.responseCode
-                if (code in 200..299) {
-                    connection.inputStream.bufferedReader().use { it.readText() }
-                } else {
-                    val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                    throw Exception("Deezer HTTP $code: $error")
-                }
-            } finally {
-                connection.disconnect()
-            }
+            // A quota refusal comes as a 200 too: it is never kept, or it would read as "no data" for a day.
+            val answer = com.ikko.aura.net.NetGuard.get(
+                urlString,
+                maxAgeMs = CACHE_MAX_AGE_MS,
+                headers = mapOf("User-Agent" to USER_AGENT, "Accept" to "application/json"),
+                connectTimeoutMs = 8_000,
+                readTimeoutMs = 10_000,
+                keep = { !isQuotaError(it) },
+            )
+            if (answer.code !in 200..299) throw Exception("Deezer HTTP ${answer.code}: ${answer.body}")
+            answer.body
         }
     }
 
@@ -412,6 +406,8 @@ class DeezerClient(
         const val MIN_INTERVAL_MS = 110L
         const val QUOTA_RETRY_MS = 1_200L
         const val QUOTA_TRIES = 3
+        /** A Deezer answer is reused for a day without asking again: catalogues and charts move slower than that. */
+        const val CACHE_MAX_AGE_MS = 24L * 3600 * 1000
         const val QUOTA_CODE = 4
         const val USER_AGENT = "AuraMusicPlayer/1.0.0 ( dooorians15@gmail.com )"
     }

@@ -17,8 +17,6 @@ import com.ikko.aura.source.ytm.YtmClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -189,13 +187,15 @@ class ArtistImages(
     }
 
     private fun download(source: String, into: File): Boolean = runCatching {
-        val connection = URL(source).openConnection() as HttpURLConnection
-        connection.connectTimeout = 8_000
-        connection.readTimeout = 12_000
         val partial = File(into.parentFile, into.name + ".part")
-        try {
+        // Through the breaker: offline, or with the photo host failing, nothing is tried (the photo on disk stays).
+        com.ikko.aura.net.NetGuard.exchange(
+            source,
+            setup = { it.connectTimeout = 8_000; it.readTimeout = 12_000; it.useCaches = false },
+        ) { connection, code ->
+            if (code !in 200..299) throw java.io.IOException("HTTP $code")
             connection.inputStream.use { input -> partial.outputStream().use { input.copyTo(it) } }
-        } finally { connection.disconnect() }
+        }
         partial.renameTo(into)
     }.getOrDefault(false)
 
@@ -342,10 +342,7 @@ class ArtistImages(
     suspend fun search(query: String): List<String> = withContext(Dispatchers.IO) {
         runCatching {
             val q = URLEncoder.encode(query.trim(), "UTF-8")
-            val connection = URL("https://api.deezer.com/search/artist?q=$q&limit=18").openConnection() as HttpURLConnection
-            connection.connectTimeout = 6_000
-            connection.readTimeout = 6_000
-            val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
+            val body = deezerGet("https://api.deezer.com/search/artist?q=$q&limit=18")
             val data = JSONObject(body).optJSONArray("data") ?: return@runCatching emptyList<String>()
             (0 until data.length()).map { data.getJSONObject(it).optString("name") }.filter { it.isNotBlank() }
         }.getOrDefault(emptyList())
@@ -357,10 +354,7 @@ class ArtistImages(
     suspend fun chart(): List<String> = withContext(Dispatchers.IO) {
         chartMemo.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         runCatching {
-            val connection = URL("https://api.deezer.com/chart/0/artists?limit=100").openConnection() as HttpURLConnection
-            connection.connectTimeout = 6_000
-            connection.readTimeout = 6_000
-            val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
+            val body = deezerGet("https://api.deezer.com/chart/0/artists?limit=100")
             val data = JSONObject(body).optJSONArray("data") ?: return@runCatching emptyList<String>()
             (0 until data.length()).map { data.getJSONObject(it).optString("name") }.filter { it.isNotBlank() }
         }.getOrDefault(emptyList()).also { chartMemo = it }
@@ -373,12 +367,7 @@ class ArtistImages(
         val key = keyOf(name)
         relatedMemo[key]?.let { return@withContext it }
         runCatching {
-            fun get(path: String): JSONObject {
-                val connection = URL("https://api.deezer.com/$path").openConnection() as HttpURLConnection
-                connection.connectTimeout = 6_000
-                connection.readTimeout = 6_000
-                return try { JSONObject(connection.inputStream.bufferedReader().use { it.readText() }) } finally { connection.disconnect() }
-            }
+            fun get(path: String): JSONObject = JSONObject(deezerGet("https://api.deezer.com/$path"))
             val q = URLEncoder.encode(name.trim(), "UTF-8")
             val hits = get("search/artist?q=$q&limit=5").optJSONArray("data") ?: return@runCatching emptyList<String>()
             val id = (0 until hits.length()).map { hits.getJSONObject(it) }.firstOrNull { keyOf(it.optString("name")) == key }?.optLong("id") ?: return@runCatching emptyList<String>()
@@ -387,7 +376,15 @@ class ArtistImages(
         }.getOrDefault(emptyList()).also { if (it.isNotEmpty()) relatedMemo[key] = it }
     }
 
+    /** A Deezer GET, kept a day and served from disk offline (see [com.ikko.aura.net.NetGuard]); throws when there is nothing. */
+    private fun deezerGet(url: String): String {
+        val answer = com.ikko.aura.net.NetGuard.get(url, maxAgeMs = DEEZER_MAX_AGE_MS, connectTimeoutMs = 6_000, readTimeoutMs = 6_000)
+        if (answer.code !in 200..299) throw java.io.IOException("HTTP ${answer.code}")
+        return answer.body
+    }
+
     companion object {
+        const val DEEZER_MAX_AGE_MS = 24L * 3600 * 1000
         const val REFRESH_MS = 7L * 24 * 3600 * 1000
         /** An artist with no photo is looked for again after this: short, as a failed lookup (no network) is not told apart from "none". */
         const val MISS_MS = 6L * 3600 * 1000

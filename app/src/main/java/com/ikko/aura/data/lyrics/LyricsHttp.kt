@@ -2,7 +2,6 @@ package com.ikko.aura.data.lyrics
 
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -34,43 +33,28 @@ class LyricsUnreachable(message: String, cause: Throwable? = null) : IOException
  * else — a network error, a timeout, a 5xx, a refusal (403, 429…), an oversized or unreadable reply.
  */
 internal fun lyricsGet(url: String): String? {
-    var connection: HttpURLConnection? = null
-    return try {
-        connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", AGENT)
-            setRequestProperty("Accept", "application/json, text/plain, */*")
-        }
-        val code = connection.responseCode
-        if (code == HttpURLConnection.HTTP_NOT_FOUND) return null
-        if (code !in 200..299) throw LyricsUnreachable("HTTP $code")
-        // Capped rather than read whole: these are third-party hosts and a lyric
-        // document is a few kilobytes, so anything at this size is a mistake or a
-        // redirect into something that isn't lyrics at all.
-        connection.inputStream.bufferedReader().use { reader ->
-            val buffer = CharArray(8 * 1024)
-            val out = StringBuilder()
-            while (true) {
-                val read = reader.read(buffer)
-                if (read < 0) break
-                out.append(buffer, 0, read)
-                if (out.length > MAX_BODY_BYTES) throw LyricsUnreachable("reply too large")
-            }
-            out.toString()
-        }
-    } catch (e: LyricsUnreachable) {
-        throw e
+    val answer = try {
+        // Kept a month: a song's words do not change, and a library browsed again (or in airplane mode) finds them at once.
+        com.ikko.aura.net.NetGuard.get(
+            url,
+            maxAgeMs = LYRICS_MAX_AGE_MS,
+            headers = mapOf("User-Agent" to AGENT, "Accept" to "application/json, text/plain, */*"),
+            connectTimeoutMs = CONNECT_TIMEOUT_MS,
+            readTimeoutMs = READ_TIMEOUT_MS,
+            maxBodyChars = MAX_BODY_BYTES,
+        )
     } catch (e: IOException) {
+        // Offline with nothing kept, a host left alone after repeated failures, a timeout, an oversized reply.
         throw LyricsUnreachable("request failed", e)
     } catch (e: SecurityException) {
         throw LyricsUnreachable("request refused", e)
-    } finally {
-        connection?.disconnect()
     }
+    if (answer.code == HttpURLConnection.HTTP_NOT_FOUND) return null
+    if (answer.code !in 200..299) throw LyricsUnreachable("HTTP ${answer.code}")
+    return answer.body
 }
+
+private const val LYRICS_MAX_AGE_MS = 30L * 24 * 3600 * 1000
 
 /** Query-string encoding: `URLEncoder` writes `+` for a space, which these APIs read literally. */
 internal fun String.asQueryValue(): String = URLEncoder.encode(this, "UTF-8").replace("+", "%20")

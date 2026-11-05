@@ -272,7 +272,17 @@ class PlaybackService : MediaSessionService() {
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
+            // Nothing is held until a track plays; see the listener below and [WakeModePolicy].
+            .setWakeMode(C.WAKE_MODE_NONE)
             .build()
+            // The locks follow the track: a stream holds the Wi-Fi lock, a local file only the CPU, and ExoPlayer drops
+            // either on pause or stop. The idle spare never plays, so never holds anything.
+            .also { p ->
+                p.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) =
+                        p.setWakeMode(WakeModePolicy.forScheme(mediaItem?.localConfiguration?.uri?.scheme))
+                })
+            }
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
             .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
             // Both players share one session id so the equaliser applies to whichever is
