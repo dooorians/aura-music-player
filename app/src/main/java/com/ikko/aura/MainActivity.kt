@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.ikko.aura.startup.FirstFrame
 import com.ikko.aura.ui.theme.AuraTheme
 import com.ikko.aura.viewmodel.SettingsViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,6 +25,8 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         window.isNavigationBarContrastEnforced = false
+        // Opens the gate the deferred start-up work waits on (see FirstFrame) once this window has drawn.
+        FirstFrame.watch(this)
         setContent {
             AuraApp()
         }
@@ -32,8 +35,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AuraApp() {
-    // Still created here, as before: building it brings the playback connection up (SleepTimer -> PlayerController).
-    // Moving that is a startup change of its own, not part of this one.
+    // Still created here, as before: building it creates the playback connection (SleepTimer -> PlayerController),
+    // which itself waits for the first frame before it binds to the service (see PlayerController.init).
     hiltViewModel<SettingsViewModel>()
     AuraTheme {
         MainLayout()
