@@ -42,7 +42,8 @@ class FavoritesStore @Inject constructor(
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     fun toggle(albumId: Long) {
-        if (albumId <= 0) return
+        // 0 is "no album". Negative ids are valid: a streamed album's id is negative by design (never a MediaStore id).
+        if (albumId == 0L) return
         scope.launch {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[key].orEmpty()

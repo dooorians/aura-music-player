@@ -63,7 +63,7 @@ class EqualizerViewModel @Inject constructor(
             bassBoost = bb
             val bassSupported = bb?.let { runCatching { it.strengthSupported }.getOrDefault(false) } ?: false
             val presets = runCatching {
-                (0 until eq.numberOfPresets).map { eq.getPresetName(it.toShort()) }
+                (0 until eq.numberOfPresets).map { frenchPresetName(eq.getPresetName(it.toShort())) }
             }.getOrDefault(emptyList())
 
             viewModelScope.launch {
@@ -177,4 +177,26 @@ class EqualizerViewModel @Inject constructor(
         runCatching { bassBoost?.release() }
         super.onCleared()
     }
+}
+
+/**
+ * The platform names its presets in English whatever the language of the app. The ones Android's equalizer
+ * ships are named here; anything a vendor adds is shown as it comes.
+ */
+private fun frenchPresetName(name: String): String = when (name.trim().lowercase()) {
+    "normal" -> "Normal"
+    "classical" -> "Classique"
+    "dance" -> "Dance"
+    "flat" -> "Neutre"
+    "folk" -> "Folk"
+    "heavy metal" -> "Métal"
+    "hip hop" -> "Hip-hop"
+    "jazz" -> "Jazz"
+    "pop" -> "Pop"
+    "rock" -> "Rock"
+    "latin" -> "Latino"
+    "bass boost" -> "Basses renforcées"
+    "treble boost" -> "Aigus renforcés"
+    "vocal", "voice" -> "Voix"
+    else -> name
 }

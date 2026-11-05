@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -16,6 +18,9 @@ import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 
@@ -36,16 +41,45 @@ class PlayerController @Inject constructor(
 
     private var controller: MediaController? = null
     private val controllerReady = CompletableDeferred<MediaController>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val _connectionFailed = MutableStateFlow(false)
+
+    /** True when the service could not be reached after every retry: no player to observe or command. */
+    val connectionFailed: StateFlow<Boolean> = _connectionFailed.asStateFlow()
 
     init {
-        context.startService(Intent(context, PlaybackService::class.java))
+        connect(context, attempt = 0)
+    }
+
+    /**
+     * Connects to the service, and tries again — a second, two seconds, four, eight — when it does not answer, instead
+     * of letting the failure of `get()` take the app down. After the last try [awaitPlayer] fails and
+     * [connectionFailed] is set.
+     */
+    private fun connect(context: Context, attempt: Int) {
+        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener(
             {
-                val connected = controllerFuture.get()
-                controller = connected
-                controllerReady.complete(connected)
+                val connected = try {
+                    controllerFuture.get()
+                } catch (e: Exception) {
+                    null
+                }
+                when {
+                    connected != null -> {
+                        controller = connected
+                        controllerReady.complete(connected)
+                    }
+                    attempt < MAX_CONNECT_RETRIES ->
+                        mainHandler.postDelayed({ connect(context, attempt + 1) }, 1_000L shl attempt)
+                    else -> {
+                        _connectionFailed.value = true
+                        controllerReady.completeExceptionally(IllegalStateException("The playback service did not answer"))
+                    }
+                }
             },
             ContextCompat.getMainExecutor(context),
         )
@@ -67,12 +101,46 @@ class PlayerController @Inject constructor(
      */
     private val player: Player? get() = controller
 
+    var isShuffleActive: Boolean = false
+        private set
+
+    fun setShuffleActive(active: Boolean) {
+        isShuffleActive = active
+    }
+
     fun playQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long = 0L) {
         if (tracks.isEmpty()) return
         val player = player ?: return
+        player.shuffleModeEnabled = false
+        val safeStart = startIndex.coerceIn(0, tracks.lastIndex)
+        if (tracks.size > 64) {
+            player.setMediaItem(toMediaItem(tracks[safeStart]), startPositionMs)
+            player.prepare()
+            player.play()
+            if (safeStart > 0) {
+                player.addMediaItems(0, tracks.subList(0, safeStart).map(::toMediaItem))
+            }
+            if (safeStart + 1 < tracks.size) {
+                player.addMediaItems(tracks.subList(safeStart + 1, tracks.size).map(::toMediaItem))
+            }
+        } else {
+            player.setMediaItems(tracks.map(::toMediaItem), safeStart, startPositionMs)
+            player.prepare()
+            player.play()
+        }
+    }
+
+    /**
+     * Puts a saved queue back without playing it: loaded, and paused where it was left. [playQueue] always plays.
+     */
+    fun restoreQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long, shuffle: Boolean, repeatMode: Int) {
+        if (tracks.isEmpty()) return
+        val player = player ?: return
+        isShuffleActive = shuffle
+        player.shuffleModeEnabled = false
+        player.repeatMode = repeatMode
         player.setMediaItems(tracks.map(::toMediaItem), startIndex, startPositionMs)
         player.prepare()
-        player.play()
     }
 
     fun togglePlayPause() {
@@ -106,7 +174,39 @@ class PlayerController @Inject constructor(
     }
 
     fun setShuffleEnabled(enabled: Boolean) {
-        player?.shuffleModeEnabled = enabled
+        isShuffleActive = enabled
+        player?.shuffleModeEnabled = false
+    }
+
+    /**
+     * Reorders upcoming media items in ExoPlayer's timeline to match [targetIds], starting from
+     * [startIndex] (typically `currentMediaItemIndex + 1`).
+     *
+     * The items before [startIndex] (including the currently playing item) are never moved or interrupted.
+     */
+    fun replaceUpcoming(startIndex: Int, upcoming: List<Track>) {
+        val player = player ?: return
+        if (startIndex !in 0..player.mediaItemCount) return
+        player.replaceMediaItems(startIndex, player.mediaItemCount, upcoming.map(::toMediaItem))
+    }
+
+    fun reorderUpcoming(startIndex: Int, targetIds: List<String>) {
+        val player = player ?: return
+        if (startIndex !in 0 until player.mediaItemCount) return
+        val currentIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toMutableList()
+        val limit = targetIds.size.coerceAtMost(currentIds.size)
+        for (i in startIndex until limit) {
+            val targetId = targetIds[i]
+            val currSubIdx = currentIds.subList(i, currentIds.size).indexOf(targetId)
+            if (currSubIdx != -1) {
+                val actualIdx = i + currSubIdx
+                if (actualIdx != i) {
+                    player.moveMediaItem(actualIdx, i)
+                    val item = currentIds.removeAt(actualIdx)
+                    currentIds.add(i, item)
+                }
+            }
+        }
     }
 
     fun setRepeatMode(@Player.RepeatMode mode: Int) {
@@ -185,12 +285,24 @@ class PlayerController @Inject constructor(
      * user has since skipped to.
      */
     suspend fun updateItemArtwork(mediaId: String, bitmap: Bitmap) {
+        // Once per item. Replacing the playing item is not free: the player announces a playlist change, the view model
+        // reads a "new" current track, reads its palette, and lands back here. With repeat-one on, the two items the loop
+        // bounced between (after the queue was restored on a launch) kept replacing each other's artwork for ever — the
+        // position bar, the lyrics and the names flickered twice a second. An item that already carries its cover has
+        // nothing to be replaced with.
+        player?.let { p ->
+            val i = p.currentMediaItemIndex
+            if (i in 0 until p.mediaItemCount) {
+                val item = p.getMediaItemAt(i)
+                if (item.mediaId == mediaId && item.mediaMetadata.artworkData != null) return
+            }
+        }
         // JPEG encoding a cover is tens of milliseconds and used to run on the caller's thread —
         // which was the main one, so every track change spent that budget inside a frame. Only
         // the Media3 call afterwards has to be on the main thread.
         val bytes = withContext(Dispatchers.Default) {
             ByteArrayOutputStream().use { stream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
                 stream.toByteArray()
             }
         }
@@ -220,5 +332,6 @@ class PlayerController @Inject constructor(
 
     companion object {
         private const val SKIP_PREVIOUS_RESTART_THRESHOLD_MS = 3_000L
+        private const val MAX_CONNECT_RETRIES = 4
     }
 }

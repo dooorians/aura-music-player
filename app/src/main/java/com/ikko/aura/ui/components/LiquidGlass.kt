@@ -16,13 +16,18 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.components.backdrop.Backdrop
@@ -31,6 +36,7 @@ import com.ikko.aura.ui.components.backdrop.drawBackdrop
 import com.ikko.aura.ui.components.backdrop.effects.blur
 import com.ikko.aura.ui.components.backdrop.effects.colorControls
 import com.ikko.aura.ui.components.backdrop.effects.lens
+import com.ikko.aura.ui.components.backdrop.effects.effect
 import com.ikko.aura.ui.components.backdrop.highlight.Highlight
 import com.ikko.aura.ui.components.backdrop.shadow.Shadow
 import com.ikko.aura.ui.theme.AuraColors
@@ -43,17 +49,6 @@ import com.ikko.aura.ui.theme.LocalAuraBatterySaver
  * shows up as smearing when a glass panel overlaps another one.
  */
 val LocalAuraBackdrop = staticCompositionLocalOf<Backdrop> { emptyBackdrop() }
-
-/**
- * False while the screen is moving — a page sliding in or out — and true once it has come to rest.
- *
- * The glass samples the backdrop at its own position on screen, so a panel that is sliding is
- * re-recording the backdrop and re-running its colour matrix, blur and lens on every frame of the
- * slide. Measured over five opens and closes of the player: 7.5% janky frames at p90 32ms with the
- * glass live throughout, 1.4% at p90 16ms with it out of the way. So it stays out of the way until
- * the movement is over, and fades in behind the panel that is already there.
- */
-val LocalGlassSettled = staticCompositionLocalOf { mutableStateOf(true) }
 
 /** Apple-matched defaults, carried over from BitChord unchanged. */
 private const val VIBRANCY = 1f
@@ -70,9 +65,6 @@ internal const val SURFACE_OPACITY = 0.4f
 private const val GLASS_RESOLUTION_SCALE = 0.33f
 
 private val GLASS_EDGE_WIDTH = 0.5.dp
-
-/** How long the stand-in fill takes to give way to the real glass. */
-internal const val GLASS_SETTLE_FADE_MS = 140
 
 /** The dark tint the glass is filled with, matching the near-black the rest of the app sits on. */
 internal val GlassSurfaceTint = Color(0xFF121212)
@@ -95,41 +87,52 @@ fun Modifier.liquidGlass(
     shape: CornerBasedShape,
     tint: Color = GlassSurfaceTint,
     tintAlpha: Float = SURFACE_OPACITY,
+    blurRadiusDp: Float = BLUR_RADIUS_DP,
+    dropShadow: Boolean = true,
+    edge: Boolean = true,
+    /** 1 for a surface of the usual size; less for a small one, where the full lens would bend the whole of it. */
+    lensScale: Float = 1f,
+    /** False for glass that must not change the colours behind it (the mini player's: it shows them as they are). */
+    vibrant: Boolean = true,
 ): Modifier {
     if (LocalAuraBatterySaver.current) {
-        return background(tint.copy(alpha = 0.55f), shape)
-            .border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, shape)
+        return background(tint.copy(alpha = 0.55f), shape).let {
+            if (edge) it.border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, shape) else it
+        }
     }
     val backdrop = LocalAuraBackdrop.current
     val density = LocalDensity.current
     // Pre-multiplied by the resolution scale: the effects run on the downscaled recording, so a
     // radius in screen pixels would come out three times too wide once it is upscaled back.
-    val blurPx = with(density) { BLUR_RADIUS_DP.dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP * lensScale).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP * lensScale).dp.toPx() } * GLASS_RESOLUTION_SCALE
 
     return drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
         effects = {
-            colorControls(saturation = 1f + 0.5f * VIBRANCY)
+            if (vibrant) colorControls(saturation = 1f + 0.5f * VIBRANCY)
             blur(blurPx)
-            lens(
-                refractionHeight = lensHeightPx,
-                refractionAmount = lensAmountPx,
-                depthEffect = true,
-                chromaticAberration = true,
-            )
+            if (lensScale > 0f) {
+                lens(
+                    refractionHeight = lensHeightPx,
+                    refractionAmount = lensAmountPx,
+                    depthEffect = false,
+                    chromaticAberration = false,
+                )
+            }
         },
-        highlight = { Highlight.Default },
-        shadow = { Shadow.Default },
+        highlight = if (edge) ({ Highlight.Default }) else null,
+        shadow = if (dropShadow) ({ Shadow.Default }) else null,
         onDrawSurface = { drawRect(color = tint.copy(alpha = tintAlpha), size = size) },
         backdropScale = GLASS_RESOLUTION_SCALE,
     )
 }
 
 /**
- * A liquid-glass panel with its content sitting *on* it rather than *inside* it.
+ * A liquid-glass panel with its content sitting *on* it rather than *inside* it. Always live glass:
+ * there is no flat stand-in phase, because the player no longer slides — see AuraMotion.sheetEnter.
  *
  * [liquidGlass] is a draw modifier, so it shares a node with whatever it wraps — and a node
  * redraws as a whole. Anything animating inside the panel therefore re-ran the whole effect
@@ -152,24 +155,18 @@ fun LiquidGlassPanel(
     modifier: Modifier = Modifier,
     tint: Color = GlassSurfaceTint,
     tintAlpha: Float = SURFACE_OPACITY,
+    blurRadiusDp: Float = BLUR_RADIUS_DP,
+    dropShadow: Boolean = true,
+    edge: Boolean = true,
+    lensScale: Float = 1f,
     contentAlignment: Alignment = Alignment.TopStart,
+    vibrant: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val settled by LocalGlassSettled.current
-    // Held back until the panel has stopped moving, then faded over the flat fill standing in for
-    // it. A fill and a glass surface differ by the refraction at the rim and a little colour, so
-    // over a tenth of a second on a dark backdrop the swap is not something that can be caught.
-    val fillAlpha by animateFloatAsState(
-        targetValue = if (settled) 0f else 1f,
-        animationSpec = tween(if (settled) GLASS_SETTLE_FADE_MS else 0),
-        label = "glass-settle",
-    )
-
     Box(modifier = modifier, contentAlignment = contentAlignment) {
-        if (settled) {
-            Spacer(
-                Modifier
-                    .matchParentSize()
+        Spacer(
+            Modifier
+                .matchParentSize()
                 // Its own layer, and the reason is not cosmetic. Compose invalidates draw up to
                 // the nearest enclosing layer, so without one here every glass surface redrew
                 // whenever *anything* on the screen did — and on the player something always
@@ -178,22 +175,69 @@ fun LiquidGlassPanel(
                 // matrix, the blur and the lens shader, six times over. Given a layer, the
                 // rendered glass is kept and reused until the backdrop behind it actually
                 // changes.
-                    .graphicsLayer { }
-                    .liquidGlass(shape, tint, tintAlpha),
-            )
-        }
-        if (fillAlpha > 0f) {
-            Spacer(
-                Modifier
-                    .matchParentSize()
-                    .graphicsLayer { alpha = fillAlpha }
-                    // Matched to the panel's own opacity rather than a constant. At a flat 0.55
-                    // the play button's pink stand-in was visibly paler than the glass that
-                    // replaced it, so the swap showed on the one panel that is not neutral.
-                    .background(tint.copy(alpha = tintAlpha.coerceAtLeast(0.55f)), shape)
-                    .border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, shape),
-            )
-        }
+                .graphicsLayer { }
+                .liquidGlass(shape, tint, tintAlpha, blurRadiusDp, dropShadow, edge, lensScale, vibrant),
+        )
         content()
     }
+}
+
+/**
+ * A shape that asks for its corners each time it is drawn, so a surface whose corners are animated can still be
+ * given a flat fill and a border under the battery saver.
+ */
+private class DynamicShape(private val provider: () -> CornerBasedShape) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ) = provider().createOutline(size, layoutDirection, density)
+}
+
+/**
+ * [liquidGlass] for a surface that changes shape while it is on screen: a menu growing out of the button that
+ * opened it. [shape] is asked for at every draw, so its corners can follow the animation, and [refraction] is how
+ * hard the lens bends what is behind the glass — 1 is the resting glass, more is the bulging, liquid look of a
+ * surface in motion, which is what iOS shows while its menus are travelling and then lets settle.
+ *
+ * Both are read while drawing, so animating them redraws the glass and nothing is recomposed.
+ */
+@Composable
+fun Modifier.liquidGlassMorphing(
+    shape: () -> CornerBasedShape,
+    refraction: () -> Float = { 1f },
+    tint: Color = GlassSurfaceTint,
+    tintAlpha: Float = SURFACE_OPACITY,
+    blurRadiusDp: Float = BLUR_RADIUS_DP,
+    dropShadow: Boolean = true,
+): Modifier {
+    if (LocalAuraBatterySaver.current) {
+        val movingShape = remember(shape) { DynamicShape(shape) }
+        return background(tint.copy(alpha = 0.55f), movingShape)
+            .border(GLASS_EDGE_WIDTH, AuraColors.GlassBorder, movingShape)
+    }
+    val backdrop = LocalAuraBackdrop.current
+    val density = LocalDensity.current
+    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+
+    return drawBackdrop(
+        backdrop = backdrop,
+        shape = shape,
+        effects = {
+            colorControls(saturation = 1f + 0.5f * VIBRANCY)
+            blur(blurPx)
+            lens(
+                refractionHeight = lensHeightPx,
+                refractionAmount = lensAmountPx * refraction().coerceIn(0f, 4f),
+                depthEffect = false,
+                chromaticAberration = false,
+            )
+        },
+        highlight = { Highlight.Default },
+        shadow = if (dropShadow) ({ Shadow.Default }) else null,
+        onDrawSurface = { drawRect(color = tint.copy(alpha = tintAlpha), size = size) },
+        backdropScale = GLASS_RESOLUTION_SCALE,
+    )
 }

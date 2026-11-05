@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 object AuraColors {
     val Black = Color(0xFF000000)
+    val NonAmoledBlack = Color(0xFF0E0E12)
     val SurfaceDark = Color(0xFF0A0A0C)
     val SurfaceVariantDark = Color(0xFF1C1C22)
     val OutlineDark = Color(0x33FFFFFF)
@@ -13,6 +14,7 @@ object AuraColors {
     val TextTertiary = Color(0x73FFFFFF)
 
     val AccentPink = Color(0xFFB8356F)
+
     val AccentPurple = Color(0xFF5B2E8C)
     val AccentOrange = Color(0xFFB35A1A)
 

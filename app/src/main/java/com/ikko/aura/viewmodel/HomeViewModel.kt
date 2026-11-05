@@ -34,6 +34,7 @@ class HomeViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val recentlyPlayedTracker: RecentlyPlayedTracker,
     private val favoritesStore: FavoritesStore,
+    private val ytmLibrary: com.ikko.aura.source.ytm.YtmLibrary,
 ) : ViewModel() {
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -43,6 +44,9 @@ class HomeViewModel @Inject constructor(
         recentlyPlayedTracker.recentAlbumIds,
         favoritesStore.favoriteAlbumIds,
         recentlyPlayedTracker.playCounts,
+        recentlyPlayedTracker.recentTrackIds,
+        ytmLibrary.observeKnown(),
+        ytmLibrary.observeKept(),
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val tracks = values[0] as List<Track>
@@ -55,13 +59,25 @@ class HomeViewModel @Inject constructor(
         val favoriteIds = values[4] as Set<Long>
         @Suppress("UNCHECKED_CAST")
         val plays = values[5] as List<AlbumPlayEntity>
+        @Suppress("UNCHECKED_CAST")
+        val recentTrackIds = values[6] as List<String>
+        @Suppress("UNCHECKED_CAST")
+        val streamed = values[7] as List<Track>
+        @Suppress("UNCHECKED_CAST")
+        val keptStreamed = values[8] as List<Track>
 
-        val albumsById = albums.associateBy { it.id }
+        // A streamed album is on the row once you have played it, and in the rediscovery pool once you have kept it.
+        val playedStreamedAlbums = com.ikko.aura.source.ytm.YtmLibrary.albumsOf(streamed)
+        val keptStreamedAlbums = com.ikko.aura.source.ytm.YtmLibrary.albumsOf(keptStreamed)
+        val albumsById = (albums + playedStreamedAlbums).associateBy { it.id }
         HomeUiState(
-            favoriteAlbums = albums.filter { it.id in favoriteIds },
+            // A starred streamed album is a favourite like any other.
+            favoriteAlbums = (albums + com.ikko.aura.source.ytm.YtmLibrary.albumsOf((streamed + keptStreamed).distinctBy { it.id })).distinctBy { it.id }.filter { it.id in favoriteIds },
             recentAlbums = recentIds.mapNotNull { albumsById[it] },
-            recentTracks = tracks.take(HOME_LIST_SIZE),
-            rediscoverAlbums = rediscover(albums, plays, recentIds.toSet()),
+            // What was actually played, newest first — not simply the first tracks of the library.
+            // Streamed songs count, kept or not (their ids resolve against what the app has met).
+            recentTracks = (tracks + streamed).associateBy { it.id }.let { byId -> recentTrackIds.mapNotNull { byId[it] } },
+            rediscoverAlbums = rediscover(albums + keptStreamedAlbums, plays, recentIds.toSet()),
             isScanning = isScanning,
         )
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())

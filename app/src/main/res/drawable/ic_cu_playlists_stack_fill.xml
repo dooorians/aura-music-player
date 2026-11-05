@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Top stacked bar -->
+    <path
+        android:pathData="M8.5,3.2L17.5,3.2C17.91,3.2 18.25,3.54 18.25,3.95C18.25,4.36 17.91,4.7 17.5,4.7L8.5,4.7C8.09,4.7 7.75,4.36 7.75,3.95C7.75,3.54 8.09,3.2 8.5,3.2Z"
+        android:fillColor="#FF000000"/>
+    <!-- Second stacked bar -->
+    <path
+        android:pathData="M6.8,5.7L19.2,5.7C19.61,5.7 19.95,6.04 19.95,6.45C19.95,6.86 19.61,7.2 19.2,7.2L6.8,7.2C6.39,7.2 6.05,6.86 6.05,6.45C6.05,6.04 6.39,5.7 6.8,5.7Z"
+        android:fillColor="#FF000000"/>
+    <!-- Main card with bottom-left circular notch for play badge -->
+    <path
+        android:pathData="M7.2,8.3L18.8,8.3C20.18,8.3 21.3,9.42 21.3,10.8L21.3,17.2C21.3,18.58 20.18,19.7 18.8,19.7L11.45,19.7C11.8,18.96 12.0,18.13 12.0,17.25C12.0,14.16 9.54,11.7 6.45,11.7C5.84,11.7 5.25,11.8 4.7,11.98L4.7,10.8C4.7,9.42 5.82,8.3 7.2,8.3Z"
+        android:fillColor="#FF000000"/>
+    <!-- Play badge at bottom-left -->
+    <path
+        android:pathData="M6.45,13.1C8.74,13.1 10.6,14.96 10.6,17.25C10.6,19.54 8.74,21.4 6.45,21.4C4.16,21.4 2.3,19.54 2.3,17.25C2.3,14.96 4.16,13.1 6.45,13.1ZM5.45,15.55L5.45,18.95L8.35,17.25L5.45,15.55Z"
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"/>
+</vector>

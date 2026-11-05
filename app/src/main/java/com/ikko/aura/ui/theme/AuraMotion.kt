@@ -3,18 +3,56 @@ package com.ikko.aura.ui.theme
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+
+/**
+ * Resolves the top-left corner radius of the physical iKKO screen (API 31+),
+ * falling back to [IKKO_SCREEN_CORNER] where the system gives none (as on the iKKO).
+ */
+@Composable
+fun rememberIkkoTopCornerRadius(): Dp {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    return remember(view, density) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val roundedCorner = view.rootWindowInsets?.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT)
+            if (roundedCorner != null && roundedCorner.radius > 0) {
+                with(density) { roundedCorner.radius.toDp() }
+            } else {
+                IKKO_SCREEN_CORNER
+            }
+        } else {
+            IKKO_SCREEN_CORNER
+        }
+    }
+}
+
+/**
+ * The iKKO MindOne reports no rounded corner to Android (every radius reads 0) and publishes none. Set by eye against the
+ * panel's own corners, from 23.2 dp (the height of its decoration overlay) down to this; measured on a photo of the lit panel: about 2 % of its width.
+ */
+private val IKKO_SCREEN_CORNER = 8.dp
 
 /**
  * One motion vocabulary for the whole app, so a transition's shape tells you what kind of move it
@@ -37,6 +75,17 @@ object AuraMotion {
     const val PEER_MS = 220
     const val PUSH_MS = 260
 
+    /**
+     * How long a push waits before moving: the new page's first frame, which is where it is built (~70 ms for
+     * an album page, measured).
+     */
+    const val PUSH_START_DELAY_MS = 80
+
+    /**
+     * The same for going back, which gives the page underneath enough time to lay out its frame without freezing.
+     */
+    const val POP_START_DELAY_MS = 90
+
     /** Fraction of the container height the entering peer rises from — deliberately small. */
     private const val PEER_RISE_DIVISOR = 14
 
@@ -49,31 +98,77 @@ object AuraMotion {
     const val SHEET_MS = 320
 
     /**
-     * The full player is presented as a sheet: it rises from the bottom edge and leaves the same
-     * way, so the direction of travel says what it is — something that covers the current screen
-     * rather than a step further into it. Whatever is underneath deliberately doesn't move
-     * ([EnterTransition.None] / [ExitTransition.None] on the other side), which is what sells the
-     * player as sliding *over* it.
+     * The player as Apple's Music opens and closes it, measured off a recording of it frame by frame.
+     *
+     * Opening: the card is there at once — dark grey, opaque, top corners rounded, a shade narrower than
+     * the screen — with its top edge a quarter of the way down (26.4%), and rises to the top on a
+     * critically damped spring: 60% of the way in the first four frames (67 ms), all of it in about 370 ms,
+     * with no overshoot. Behind it the page stays where it is and goes dim.
+     *
+     * Closing: the card sinks the whole way to the mini player's place — its top edge at 85.5% — on an
+     * ease-in-out over 320 ms (slow off the line, fastest at the middle, slow into the end), narrowing to
+     * the pill's width as it goes, and clears there as the pill takes its place.
      */
-    val sheetEnter: EnterTransition =
-        slideInVertically(
-            spring(
-                dampingRatio = Spring.DampingRatioLowBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-        ) { height -> height } + fadeIn(tween(SHEET_MS / 2))
+    /** Where the card's top edge starts, as a fraction of the screen's height below the top. */
+    const val SHEET_START_FRACTION = 0.264f
+
+    /** Where it ends when it closes: the mini player's top edge. */
+    const val SHEET_PILL_TOP_FRACTION = 0.863f
+
+    /** How much narrower than the screen the card is, per unit of [SHEET_START_FRACTION]: 2.4% at the start, the pill's 9.7% at the end. */
+    // The docked mini player is as wide as the screen: the card does not narrow towards it (it did for the floating pill).
+    const val SHEET_NARROWING = 0f
+
+    /** The spring the card rises on, critically damped. */
+    const val SHEET_STIFFNESS = 650f
+    const val SHEET_EXIT_MS = 320
 
     /**
-     * What the screen *underneath* does while the player covers it. It has to actually leave:
-     * screens are transparent over one shared backdrop, so a screen that merely stops animating
-     * stays fully painted and shows through the player. Quick, so the two barely overlap.
+     * The cover's wash comes in at once rather than fading: it is clipped to the card (see MainLayout), so
+     * there is nothing for it to flash over, and fading it in left the card darker than what it was about to
+     * become — a dip in brightness in the middle of the rise. Going, it leaves on the card's own clock.
      */
-    val sheetUnderExit: ExitTransition = fadeOut(tween(SHEET_MS / 2))
-    val sheetUnderEnter: EnterTransition = fadeIn(tween(SHEET_MS / 2))
+    const val SHEET_ARTWORK_IN_MS = 0
 
-    val sheetExit: ExitTransition =
-        slideOutVertically(tween(SHEET_MS, easing = FastOutSlowInEasing)) { height -> height } +
-            fadeOut(tween(SHEET_MS))
+    /** From where the card starts to clear on its way down, into the mini player. */
+    const val SHEET_CLEAR_FROM = 0.70f
+
+    val EaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+
+    /** How long the navigation transition holds the page under the card (and the card itself, on the way out) in place. */
+    const val SHEET_HOLD_MS = 800
+    // How long the navigation keeps the closing player: its card's whole way down (SHEET_EXIT_MS), after waiting
+    // up to 250 ms for the page under it to be composed again, with room to spare. At 380 the player was
+    // removed part-way down whenever the close started late — the card vanished before reaching the pill.
+    const val SHEET_EXIT_HOLD_MS = 650
+
+    /** How dim the page behind goes, and how quickly. */
+    const val SHEET_DIM = 0.45f
+    const val SHEET_DIM_IN_MS = 130
+    const val SHEET_DIM_OUT_MS = 320
+
+    /** The card's top corners while it is away from full screen. */
+    val SheetCorner = 44.dp
+    /** The card's top corners where it sits on the dock: the screen's own, as the page above the dock has them. */
+    val PillCorner = 8.dp
+
+    /** The card's corner radius when its top edge is [offset] (a fraction of the screen's height) down. */
+    fun cornerAt(offset: Float): androidx.compose.ui.unit.Dp =
+        // The same all the way: the screen's own corners, from the dock to the top (nothing grows to 44 dp and comes back).
+        if (offset <= 0f) 0.dp else PillCorner
+
+    // Placeholders for the navigation transition: they change nothing that can be seen, and only keep the
+    // transition alive — and so the page under the card drawn — for as long as the card takes.
+    //
+    // A scale of 0.9999, not a fade: a fade puts the screen in a layer of its own with an alpha, and on the
+    // player — six glass panels — that is a re-render of all of them when the alpha reaches 1 and the layer
+    // goes away, which showed as a flicker. And a placeholder whose two ends are equal is not animated at
+    // all, so a transition with nothing in it ends at once and takes the page under the card with it.
+    // The player itself, coming in, has none: the page under it holds the transition open.
+    val sheetEnter: EnterTransition = EnterTransition.None
+    val sheetUnderExit: ExitTransition = scaleOut(tween(SHEET_HOLD_MS), targetScale = 0.9999f)
+    val sheetUnderEnter: EnterTransition = EnterTransition.None
+    val sheetExit: ExitTransition = scaleOut(tween(SHEET_EXIT_HOLD_MS), targetScale = 0.9999f)
 
     const val QUEUE_SLIDE_MS = 280
 
@@ -100,4 +195,30 @@ object AuraMotion {
             } + fadeOut(tween(QUEUE_SLIDE_MS))
             )
     }
+
+    /**
+     * The player's cover, title and artist moving through the queue as one block, as in the user's sketch
+     * ("le contenu glisse jusqu'au bord du cadre, puis inversement"). Each part travels the panel's whole width,
+     * [distancePx], unclipped by its own box — only the panel's edge cuts it — so the old block leaves by one
+     * side as the new one comes in from the other, never cut off half-way.
+     *
+     * Both sides ride the same spring, which keeps the parts of a block together (a curve for one and a spring
+     * for the other pulled them apart), and it overshoots by a hair (~2% of the width) before settling, so the
+     * block does not stop dead.
+     */
+    fun heroSlide(forward: Boolean, distancePx: Int): ContentTransform {
+        val sign = if (forward) 1 else -1
+        fun distance(width: Int) = if (distancePx > 0) distancePx else width
+        return ContentTransform(
+            targetContentEnter = slideInHorizontally(heroSlideSpring) { width -> sign * distance(width) },
+            initialContentExit = slideOutHorizontally(heroSlideSpring) { width -> -sign * distance(width) },
+            sizeTransform = SizeTransform(clip = false),
+        )
+    }
+
+    private val heroSlideSpring = spring(
+        dampingRatio = 0.78f,
+        stiffness = 300f,
+        visibilityThreshold = IntOffset(1, 1),
+    )
 }

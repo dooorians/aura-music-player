@@ -18,9 +18,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.data.lyrics.LyricLine
 
@@ -61,6 +63,58 @@ fun rememberLyricClock(
 }
 
 /**
+ * The same clock, read off the player on every frame instead of extrapolated from a published value.
+ *
+ * [livePosition] is the player's own position. Anchored on a value published twice a second, the clock was up to half
+ * a second wrong after a seek, a pause or a track change, and the lines (which change on it) came late by as much. Read
+ * straight, it is as right as the player is, always: nothing to re-anchor, nothing to drift.
+ *
+ * [leadMs] is how far ahead of the audio the clock runs while playing. A frame drawn now reaches the eye one or two
+ * frames and a display's latency later, and the voice is already there: the lead puts the light where the sound is
+ * when it is seen. Not applied while paused, where the page must show exactly the place the music stopped at.
+ *
+ * Idle when [active] is false; paused, it looks only a few times a second (enough to follow a seek).
+ */
+@Composable
+fun rememberLiveLyricClock(
+    livePosition: () -> Long,
+    isPlaying: Boolean,
+    active: Boolean = true,
+    leadMs: Long = LYRIC_LEAD_MS,
+): MutableLongState {
+    val clock = remember { mutableLongStateOf(livePosition() + leadMs) }
+    val read = androidx.compose.runtime.rememberUpdatedState(livePosition)
+    LaunchedEffect(isPlaying, active) {
+        clock.longValue = read.value() + leadMs
+        if (!active) return@LaunchedEffect
+        if (isPlaying) {
+            while (true) withFrameMillis { clock.longValue = read.value() + leadMs }
+        } else {
+            while (true) {
+                kotlinx.coroutines.delay(PAUSED_POLL_MS)
+                clock.longValue = read.value() + leadMs
+            }
+        }
+    }
+    return clock
+}
+
+/** The index of the line being sung at [positionMs] (-1 before the first), for lines in time order. */
+fun List<LyricLine>.indexAt(positionMs: Long): Int {
+    var low = 0
+    var high = size - 1
+    var found = -1
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        if (this[mid].timeMs <= positionMs) { found = mid; low = mid + 1 } else high = mid - 1
+    }
+    return found
+}
+
+internal const val LYRIC_LEAD_MS = 80L
+private const val PAUSED_POLL_MS = 120L
+
+/**
  * One lyric line with the sung part lit and the rest left dim, the boundary moving
  * through the line as it is sung.
  *
@@ -85,8 +139,40 @@ fun SweepLyricLine(
     dimColor: Color,
     textAlign: TextAlign,
     modifier: Modifier = Modifier,
+    /** For a single-line strip: the line is cut with an ellipsis rather than wrapped. */
+    maxLines: Int = Int.MAX_VALUE,
+    /**
+     * The one-line strip's look: the sung part just fills in, at a steady pace across each timed word, with no bloom
+     * on the head. The full lyrics keep the glow.
+     */
+    plain: Boolean = false,
 ) {
+    if (!line.isWordSynced) {
+        Text(
+            text = line.text,
+            style = style,
+            color = litColor,
+            textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier.fillMaxWidth(),
+        )
+        return
+    }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // Where each timed word sits in the text, walked in order so a repeated word still lines up.
+    val spans = remember(line, plain) {
+        if (!plain) {
+            emptyList()
+        } else {
+            var offset = 0
+            line.words.map { word ->
+                val start = line.text.indexOf(word.text, offset).takeIf { it >= 0 } ?: offset
+                offset = start + word.text.length
+                start until offset
+            }
+        }
+    }
 
     Box(modifier) {
         Text(
@@ -94,6 +180,8 @@ fun SweepLyricLine(
             style = style,
             color = dimColor,
             textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -101,9 +189,15 @@ fun SweepLyricLine(
             style = style,
             color = litColor,
             textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
             onTextLayout = { layout = it },
             modifier = Modifier
                 .fillMaxWidth()
+                // Its own layer, so each frame of the sweep re-records this text alone. Without one the
+                // redraw falls to the nearest enclosing layer, which in the player is its whole content.
+                // Not clipped, so the glow below can still spill past the text's bounds.
+                .graphicsLayer()
                 .drawWithContent {
                     val result = layout ?: return@drawWithContent
                     val revealed = line.revealedChars(positionProvider())
@@ -120,8 +214,12 @@ fun SweepLyricLine(
                         val right = if (revealed >= end) {
                             result.getLineRight(row)
                         } else {
-                            head = Offset(horizontalAt(result, revealed, start, end), (top + bottom) / 2f)
-                            horizontalAt(result, revealed, start, end)
+                            if (plain) {
+                                horizontalAtSpans(result, revealed, row, spans)
+                            } else {
+                                head = Offset(horizontalAt(result, revealed, start, end), (top + bottom) / 2f)
+                                horizontalAt(result, revealed, start, end)
+                            }
                         }
                         clipRect(left, top, right, bottom) { this@drawWithContent.drawContent() }
                     }
@@ -131,7 +229,7 @@ fun SweepLyricLine(
                     // word rattled off in a tenth of one barely registers, which is the
                     // difference between light that belongs to the singing and a lamp
                     // dragged along under the text.
-                    val glow = line.glowIntensity(positionProvider())
+                    val glow = if (plain) 0f else line.glowIntensity(positionProvider())
                     if (glow > 0.01f && head != Offset.Unspecified) {
                         val radius = GLOW_RADIUS.toPx()
                         drawCircle(
@@ -161,6 +259,37 @@ private fun horizontalAt(result: TextLayoutResult, revealed: Float, start: Int, 
     if (index >= end) return here
     val next = result.getHorizontalPosition(index + 1, usePrimaryDirection = true)
     return here + (next - here) * fraction
+}
+
+/** Where a row's text ends at [offset], held inside the row's own edges. */
+private fun TextLayoutResult.xOn(offset: Int, row: Int): Float {
+    val left = getLineLeft(row)
+    val right = getLineRight(row)
+    return when {
+        offset <= getLineStart(row) -> left
+        offset >= getLineEnd(row, visibleEnd = true) -> right
+        else -> getHorizontalPosition(offset, usePrimaryDirection = true).coerceIn(left, right)
+    }
+}
+
+/**
+ * Where the lit part of a row ends, [chars] characters in. Inside a timed word the edge crosses it at a constant rate
+ * — read letter by letter it sped up over an "i" and slowed over a "w" — and between words, or across a wrap, it goes
+ * letter by letter.
+ */
+private fun horizontalAtSpans(result: TextLayoutResult, chars: Float, row: Int, spans: List<IntRange>): Float {
+    val rowStart = result.getLineStart(row)
+    val rowEnd = result.getLineEnd(row, visibleEnd = true)
+    val word = spans.firstOrNull { chars >= it.first && chars < it.last + 1 }
+    if (word != null && word.first >= rowStart && word.last + 1 <= rowEnd) {
+        val from = result.xOn(word.first, row)
+        val to = result.xOn(word.last + 1, row)
+        return from + (to - from) * (chars - word.first) / (word.last + 1 - word.first)
+    }
+    val index = chars.toInt().coerceIn(rowStart, rowEnd)
+    val here = result.xOn(index, row)
+    val next = result.xOn((index + 1).coerceAtMost(rowEnd), row)
+    return here + (next - here) * (chars - index)
 }
 
 private val GLOW_RADIUS = 22.dp

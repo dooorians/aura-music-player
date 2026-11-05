@@ -1,9 +1,17 @@
+import com.android.build.api.variant.BuildConfigField
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// The database's schema is written out at each version, so an upgrade can be checked against the one before it.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 android {
@@ -26,6 +34,18 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        // False and empty everywhere but in the QA variant (see androidComponents below), where Réglages shows the text.
+        // A constant `false` lets the compiler drop the whole branch that reads them: the other builds do not contain it.
+        buildConfigField("boolean", "IS_QA", "false")
+        // The app's Last.fm key and secret (last.fm/api/account/create), kept out of git in local.properties:
+        //   lastfm.apiKey=...   lastfm.secret=...
+        // With them the connection is just the page on Last.fm; without, the settings ask for them once.
+        val localProps = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+        }
+        buildConfigField("String", "LASTFM_KEY", "\"${localProps.getProperty("lastfm.apiKey", "").trim()}\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"${localProps.getProperty("lastfm.secret", "").trim()}\"")
+        buildConfigField("String", "QA_INFO", "\"\"")
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -48,6 +68,20 @@ android {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
         }
+        // QA: exactly the release build (R8, shrunk, not debuggable, same code), under its own application id so it installs
+        // beside the daily app and shares nothing with it: the id decides the app's private storage (queue, history,
+        // favourites, downloads, settings and databases), and nothing here writes outside it. Built with
+        // `./gradlew :app:assembleQa`; its name on the launcher is "Aura QA" (src/qa/res).
+        create("qa") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".qa"
+            versionNameSuffix = "-qa"
+            matchingFallbacks += "release"
+        }
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     compileOptions {
@@ -95,6 +129,24 @@ android {
     }
 }
 
+// The QA variant says what it is on Réglages: "Version de test • QA • <short HEAD>", with a "+" after the hash when tracked
+// files differ from that commit (a build made from uncommitted changes must not pass for the commit). Read through
+// providers.exec so Gradle runs git again on each build and a new commit is never served from the configuration cache.
+androidComponents {
+    onVariants(selector().withBuildType("qa")) { variant ->
+        fun git(vararg args: String) = providers.exec {
+            commandLine("git", *args)
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { it.trim() }
+        val info = git("rev-parse", "--short", "HEAD").zip(git("status", "--porcelain", "--untracked-files=no")) { head, changes ->
+            val hash = head.ifEmpty { "inconnu" }
+            "Version de test \u2022 QA \u2022 $hash${if (changes.isNotEmpty()) "+" else ""}"
+        }
+        variant.buildConfigFields?.put("IS_QA", BuildConfigField("boolean", "true", "this is the QA build"))
+        variant.buildConfigFields?.put("QA_INFO", info.map { BuildConfigField("String", "\"$it\"", "what the QA build is") })
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -103,8 +155,6 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.palette)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.haze)
-    implementation(libs.haze.materials)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -128,6 +178,9 @@ dependencies {
     implementation(libs.media3.common)
     implementation(libs.media3.datasource)
     implementation(libs.media3.extractor)
+    // FFmpeg audio decoders for what the phone's own codecs do not play (AC3, DTS, ALAC, WMA, APE…), used as a fallback.
+    implementation(libs.nextlib.media3ext)
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 
     implementation(libs.kotlinx.coroutines.android)
 
@@ -137,4 +190,11 @@ dependencies {
     // One file's worth: the Automix analysis store, whose on-disk records are
     // @Serializable DTOs in BitChord and stay that way here.
     implementation(libs.kotlinx.serialization.json)
+
+
+    // JVM unit tests only: nothing here ships in the app. The first tests of the project, for the
+    // pure logic that decides what gets played (see source/ and playback/).
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation("org.json:json:20240303")
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.media.AudioManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
@@ -14,7 +15,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.ikko.aura.source.ytm.StreamCache
+import com.ikko.aura.source.ytm.YtmClient
+import com.ikko.aura.source.ytm.YtmDataSource
+import com.ikko.aura.source.ytm.YtmGate
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.session.CacheBitmapLoader
@@ -25,6 +32,8 @@ import androidx.media3.common.ForwardingPlayer
 import com.ikko.aura.MainActivity
 import com.ikko.aura.R
 import com.ikko.aura.data.SettingsStore
+import com.ikko.aura.playback.PlaybackRecoveryPolicy
+import com.ikko.aura.playback.TrackResolver
 import com.ikko.aura.player.smart.AutomixSettings
 import com.ikko.aura.player.smart.TrackAnalyzer
 import com.ikko.aura.player.smart.TransitionFilterProcessor
@@ -62,6 +71,12 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioSessionIdProvider: AudioSessionIdProvider
     @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var audioOutputMonitor: AudioOutputMonitor
+    @Inject lateinit var ytmClient: YtmClient
+    @Inject lateinit var jioSaavnClient: com.ikko.aura.source.jiosaavn.JioSaavnClient
+    @Inject lateinit var remoteSources: com.ikko.aura.source.remote.RemoteSources
+    @Inject lateinit var streamCache: StreamCache
+    @Inject lateinit var trackResolver: TrackResolver
+    @Inject lateinit var queueSnapshotStore: QueueSnapshotStore
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -76,11 +91,21 @@ class PlaybackService : MediaSessionService() {
     private var activeFilter = TransitionFilterProcessor()
     private var spareFilter = TransitionFilterProcessor()
 
+    /** One tempo detector per player, swapped with them like the filters: the screens follow the one that is audible. */
+    private var activeBeat = com.ikko.aura.player.beat.BeatDetector()
+    private var spareBeat = com.ikko.aura.player.beat.BeatDetector()
+
     /** Automix's DSP analyzer. Constructed lazily — see [TrackAnalyzer]'s note about contexts. */
     private val trackAnalyzer by lazy { TrackAnalyzer(this) }
 
     private var crossfade: CrossfadeController? = null
     private var mediaSession: MediaSession? = null
+
+    /** Moves past a track that cannot be played; follows the session's player — see [adoptPlayer]. */
+    private val recovery by lazy { PlaybackRecovery(trackResolver, PlaybackRecoveryPolicy(), scope) }
+
+    /** Writes the queue down as it changes, so it can come back after the process is killed. */
+    private val snapshotWriter by lazy { QueueSnapshotWriter(queueSnapshotStore, settingsStore, scope) }
 
     override fun onCreate() {
         super.onCreate()
@@ -89,13 +114,16 @@ class PlaybackService : MediaSessionService() {
                 .setChannelId(CHANNEL_ID)
                 .setChannelName(R.string.notification_channel_playback)
                 .build()
-                .apply { setSmallIcon(R.drawable.ic_ph_headphones) },
+                .apply { setSmallIcon(R.drawable.ic_cu_headphones) },
         )
 
-        val active = buildPlayer(activeFilter, ownsSession = true)
-        val standby = buildPlayer(spareFilter, ownsSession = false)
+        val active = buildPlayer(activeFilter, activeBeat, ownsSession = true)
+        val standby = buildPlayer(spareFilter, spareBeat, ownsSession = false)
         player = active
         spare = standby
+        com.ikko.aura.player.beat.BeatGrids.active = activeBeat
+        recovery.attach(active)
+        snapshotWriter.attach(active)
 
         val controller = CrossfadeController(
             scope = scope,
@@ -104,7 +132,7 @@ class PlaybackService : MediaSessionService() {
             onHandoff = ::adoptPlayer,
             analysisFor = { item -> trackAnalyzer.analysisFor(item.mediaId) },
             requestAnalysis = { item, durationMs ->
-                item.localConfiguration?.uri?.let { uri ->
+                item.localConfiguration?.uri?.takeIf { it.scheme != "ytm" }?.let { uri ->
                     trackAnalyzer.request(item.mediaId, uri, durationMs / 1000.0)
                 }
             },
@@ -129,6 +157,7 @@ class PlaybackService : MediaSessionService() {
         )
         mediaSession = MediaSession.Builder(this, SkipAwarePlayer(active, controller))
             .setSessionActivity(sessionActivity)
+            .setCallback(AuraSessionCallback(trackResolver, queueSnapshotStore, scope))
             // Media3's default loader decodes the embedded cover at its full resolution for a
             // notification icon Android then draws at about 128dp. On a 3000x3000 front cover
             // that is a 36MB allocation and a decode long enough to be felt: an atrace of three
@@ -184,9 +213,15 @@ class PlaybackService : MediaSessionService() {
 
         player = incoming
         spare = outgoing
+        recovery.attach(incoming)
+        snapshotWriter.attach(incoming)
         val heldFilter = activeFilter
         activeFilter = spareFilter
         spareFilter = heldFilter
+        val heldBeat = activeBeat
+        activeBeat = spareBeat
+        spareBeat = heldBeat
+        com.ikko.aura.player.beat.BeatGrids.active = activeBeat
 
         crossfade?.let { mediaSession?.player = SkipAwarePlayer(incoming, it) }
     }
@@ -201,12 +236,45 @@ class PlaybackService : MediaSessionService() {
         target.setHandleAudioBecomingNoisy(owns)
     }
 
-    private fun buildPlayer(filter: TransitionFilterProcessor, ownsSession: Boolean): ExoPlayer =
-        ExoPlayer.Builder(this, filteredRenderers(filter))
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this, DefaultExtractorsFactory()))
+    private fun buildPlayer(filter: TransitionFilterProcessor, beat: com.ikko.aura.player.beat.BeatDetector, ownsSession: Boolean): ExoPlayer =
+        ExoPlayer.Builder(this, filteredRenderers(filter, beat))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    DefaultDataSource.Factory(
+                        this,
+                        DataSource.Factory {
+                            val upstream = com.ikko.aura.source.jiosaavn.JioSaavnDataSource(
+                                jioSaavnClient,
+                                YtmGate(ytmClient, streamCache.factory { YtmDataSource(ytmClient) }.createDataSource()),
+                            )
+                            object : DataSource by upstream {
+                                override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
+                                    val uri = dataSpec.uri
+                                    if (uri.scheme == "remote") {
+                                        val sourceId = uri.authority ?: uri.host.orEmpty()
+                                        val itemId = uri.path?.removePrefix("/").orEmpty()
+                                        val resolved = remoteSources.streamFor("$sourceId:$itemId")
+                                            ?: throw androidx.media3.datasource.HttpDataSource.HttpDataSourceException(
+                                                "Remote source $sourceId unavailable",
+                                                dataSpec,
+                                                androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                                                androidx.media3.datasource.HttpDataSource.HttpDataSourceException.TYPE_OPEN,
+                                            )
+                                        return upstream.open(dataSpec.buildUpon().setUri(android.net.Uri.parse(resolved)).build())
+                                    }
+                                    return upstream.open(dataSpec)
+                                }
+                            }
+                        },
+                    ),
+                    DefaultExtractorsFactory(),
+                ),
+            )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
             .build()
+            // A new track starts the tempo over; a seek within one does not (see BeatDetector).
+            .also { it.addListener(object : Player.Listener { override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = beat.reset() }) }
             // Both players share one session id so the equaliser applies to whichever is
             // audible, including through the overlap where both are.
             .apply { setAudioSessionId(audioSessionIdProvider.id) }
@@ -215,13 +283,17 @@ class PlaybackService : MediaSessionService() {
      * The stock renderer chain with [TransitionFilterProcessor] spliced into the audio sink.
      * That is what makes a transition's low-pass and high-pass audible rather than advisory.
      */
-    private fun filteredRenderers(transition: TransitionFilterProcessor) =
-        object : DefaultRenderersFactory(this) {
+    private fun filteredRenderers(transition: TransitionFilterProcessor, beat: com.ikko.aura.player.beat.BeatDetector) =
+        object : io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory(this@PlaybackService) {
+            // The phone's own codecs first; FFmpeg only for the formats they refuse, so a file that plays
+            // silently in the gallery still plays here.
+            init { setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON) }
+
             override fun buildAudioSink(
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink = DefaultAudioSink.Builder(context)
+            ): AudioSink = com.ikko.aura.player.beat.BeatAudioSink(DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
                 .setAudioProcessorChain(
@@ -231,12 +303,14 @@ class PlaybackService : MediaSessionService() {
                         SonicAudioProcessor(),
                     ),
                 )
-                .build()
+                .build(), beat)
         }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
+        recovery.release()
+        snapshotWriter.release()
         crossfade?.release()
         crossfade = null
         scope.cancel()
@@ -299,7 +373,7 @@ class PlaybackService : MediaSessionService() {
          * on the lock screen, where the same bitmap is blurred across the wallpaper, it is what
          * keeps that from looking soft.
          */
-        private const val NOTIFICATION_ART_MAX_PX = 512
+        private const val NOTIFICATION_ART_MAX_PX = 1024
 
         private val AUDIO_ATTRIBUTES = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)

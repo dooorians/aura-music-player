@@ -45,6 +45,9 @@ class LyricsViewModel @Inject constructor(
         loadJob?.cancel()
         _uiState.value = LyricsUiState.Loading
         loadJob = viewModelScope.launch {
+            // A breath first: a run of skips looks up only the last track's words, and does not keep the CPU busy
+            // under the player's own change.
+            kotlinx.coroutines.delay(LOOKUP_SETTLE_MS)
             val result = lyricsRepository.loadLyrics(track)
             _uiState.value = if (result == null || result.lines.isEmpty()) {
                 LyricsUiState.Unavailable
@@ -69,5 +72,9 @@ class LyricsViewModel @Inject constructor(
                 LyricsUiState.Available(result.lines, result.sourceLabel)
             }
         }
+    }
+
+    private companion object {
+        const val LOOKUP_SETTLE_MS = 250L
     }
 }

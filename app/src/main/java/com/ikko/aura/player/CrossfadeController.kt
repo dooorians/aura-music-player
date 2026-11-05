@@ -22,6 +22,8 @@ import com.ikko.aura.player.smart.TransitionTrackInfo
 import com.ikko.aura.player.smart.planTransition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -201,6 +203,8 @@ class CrossfadeController(
     /** Which player this class's own listener is currently attached to. */
     private var listeningTo: ExoPlayer? = null
     private var tickerJob: Job? = null
+    private var settingsWatchJob: Job? = null
+    private val wake = Channel<Unit>(Channel.CONFLATED)
 
     /** Length of the transition in flight, in ms. Fixed when it begins. */
     private var fadeMs = 0L
@@ -318,6 +322,11 @@ class CrossfadeController(
         settledAt.takeIf { it != 0L }?.let { SystemClock.elapsedRealtime() - it }
 
     private val listener = object : Player.Listener {
+        // Wakes the ticker from its paused sleep the moment playback starts again (see [start]).
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            wake.trySend(Unit)
+        }
+
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -363,9 +372,32 @@ class CrossfadeController(
     fun start() {
         listenTo(active())
         tickerJob?.cancel()
+        settingsWatchJob?.cancel()
+        // The ticker sleeps for as long as no fade can be armed; turning Automix on is what wakes it.
+        settingsWatchJob = scope.launch {
+            kotlinx.coroutines.flow.combine(
+                AutomixSettings.smartFadeEnabled,
+                AutomixSettings.crossfadeSeconds,
+            ) { smart, seconds -> canArm(smart, seconds) }
+                .collect { wake.trySend(Unit) }
+        }
         tickerJob = scope.launch {
             while (isActive) {
                 tick()
+                // Idle and paused, there is nothing to arm or run: it sleeps until playback starts again
+                // instead of ticking four times a second on the main thread for as long as the service
+                // lives. It still looks in every couple of seconds, in case a wake-up was ever missed.
+                if (phase == Phase.IDLE && !active().isPlaying) {
+                    withTimeoutOrNull(PAUSED_STEP_MS) { wake.receive() }
+                    continue
+                }
+                // Automix off and no manual fade (there is no setting for one): nothing can ever be armed, so the
+                // ticker does not wake four times a second to find that out. [settingsWatchJob] wakes it when that
+                // changes; the long timeout is only a net under it.
+                if (phase == Phase.IDLE && !canArm()) {
+                    withTimeoutOrNull(DISABLED_STEP_MS) { wake.receive() }
+                    continue
+                }
                 delay(
                     when (phase) {
                         Phase.IDLE -> IDLE_STEP_MS
@@ -381,6 +413,8 @@ class CrossfadeController(
     fun release() {
         tickerJob?.cancel()
         tickerJob = null
+        settingsWatchJob?.cancel()
+        settingsWatchJob = null
         listeningTo?.removeListener(listener)
         listeningTo = null
         active().volume = 1f
@@ -410,7 +444,11 @@ class CrossfadeController(
 
     // ---- Ticker -------------------------------------------------------------
 
+    private fun canArm() = canArm(AutomixSettings.smartFadeEnabled.value, AutomixSettings.crossfadeSeconds.value)
+
     private fun tick() {
+        // Nothing to arm and nothing in flight: no analysis line to publish, no plan to make (and nobody reads them).
+        if (phase == Phase.IDLE && !canArm()) return
         // A pause has to take the other player with it, or one half of the blend
         // carries on alone over a stopped one. Mirrored every tick rather than
         // handled as an event, so audio focus loss, the sleep timer and the
@@ -1635,6 +1673,8 @@ class CrossfadeController(
         const val BLEND_EXIT_LOW_PASS_HZ = 2_200.0
 
         const val IDLE_STEP_MS = 250L
+        const val PAUSED_STEP_MS = 2_000L
+        const val DISABLED_STEP_MS = 30_000L
 
         /**
          * Arming only waits on a buffer now — nothing is being converged — so
@@ -1646,3 +1686,7 @@ class CrossfadeController(
         const val BAIL_STEP_MS = 15L
     }
 }
+
+/** A fade can be armed only by Automix, or by a manual crossfade length above zero. */
+internal fun canArm(smartFadeEnabled: Boolean, crossfadeSeconds: Int): Boolean =
+    smartFadeEnabled || crossfadeSeconds > 0

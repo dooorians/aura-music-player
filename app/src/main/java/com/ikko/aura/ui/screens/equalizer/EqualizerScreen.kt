@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.equalizer
 
+import com.ikko.aura.ui.components.listTopBlur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,13 +32,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.ui.components.GradientScreenScaffold
+import com.ikko.aura.ui.components.AuraSwitch
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
+import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.ui.theme.AuraShapes
 import com.ikko.aura.viewmodel.EqBand
 import com.ikko.aura.viewmodel.EqualizerViewModel
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.ikko.aura.ui.components.AuraChip
 
 @Composable
 fun EqualizerScreen(
@@ -47,12 +51,7 @@ fun EqualizerScreen(
     val uiState by equalizerViewModel.uiState.collectAsStateWithLifecycle()
 
     GradientScreenScaffold {
-        Text(
-            text = "Égaliseur",
-            style = MaterialTheme.typography.headlineLarge,
-            color = AuraColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        PageHeader(title = "Égaliseur")
 
         if (!uiState.available) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -66,8 +65,10 @@ fun EqualizerScreen(
             return@GradientScreenScaffold
         }
 
+        val eqListState = androidx.compose.foundation.lazy.rememberLazyListState()
         LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
+            state = eqListState,
+            modifier = Modifier.fillMaxWidth().weight(1f).listTopBlur(eqListState),
             contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item {
@@ -89,20 +90,7 @@ fun EqualizerScreen(
                         items(uiState.presets.size, key = { uiState.presets[it] }) { index ->
                             val label = uiState.presets[index]
                             val isSelected = uiState.selectedPresetIndex == index
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { equalizerViewModel.applyPreset(index) },
-                                label = { Text(label, style = MaterialTheme.typography.titleMedium) },
-                                shape = AuraShapes.Pill,
-                                border = null,
-                                modifier = Modifier.height(46.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    containerColor = AuraColors.GlassFill,
-                                    labelColor = AuraColors.TextSecondary,
-                                    selectedContainerColor = AuraColors.TextPrimary,
-                                    selectedLabelColor = AuraColors.Black,
-                                ),
-                            )
+                            AuraChip(label = label, selected = isSelected, onClick = { equalizerViewModel.applyPreset(index) })
                         }
                     }
                 }
@@ -162,17 +150,7 @@ private fun EqSwitchRow(title: String, subtitle: String, checked: Boolean, onChe
             Text(text = title, style = MaterialTheme.typography.titleMedium, color = AuraColors.TextPrimary)
             Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = AuraColors.TextSecondary)
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AuraColors.Black,
-                checkedTrackColor = AuraColors.TextPrimary,
-                uncheckedThumbColor = AuraColors.TextSecondary,
-                uncheckedTrackColor = AuraColors.GlassFill,
-                uncheckedBorderColor = AuraColors.GlassBorder,
-            ),
-        )
+        AuraSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

@@ -1,5 +1,6 @@
 package com.ikko.aura.ui.screens.album
 
+import com.ikko.aura.ui.components.listTopBlur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,28 +24,28 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.ikko.aura.navigation.AuraDestination
+import com.ikko.aura.navigation.route
 import com.ikko.aura.ui.components.AlbumArt
 import com.ikko.aura.ui.components.GradientScreenScaffold
 import com.ikko.aura.ui.components.SquircleCard
 import com.ikko.aura.ui.theme.AuraColors
 import com.ikko.aura.ui.theme.LocalPlayerPillHeight
+import com.ikko.aura.ui.components.PageHeader
 import com.ikko.aura.viewmodel.AlbumListViewModel
 
 @Composable
 fun AlbumListScreen(
     mode: String,
     navController: NavHostController,
+    playerViewModel: com.ikko.aura.viewmodel.PlayerViewModel,
     albumListViewModel: AlbumListViewModel = hiltViewModel(),
 ) {
     val uiState by albumListViewModel.uiState.collectAsStateWithLifecycle()
 
+    val tracksOf = com.ikko.aura.viewmodel.rememberAlbumTracks()
+    com.ikko.aura.ui.components.MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
     GradientScreenScaffold {
-        Text(
-            text = uiState.title,
-            style = MaterialTheme.typography.headlineLarge,
-            color = AuraColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        PageHeader(title = uiState.title)
 
         if (uiState.albums.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -55,10 +56,12 @@ fun AlbumListScreen(
                 )
             }
         } else {
+            val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
+                modifier = Modifier.fillMaxSize().weight(1f).listTopBlur(gridState),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = LocalPlayerPillHeight.current + 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -68,7 +71,8 @@ fun AlbumListScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f),
-                            onClick = { navController.navigate(AuraDestination.AlbumPattern.route(album.id.toString())) },
+                            onClick = { navController.navigate(album.route()) },
+                            onLongClick = { menu.show(com.ikko.aura.ui.components.LibraryContextTarget.AlbumTarget(album, tracksOf(album.id))) },
                         ) {
                             AlbumArt(
                                 uri = album.artworkUri,
@@ -97,5 +101,6 @@ fun AlbumListScreen(
                 }
             }
         }
+    }
     }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aura's own foreground with the QA badge over it (the badge is a full-canvas picture, transparent but for the pill). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher_foreground" />
+    <item android:drawable="@drawable/ic_qa_badge" />
+</layer-list>

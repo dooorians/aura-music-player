@@ -1,6 +1,13 @@
 package com.ikko.aura.data.playlist
 
 import androidx.room.Dao
+import com.ikko.aura.catalog.CatalogDao
+import com.ikko.aura.catalog.DownloadDao
+import com.ikko.aura.source.remote.SourceConfigDao
+import com.ikko.aura.source.remote.SourceConfigEntity
+import com.ikko.aura.catalog.YtmDownloadEntity
+import com.ikko.aura.catalog.CatalogTrackEntity
+import com.ikko.aura.catalog.TrackBindingEntity
 import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -28,6 +35,19 @@ interface PlaylistDao {
     @Insert
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long
 
+    /** Creates it only if there is no playlist with its id yet — for the Favoris playlist, made on demand. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistIfAbsent(playlist: PlaylistEntity)
+
+    @Query("SELECT COALESCE(MIN(position), 1) - 1 FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun firstPosition(playlistId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun containsTrack(playlistId: Long, trackId: String): Int
+
+    @Query("SELECT COUNT(*) FROM playlists WHERE id = :playlistId")
+    suspend fun playlistExists(playlistId: Long): Int
+
     @Query("DELETE FROM playlists WHERE id = :playlistId")
     suspend fun deletePlaylist(playlistId: Long)
 
@@ -45,6 +65,16 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
+
+    /** One transaction: the playlist is never seen empty or half-filled between the two steps. */
+    @androidx.room.Transaction
+    suspend fun replaceTracks(playlistId: Long, entries: List<PlaylistTrackEntity>) {
+        clearPlaylistTracks(playlistId)
+        entries.forEach { insertPlaylistTrack(it) }
+    }
+
+    @Query("SELECT * FROM playlist_tracks")
+    suspend fun allEntries(): List<PlaylistTrackEntity>
 }
 
 @Database(
@@ -53,14 +83,94 @@ interface PlaylistDao {
         PlaylistTrackEntity::class,
         LyricsCacheEntity::class,
         AlbumPlayEntity::class,
+        CatalogTrackEntity::class,
+        TrackBindingEntity::class,
+        YtmDownloadEntity::class,
+        SourceConfigEntity::class,
+        com.ikko.aura.reco.ListenEntity::class,
+        com.ikko.aura.reco.FeedbackEntity::class,
+        com.ikko.aura.reco.HistoryEntity::class,
+        com.ikko.aura.reco.RecoItemEntity::class,
+        com.ikko.aura.reco.RecoStateEntity::class,
+        com.ikko.aura.reco.TrackStatsEntity::class,
+        com.ikko.aura.reco.ArtistMetaEntity::class,
+        com.ikko.aura.reco.ArtistSimilarityEntity::class,
     ],
-    version = 3,
-    exportSchema = false,
+    version = 11,
+    exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun lyricsCacheDao(): LyricsCacheDao
     abstract fun albumPlaysDao(): AlbumPlaysDao
+    abstract fun catalogDao(): CatalogDao
+    abstract fun downloadDao(): DownloadDao
+    abstract fun sourceConfigDao(): SourceConfigDao
+    abstract fun recoDao(): com.ikko.aura.reco.RecoDao
+    abstract fun smartDao(): com.ikko.aura.reco.SmartDao
+}
+
+/**
+ * Adds the catalogue: what each track is, and which file holds it. Additive only — no key anywhere else is rewritten,
+ * a local track's key being the MediaStore id it has always had.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS catalog_tracks (" +
+                "`key` TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, " +
+                "album TEXT NOT NULL, durationMs INTEGER NOT NULL)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS track_bindings (" +
+                "sourceId TEXT NOT NULL, itemId TEXT NOT NULL, trackKey TEXT NOT NULL, fingerprint TEXT NOT NULL, " +
+                "availability TEXT NOT NULL, lastSeenAt INTEGER NOT NULL, PRIMARY KEY(sourceId, itemId))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_track_bindings_trackKey ON track_bindings(trackKey)")
+    }
+}
+
+/** Remote covers for songs saved from a streaming source. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN artworkUrl TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** The sources the user added themselves. */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS source_configs (" +
+                "id TEXT NOT NULL PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, baseUrl TEXT NOT NULL, " +
+                "username TEXT NOT NULL, secret TEXT NOT NULL, salt TEXT NOT NULL, enabled INTEGER NOT NULL, createdAt INTEGER NOT NULL)",
+        )
+    }
+}
+
+/** Songs downloaded from a streaming source: one row per song, with the state of its file. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS ytm_downloads (" +
+                "`key` TEXT NOT NULL PRIMARY KEY, state TEXT NOT NULL, filePath TEXT NOT NULL, mime TEXT NOT NULL, " +
+                "bytes INTEGER NOT NULL, totalBytes INTEGER NOT NULL, updatedAt INTEGER NOT NULL)",
+        )
+    }
+}
+
+/** The album a streamed song belongs to. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN albumRef TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** Streamed songs can be known without being in the library. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_tracks ADD COLUMN inLibrary INTEGER NOT NULL DEFAULT 1")
+    }
 }
 
 /** Adds the play counts Home's "Redécouvrir" row is built from. */

@@ -13,4 +13,6 @@ data class Album(
     val artworkUri: Uri?,
     val trackCount: Int,
     val year: Int,
+    /** A streamed album's id on its source, when it is one: its page is the source's, not a local album's. */
+    val remoteId: String? = null,
 )

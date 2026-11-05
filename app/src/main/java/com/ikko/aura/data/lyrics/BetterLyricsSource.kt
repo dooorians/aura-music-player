@@ -38,9 +38,11 @@ object BetterLyricsSource {
         }
 
         val body = lyricsGet(url) ?: return@withContext null
-        val ttml = runCatching {
+        val ttml = try {
             JSONObject(body).optString("ttml").takeIf { it.isNotBlank() }
-        }.getOrNull() ?: return@withContext null
+        } catch (e: org.json.JSONException) {
+            throw LyricsUnreachable("unreadable reply", e)
+        } ?: return@withContext null
 
         TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }
     }

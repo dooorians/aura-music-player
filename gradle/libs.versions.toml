@@ -1,8 +1,8 @@
 [versions]
-agp = "9.4.0"
-kotlin = "2.2.10"
+agp = "9.4.1"
+kotlin = "2.3.20"
 kotlinxCoroutines = "1.9.0"
-ksp = "2.3.2"
+ksp = "2.3.9"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
@@ -13,12 +13,13 @@ hilt = "2.60"
 hiltNavigationCompose = "1.2.0"
 room = "2.8.4"
 media3 = "1.11.0"
+nextlib = "1.11.0-0.15.0"
 palette = "1.0.0"
 datastore = "1.1.1"
 errorprone = "2.+"
-haze = "1.5.3"
 onnxruntime = "1.28.0"
 kotlinxSerialization = "1.7.3"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -35,8 +36,6 @@ androidx-compose-material3 = { module = "androidx.compose.material3:material3", 
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-palette = { module = "androidx.palette:palette-ktx", version.ref = "palette" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
-haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
-haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 
@@ -53,8 +52,11 @@ media3-session = { module = "androidx.media3:media3-session", version.ref = "med
 media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
 media3-datasource = { module = "androidx.media3:media3-datasource", version.ref = "media3" }
 media3-extractor = { module = "androidx.media3:media3-extractor", version.ref = "media3" }
+nextlib-media3ext = { module = "io.github.anilbeesetti:nextlib-media3ext", version.ref = "nextlib" }
 
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
 errorprone-annotations = { module = "com.google.errorprone:error_prone_annotations", version.ref = "errorprone" }
 
 [plugins]

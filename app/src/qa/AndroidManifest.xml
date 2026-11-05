@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- QA only. The label is also set on the launcher activity, so a launcher that reads the activity's label gets "Aura QA" too. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="com.ikko.aura.MainActivity"
+            android:label="@string/app_name" />
+    </application>
+</manifest>
