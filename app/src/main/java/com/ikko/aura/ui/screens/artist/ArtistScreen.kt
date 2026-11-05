@@ -175,6 +175,9 @@ fun ArtistPageContent(
       val tracksOf = com.ikko.aura.viewmodel.rememberAlbumTracks()
       MediaContextHost(navController = navController, playerViewModel = playerViewModel) { menu ->
         Box(Modifier.fillMaxSize()) {
+        // The whole page steps back when an album opens from it, and returns from the touched card outwards, as a Home card does;
+        // not when the trip is this page's own (it rises by itself).
+        val rippleKey = heroKey ?: "artist:page"
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -183,7 +186,7 @@ fun ArtistPageContent(
             contentPadding = PaddingValues(top = statusBarTop, bottom = LocalPlayerPillHeight.current + 12.dp),
         ) {
             item(key = "artist_header", contentType = "artist_header") {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
+                Column(modifier = Modifier.heroRipple(pageKey = rippleKey).padding(horizontal = 16.dp, vertical = 20.dp)) {
                     // As the album pages: the picture on the left, the name and the counts beside it, then one row of actions.
                     val u = com.ikko.aura.ui.components.designUnit()
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -295,7 +298,7 @@ fun ArtistPageContent(
                         text = "Albums",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRise(2).padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(2).padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
                 item(key = "artist_albums_row", contentType = "album_row") {
@@ -358,7 +361,7 @@ fun ArtistPageContent(
                         text = "Singles & EP",
                         style = MaterialTheme.typography.headlineMedium,
                         color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRise(4).padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(4).padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
                 item(key = "artist_singles_row", contentType = "album_row") {
@@ -391,7 +394,7 @@ fun ArtistPageContent(
                     text = "Titres",
                     style = MaterialTheme.typography.headlineMedium,
                     color = AuraColors.TextPrimary,
-                    modifier = Modifier.heroRise(5).padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(5).padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
 
@@ -421,6 +424,7 @@ fun ArtistPageContent(
                     isPlayingTrack = nowPlayingId == track.id,
                     onLongClick = { menu.show(track) },
                     modifier = Modifier
+                        .heroRipple(pageKey = rippleKey)
                         .heroRise(index, rows = true)
                         .padding(horizontal = 16.dp),
                 )

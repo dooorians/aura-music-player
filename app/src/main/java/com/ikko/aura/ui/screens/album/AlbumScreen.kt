@@ -734,7 +734,8 @@ private fun AlbumHeader(
                                         key = artistTripKey,
                                         uri = null,
                                         cacheKey = null,
-                                        cover = com.ikko.aura.ui.components.HeroAnchor(),
+                                        // The name is also where the ripple starts: what is on the page steps back from it, and returns from it.
+                                        cover = artistAnchor,
                                         radiusPx = 0f,
                                         title = artistAnchor to com.ikko.aura.ui.components.HeroText(
                                             uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, artistColor,
