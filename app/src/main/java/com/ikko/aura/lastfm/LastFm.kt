@@ -3,8 +3,6 @@ package com.ikko.aura.lastfm
 import android.content.Context
 import com.ikko.aura.data.model.Track
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -47,6 +45,7 @@ object LastFmRules {
  * sent to Last.fm to get a session and is not kept.
  */
 @Singleton
+class LastFm @Inject constructor(@param:ApplicationContext private val context: Context) : com.ikko.aura.reco.ArtistInsight {
 class LastFm @Inject constructor(
     @ApplicationContext context: Context,
     remoteCache: com.ikko.aura.data.cache.RemoteCacheDao,
@@ -84,7 +83,7 @@ class LastFm @Inject constructor(
                 prefs.edit().putString("apiKey", apiKey).putString("secret", secret)
                     .putString("sk", session.getString("key")).putString("user", session.getString("name")).apply()
                 _user.value = session.getString("name")
-                flush()
+                flushPending()
                 true
             } catch (e: LastFmError) {
                 // 14: the token is not approved yet. 15: it has expired.
@@ -264,15 +263,22 @@ class LastFm @Inject constructor(
                     .put("duration", duration / 1000).put("timestamp", startedAtMs / 1000))
                 save(q)
             }
-            flush()
+            flushPending()
         }
     }
 
-    private suspend fun flush() = sending.withLock {
-        val sk = prefs.getString("sk", null) ?: return@withLock
+    /**
+     * Sends what waits. False when listens are still kept because the network or Last.fm could not take them now: that is
+     * when [ScrobbleFlushWorker] is asked to try again later, once the system reports a network, with a growing delay —
+     * rather than this being retried in a loop or left until the next song.
+     */
+    suspend fun flushPending(): Boolean = flush().also { sent -> if (!sent) ScrobbleFlushWorker.schedule(context) }
+
+    private suspend fun flush(): Boolean = sending.withLock {
+        val sk = prefs.getString("sk", null) ?: return@withLock true
         while (true) {
             val q = queue()
-            if (q.length() == 0) return@withLock
+            if (q.length() == 0) return@withLock true
             val n = minOf(q.length(), 50)
             val params = mutableMapOf("method" to "track.scrobble", "sk" to sk)
             for (i in 0 until n) {
@@ -287,16 +293,18 @@ class LastFm @Inject constructor(
             val error = sent.exceptionOrNull() as? LastFmError
             when {
                 sent.isSuccess -> Unit
-                // No network, the service is down or busy: what is kept goes with the next one.
-                error == null || error.code in TEMPORARY -> return@withLock
+                // No network, the service is down or busy: what is kept goes later, through [ScrobbleFlushWorker].
+                error == null || error.code in TEMPORARY -> return@withLock false
                 // The session is no longer valid: the account has to be connected again.
-                error.code == 9 -> { logout(); return@withLock }
+                error.code == 9 -> { logout(); return@withLock true }
                 // Anything else is refused for good: dropped, so one bad listen does not stop the others.
             }
             val rest = JSONArray()
             for (i in n until q.length()) rest.put(q.get(i))
             save(rest)
         }
+        @Suppress("UNREACHABLE_CODE")
+        true
     }
 
     private fun queue(): JSONArray = runCatching { JSONArray(prefs.getString("pending", "[]")) }.getOrDefault(JSONArray())
@@ -320,6 +328,24 @@ class LastFm @Inject constructor(
         val all = params + ("api_key" to apiKey)
         val body = (all + ("api_sig" to LastFmRules.sign(all, secret)) + ("format" to "json")).entries
             .joinToString("&") { URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }
+        // Through the breaker: offline or after repeated failures nothing is sent — the listen stays queued, and
+        // [ScrobbleFlushWorker] sends it once the system says there is a network.
+        return com.ikko.aura.net.NetGuard.exchange(
+            ENDPOINT,
+            setup = { connection ->
+                connection.requestMethod = "POST"
+                connection.doOutput = true
+                connection.connectTimeout = 8_000
+                connection.readTimeout = 12_000
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                connection.outputStream.use { it.write(body.toByteArray()) }
+            },
+        ) { connection, code ->
+            val text = (if (code < 400) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val json = JSONObject(text)
+            if (json.has("error")) throw LastFmError(json.getInt("error"), json.optString("message"))
+            json
         val connection = URL("https://ws.audioscrobbler.com/2.0/").openConnection() as HttpURLConnection
         connection.requestMethod = "POST"
         connection.doOutput = true
@@ -363,6 +389,7 @@ class LastFm @Inject constructor(
     private companion object {
         /** Service offline, temporarily unavailable, rate limit. */
         val TEMPORARY = setOf(11, 16, 29)
+        const val ENDPOINT = "https://ws.audioscrobbler.com/2.0/"
         const val RATE_LIMITED = 29
         /** Last.fm does not say how long its rate limit lasts; a minute is what its documentation suggests waiting. */
         const val RATE_LIMIT_PAUSE_MS = 60_000L

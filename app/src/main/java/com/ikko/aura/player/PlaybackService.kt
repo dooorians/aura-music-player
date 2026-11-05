@@ -309,14 +309,17 @@ class PlaybackService : MediaSessionService() {
             )
             .setAudioAttributes(AUDIO_ATTRIBUTES, ownsSession)
             .setHandleAudioBecomingNoisy(ownsSession)
-            // Wake and Wi-Fi locks held only while this player is actually playing or buffering, and
-            // let go of the moment it pauses — the sleep timer's pause included. Without them a
-            // screen-off phone may suspend the CPU mid-stream.
-            // Held only while this player is playing or buffering, so the idle spare holds nothing. Without it the CPU
-            // and the Wi-Fi could sleep with the screen off while a streamed track was still buffering, and playback
-            // stalled until the phone woke up.
-            .setWakeMode(C.WAKE_MODE_NETWORK)
+            // Nothing is held until a track plays; see the listener below and [WakeModePolicy].
+            .setWakeMode(C.WAKE_MODE_NONE)
             .build()
+            // The locks follow the track: a stream holds the Wi-Fi lock, a local file only the CPU, and ExoPlayer drops
+            // either on pause or stop. The idle spare never plays, so never holds anything.
+            .also { p ->
+                p.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) =
+                        p.setWakeMode(WakeModePolicy.forScheme(mediaItem?.localConfiguration?.uri?.scheme))
+                })
+            }
             // A new track starts the tempo over; a seek within one does not (see BeatDetector).
             .also {
                 it.addListener(object : Player.Listener {

@@ -1,8 +1,6 @@
 package com.ikko.aura.reco
 
 import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -65,25 +63,25 @@ class RecoBeatsClient(
 
     private suspend fun network(audio: ByteArray): RecoBeatsAnswer = withContext(Dispatchers.IO) {
         val boundary = "aura" + UUID.randomUUID().toString().replace("-", "")
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 8_000
-        connection.readTimeout = 30_000
-        connection.doOutput = true
-        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-        connection.setRequestProperty("User-Agent", "Aura/1.0")
-        try {
-            connection.outputStream.use { out ->
-                out.write("--$boundary\r\nContent-Disposition: form-data; name=\"audioFile\"; filename=\"preview.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n".toByteArray())
-                out.write(audio)
-                out.write("\r\n--$boundary--\r\n".toByteArray())
-            }
-            val code = connection.responseCode
+        com.ikko.aura.net.NetGuard.exchange(
+            ENDPOINT,
+            setup = { connection ->
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 8_000
+                connection.readTimeout = 30_000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                connection.setRequestProperty("User-Agent", "Aura/1.0")
+                connection.outputStream.use { out ->
+                    out.write("--$boundary\r\nContent-Disposition: form-data; name=\"audioFile\"; filename=\"preview.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n".toByteArray())
+                    out.write(audio)
+                    out.write("\r\n--$boundary--\r\n".toByteArray())
+                }
+            },
+        ) { connection, code ->
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.use { s -> ByteArrayOutputStream().also { s.copyTo(it) }.toString(Charsets.UTF_8.name()) }.orEmpty()
             RecoBeatsAnswer(code, text, connection.getHeaderField("Retry-After")?.trim()?.toLongOrNull())
-        } finally {
-            connection.disconnect()
         }
     }
 

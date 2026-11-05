@@ -49,6 +49,7 @@ object ScrobbleMatcher {
  */
 @Singleton
 class LastFmEnricher @Inject constructor(
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val dao: SmartDao,
     private val lastFm: LastFm,
     private val library: MusicRepository,
@@ -104,27 +105,32 @@ class LastFmEnricher @Inject constructor(
     @Volatile private var libraryDone = false
 
     /**
-     * Fetches, for the library's artists that have nothing kept yet (or nothing recent), what Last.fm says of their sound: a few at
-     * a time and without hurry, once per launch. The style rows of Home are drawn from these tags.
+     * Fetches, for the library's artists that have nothing kept yet (or nothing recent), what Last.fm says of their sound. The style
+     * rows of Home are drawn from these tags.
+     *
+     * Up to 80 artists, several requests each: handed to [LibraryEnrichWorker], which the system runs once the device is on a
+     * network the user does not pay by the byte and the battery is not low — not straight away on a phone in a pocket on 4G.
+     * Asked once per launch; the worker itself does nothing for an artist whose answer is still fresh.
      */
     fun enrichLibrary() {
         if (libraryDone) return
         libraryDone = true
-        scope.launch {
-            runCatching {
-                val tracks = library.tracks.first { it.isNotEmpty() }
-                val names = tracks.groupingBy { ArtistNames.primary(it.artist) }.eachCount()
-                    .entries.sortedByDescending { it.value }.map { it.key }.filter { !it.startsWith("Artiste inconnu") }.take(LIBRARY_ARTISTS)
-                for (name in names) {
-                    val key = ArtistNames.primaryKey(name)
-                    val meta = dao.artist(key)
-                    val stale = meta == null || System.currentTimeMillis() - meta.lastFmFetchedTimestamp > RecommendationConfig.LASTFM_TTL_MS
-                    if (stale && synchronized(inFlight) { inFlight.add(key) }) {
-                        try { enrich(key, name) } catch (e: Exception) { /* a missing answer is tried at the next launch */ }
-                        finally { synchronized(inFlight) { inFlight.remove(key) } }
-                        kotlinx.coroutines.delay(300)
-                    }
-                }
+        LibraryEnrichWorker.schedule(context)
+    }
+
+    /** The work itself, run by [LibraryEnrichWorker]. Stops at once when the worker is cancelled (constraints lost). */
+    suspend fun enrichLibraryNow() {
+        val tracks = library.tracks.first { it.isNotEmpty() }
+        val names = tracks.groupingBy { ArtistNames.primary(it.artist) }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key }.filter { !it.startsWith("Artiste inconnu") }.take(LIBRARY_ARTISTS)
+        for (name in names) {
+            val key = ArtistNames.primaryKey(name)
+            val meta = dao.artist(key)
+            val stale = meta == null || System.currentTimeMillis() - meta.lastFmFetchedTimestamp > RecommendationConfig.LASTFM_TTL_MS
+            if (stale && synchronized(inFlight) { inFlight.add(key) }) {
+                try { enrich(key, name) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { /* a missing answer is tried at the next run */ }
+                finally { synchronized(inFlight) { inFlight.remove(key) } }
+                kotlinx.coroutines.delay(300)
             }
         }
     }
