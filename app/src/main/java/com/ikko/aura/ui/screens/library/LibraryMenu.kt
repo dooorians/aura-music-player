@@ -343,18 +343,6 @@ internal fun LibraryPageHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(u * 16f),
         ) {
-            // Search button (same icon & circular container as Accueil / Bibliothèque)
-            Box(
-                Modifier
-                    .size(u * 96f)
-                    .glassSurface(CircleShape)
-                    .clip(CircleShape)
-                    .clickable(onClick = onSearch),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(CupertinoIcons.Search, contentDescription = "Rechercher", tint = Color.White, modifier = Modifier.size(u * 44f))
-            }
-
             if (filter == LibraryFilter.PLAYLISTS && onAi != null) {
                 // The playlist assistant: a playlist composed from a sentence, on the device.
                 Box(
@@ -367,6 +355,18 @@ internal fun LibraryPageHeader(
                 ) {
                     Icon(CupertinoIcons.AutoAwesome, contentDescription = "Composer une playlist avec l'IA", tint = Color.White, modifier = Modifier.size(u * 44f))
                 }
+            }
+
+            // Search button (same icon & circular container as Accueil / Bibliothèque)
+            Box(
+                Modifier
+                    .size(u * 96f)
+                    .glassSurface(CircleShape)
+                    .clip(CircleShape)
+                    .clickable(onClick = onSearch),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(CupertinoIcons.Search, contentDescription = "Rechercher", tint = Color.White, modifier = Modifier.size(u * 44f))
             }
 
             if (filter == LibraryFilter.PLAYLISTS) {
