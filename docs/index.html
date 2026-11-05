@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura, lecteur de musique Android</title>
+<meta name="description" content="Aura est un lecteur de musique pour Android : bibliothèque locale, sources en ligne et recommandations calculées sur l'appareil.">
+<style>
+  :root { color-scheme: light dark; --bg: #fafafa; --fg: #1b1b1f; --muted: #5d5d66; --accent: #5b4bdb; --line: #e3e3e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #131316; --fg: #ececf1; --muted: #a0a0ab; --accent: #9d93ff; --line: #2a2a31; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 3rem 1rem 4rem; }
+  h1 { font-size: 2.2rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.15rem; margin: 2.2rem 0 .6rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+  p.lead { color: var(--muted); margin-top: 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  a { color: var(--accent); }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Aura</h1>
+  <p class="lead">Lecteur de musique pour Android : ta bibliothèque, des sources en ligne, et des recommandations calculées sur ton appareil à partir de ce que tu écoutes.</p>
+
+  <h2>Sources de données</h2>
+  <p>Les recommandations, les rangées de l'accueil et les ambiances (Chill, Nuit, Ça bouge&nbsp;!) s'appuient sur des services tiers. Merci à eux&nbsp;:</p>
+  <ul>
+    <li><a href="https://getsongbpm.com">GetSongBPM</a> : tempo (BPM) et caractéristiques des morceaux</li>
+    <li><a href="https://musicbrainz.org">MusicBrainz</a> : identité des artistes et des albums</li>
+    <li><a href="https://developers.deezer.com">Deezer</a> : pochettes, discographies, classements par genre, extraits de 30 secondes</li>
+    <li><a href="https://www.last.fm">Last.fm</a> : tags et artistes proches</li>
+  </ul>
+
+  <h2>Confidentialité</h2>
+  <p>Le profil de goût, l'historique d'écoute et les mesures restent sur l'appareil. Seuls des noms d'artistes et de titres sont envoyés aux services ci-dessus, et seulement si les recommandations personnalisées sont activées dans les réglages.</p>
+
+  <h2>Code source</h2>
+  <p><a href="https://github.com/dooorians/aura-music-player">github.com/dooorians/aura-music-player</a></p>
+
+  <footer>Données de tempo : <a href="https://getsongbpm.com">GetSongBPM.com</a></footer>
+</main>
+</body>
+</html>
