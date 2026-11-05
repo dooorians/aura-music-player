@@ -50,10 +50,16 @@
 # The extractor itself is plain code, called directly: R8 may shrink and rename it. Two things in it are reached by
 # name only, as NewPipe's own app keeps them:
 #   - the "x minutes ago" patterns, one class per language, loaded with Class.forName from the language code;
-#   - Rhino, the JavaScript engine that runs YouTube's player code, which loads its own parts by reflection.
+#   - Rhino, the JavaScript engine that runs YouTube's player code, which loads its own parts by reflection;
+#   - the fields of its generated protobuf messages (the continuation tokens of a playlist or an album): protobuf-javalite
+#     finds them by name with reflection, from each message's schema string. Renamed or removed by R8 in full mode, every
+#     album and playlist page failed in the release build ("Field browseId_ for ... not found") and not in debug.
 -keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
 -keep class org.mozilla.javascript.** { *; }
 -keep class org.mozilla.classfile.** { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
+    <fields>;
+}
 # Desktop-JVM APIs Rhino and the extractor refer to on paths Android never takes.
 -dontwarn java.beans.**
 -dontwarn javax.script.**
