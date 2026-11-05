@@ -193,7 +193,9 @@ fun ArtistPageContent(
                         photo?.let { photo ->
                             com.ikko.aura.ui.components.AlbumArt(
                                 uri = photo, contentDescription = uiState.name, shape = RoundedCornerShape(50),
-                                modifier = Modifier.size(u * 240f), targetSizeDp = u * 240f, cacheKey = photo.toString(),
+                                // Arrives with the name beside it (the same clock): it used to stand there, whole, over the page the trip
+                                // was leaving, while the rest of the header was still to rise.
+                                modifier = Modifier.size(u * 240f).heroRise(0), targetSizeDp = u * 240f, cacheKey = photo.toString(),
                             )
                             Spacer(Modifier.width(u * 40f))
                         }
