@@ -175,7 +175,10 @@ fun PlaylistScreen(
     androidx.compose.runtime.LaunchedEffect(currentCustomBmp, cardArt, ambience, firstTrack?.albumId, firstTrack?.artworkUri, detail != null) {
         if (theme == null || currentCustomBmp != null) {
             theme = when {
-                currentCustomBmp != null -> albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                // A palette pass over the picture: on Default, like the card's below, not on the main thread.
+                currentCustomBmp != null -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    albumThemeFromBitmap(currentCustomBmp, seed = 42)
+                }
                 cardArt != null && (ambience != null || artwork != null) -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     albumThemeFromBitmap(cardArt, seed = artSeed)
                 }
@@ -220,7 +223,7 @@ fun PlaylistScreen(
                 contentPadding = PaddingValues(bottom = LocalPlayerPillHeight.current + 12.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                item(key = "header") {
+                item(key = "header", contentType = "header") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -274,11 +277,13 @@ fun PlaylistScreen(
                             // A recommended playlist says when it was made, and can be made again now: the listener's
                             // answers and the profile are kept.
                             reco?.let { page ->
-                                val updated = if (page.updatedAtMs > 0) {
-                                    "Mis à jour le " + java.time.Instant.ofEpochMilli(page.updatedAtMs)
-                                        .atZone(java.time.ZoneId.systemDefault())
-                                        .format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH))
-                                } else "Pas encore mis à jour"
+                                val updated = remember(page.updatedAtMs) {
+                                    if (page.updatedAtMs > 0) {
+                                        "Mis à jour le " + java.time.Instant.ofEpochMilli(page.updatedAtMs)
+                                            .atZone(java.time.ZoneId.systemDefault())
+                                            .format(UPDATED_DATE_FORMAT)
+                                    } else "Pas encore mis à jour"
+                                }
                                 Row(
                                     modifier = Modifier
                                         .padding(top = com.ikko.aura.ui.components.designUnit() * 10f)
@@ -386,7 +391,7 @@ fun PlaylistScreen(
                     }
                 }
                 if (current.tracks.isEmpty() && current.unavailable.isEmpty()) {
-                    item(key = "empty") {
+                    item(key = "empty", contentType = "empty") {
                         Text(
                             text = if (isFavorites) "Touche le cœur dans le lecteur pour ajouter un titre ici"
                             else "Ajoute des titres à cette playlist depuis un album ou la bibliothèque",
@@ -398,7 +403,7 @@ fun PlaylistScreen(
                         )
                     }
                 }
-                itemsIndexed(current.tracks, key = { _, track -> track.id }) { index, track ->
+                itemsIndexed(current.tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                     Box(Modifier.heroRise(index, rows = true)) {
                     AlbumTrackRow(
                         number = index + 1,
@@ -438,7 +443,7 @@ fun PlaylistScreen(
                     )
                     }
                 }
-                items(current.unavailable, key = { "gone-${it.id}" }) { entry ->
+                items(current.unavailable, key = { "gone-${it.id}" }, contentType = { "unavailable" }) { entry ->
                     Box(Modifier.heroRise(9)) {
                         UnavailableTrackRow(entry, onRemove = { playlistDetailViewModel.removeTrack(entry.id) })
                     }
@@ -539,3 +544,7 @@ private fun RecoRowMenu(
         }
     }
 }
+
+/** "d MMMM" in French, for the line saying when a recommended playlist was made; built once, not per recomposition. */
+private val UPDATED_DATE_FORMAT: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.FRENCH)

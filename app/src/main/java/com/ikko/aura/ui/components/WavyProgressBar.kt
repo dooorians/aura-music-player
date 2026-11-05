@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ikko.aura.ui.theme.AuraColors
@@ -63,7 +64,8 @@ fun WavyProgressBar(
         }
     }
     val totalSec = safeDuration / 1000L
-    val height by animateDpAsState(
+    // Kept as a State and read in the layout phase below: a spring frame resizes the bar without recomposing it.
+    val height = animateDpAsState(
         targetValue = if (dragging) ACTIVE_HEIGHT else IDLE_HEIGHT,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -117,7 +119,12 @@ fun WavyProgressBar(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = edgeInset)
-                    .height(height),
+                    // Modifier.height(height.value), read at measure time rather than during composition.
+                    .layout { measurable, constraints ->
+                        val h = height.value.roundToPx().coerceIn(constraints.minHeight, constraints.maxHeight)
+                        val placeable = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    },
             ) {
                 val value = dragFraction ?: (positionMs().toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
                 val radius = CornerRadius(size.height / 2f)
@@ -136,27 +143,41 @@ fun WavyProgressBar(
                 }
             }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = edgeInset + 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = formatSeconds(displayedSec),
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
-                ),
-                color = accent.copy(alpha = 0.7f),
-            )
-            Text(
-                text = "-${formatSeconds((totalSec - displayedSec).coerceAtLeast(0L))}",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS,
-                ),
-                color = accent.copy(alpha = 0.7f),
-            )
-        }
+        ProgressTimes(
+            displayedSec = { displayedSec },
+            totalSec = totalSec,
+            color = accent,
+            edgeInset = edgeInset,
+        )
+    }
+}
+
+/**
+ * The elapsed and remaining times under the bar. Their own restart scope: the second ticking over recomposes these two
+ * texts alone, not the bar, its touch area and its canvas.
+ */
+@Composable
+private fun ProgressTimes(displayedSec: () -> Long, totalSec: Long, color: Color, edgeInset: Dp) {
+    val sec = displayedSec()
+    val labelStyle = MaterialTheme.typography.labelMedium
+    val style = remember(labelStyle) { labelStyle.copy(fontFeatureSettings = com.ikko.aura.ui.theme.TABULAR_NUMBERS) }
+    val ink = color.copy(alpha = 0.7f)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = edgeInset + 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = remember(sec) { formatSeconds(sec) },
+            style = style,
+            color = ink,
+        )
+        Text(
+            text = remember(sec, totalSec) { "-${formatSeconds((totalSec - sec).coerceAtLeast(0L))}" },
+            style = style,
+            color = ink,
+        )
     }
 }
 

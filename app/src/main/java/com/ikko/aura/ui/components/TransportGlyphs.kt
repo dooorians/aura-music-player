@@ -2,6 +2,7 @@ package com.ikko.aura.ui.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -18,8 +19,9 @@ internal const val CHASE_MS = 460
  */
 @Composable
 internal fun SkipGlyph(forward: Boolean, color: Color, progress: () -> Float, modifier: Modifier = Modifier) {
-    androidx.compose.foundation.Canvas(modifier) {
-        val t = progress()
+    // A Canvas (a Spacer drawing behind), with its geometry made once per size: the triangle, its stroke and the layer's
+    // paint are reused on every frame of the chase instead of being allocated three times a frame.
+    androidx.compose.foundation.layout.Spacer(modifier.drawWithCache {
         val h = size.height * 0.52f
         val w = h * 0.92f
         val slot = w * 0.94f
@@ -27,6 +29,14 @@ internal fun SkipGlyph(forward: Boolean, color: Color, progress: () -> Float, mo
         val cx = size.width / 2f
         val cy = size.height / 2f
         val dir = if (forward) 1f else -1f
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(-w / 2f, -h / 2f); lineTo(w / 2f, 0f); lineTo(-w / 2f, h / 2f); close()
+        }
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = corner * 2f, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        val layerBounds = androidx.compose.ui.geometry.Rect(-w, -h, w, h)
+        val layer = androidx.compose.ui.graphics.Paint()
+        onDrawBehind {
+        val t = progress()
         // Slots -1, 0 and 1 (the pair rests on 0 and 1, centred on 0.5), carried by t.
         for (i in -1..1) {
             val x = i + t
@@ -40,17 +50,16 @@ internal fun SkipGlyph(forward: Boolean, color: Color, progress: () -> Float, mo
                 translate(centreX, cy)
                 scale(scale * dir, scale, androidx.compose.ui.geometry.Offset.Zero)
             }) {
-                val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(-w / 2f, -h / 2f); lineTo(w / 2f, 0f); lineTo(-w / 2f, h / 2f); close()
-                }
                 drawIntoCanvas { canvas ->
-                    val layer = androidx.compose.ui.graphics.Paint().apply { this.alpha = alpha }
-                    canvas.saveLayer(androidx.compose.ui.geometry.Rect(-w, -h, w, h), layer)
+                    // The canvas keeps a copy of the paint with the layer it opens, so one paint serves every triangle.
+                    layer.alpha = alpha
+                    canvas.saveLayer(layerBounds, layer)
                     drawPath(path, color)
-                    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = corner * 2f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    drawPath(path, color, style = stroke)
                     canvas.restore()
                 }
             }
         }
-    }
+        }
+    })
 }

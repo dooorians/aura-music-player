@@ -1,7 +1,7 @@
 package com.ikko.aura.ui.components
 
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
@@ -22,12 +22,14 @@ import androidx.compose.ui.unit.dp
  * darkest and the ground stands out from it. Pulled in by under a dp, the ground is still all that shows
  * while a cover loads, and the edge of a cover is the cover's alone.
  */
-fun Modifier.groundFill(brush: Brush, shape: Shape, inset: Dp = GROUND_INSET): Modifier = drawBehind {
+fun Modifier.groundFill(brush: Brush, shape: Shape, inset: Dp = GROUND_INSET): Modifier = drawWithCache {
+    // The outline and its path are made once per size, not on every draw: a scrolling list redraws each cover's ground
+    // on every frame it moves.
     val i = inset.toPx()
     val inner = Size((size.width - 2 * i).coerceAtLeast(0f), (size.height - 2 * i).coerceAtLeast(0f))
     val outline = shape.createOutline(inner, layoutDirection, this)
     val path = Path().apply { addOutline(outline) }
-    translate(i, i) { drawPath(path, brush) }
+    onDrawBehind { translate(i, i) { drawPath(path, brush) } }
 }
 
 private val GROUND_INSET = 0.75.dp

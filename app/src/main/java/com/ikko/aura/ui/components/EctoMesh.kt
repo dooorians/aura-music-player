@@ -164,12 +164,13 @@ fun EctoMesh(palette: EctoPalette, modifier: Modifier = Modifier, drifting: Bool
                 scaleY = MESH_DOWN.toFloat()
             }
             .drawBehind {
-                val cols = arrayOf(m0, m1, m2, m3, m4)
                 if (shader != null && android.os.Build.VERSION.SDK_INT >= 33) {
-                    shader.update(size.width, size.height, MeshClock.seconds.floatValue, ground, cols)
+                    // Redrawn on every frame of the drift: the colours go in one by one (unboxed), so a frame allocates nothing.
+                    shader.update(size.width, size.height, MeshClock.seconds.floatValue, ground, m0, m1, m2, m3, m4)
                     drawRect(shader.brush)
                 } else {
                     // Before Android 13: the five colours as soft pools on the ground, still.
+                    val cols = arrayOf(m0, m1, m2, m3, m4)
                     drawRect(ground)
                     val w = size.width
                     MeshPoints.forEachIndexed { i, p ->
@@ -247,13 +248,15 @@ private class MeshShader {
         shader.setFloatUniform("M", mov)
     }
 
-    fun update(w: Float, h: Float, t: Float, ground: Color, c: Array<Color>) {
+    fun update(w: Float, h: Float, t: Float, ground: Color, c0: Color, c1: Color, c2: Color, c3: Color, c4: Color) {
         shader.setFloatUniform("RES", w, h)
         shader.setFloatUniform("T", t)
         shader.setFloatUniform("GROUND", ground.red, ground.green, ground.blue, 1f)
-        for (i in 0 until 5) {
-            cols[i * 4] = c[i].red; cols[i * 4 + 1] = c[i].green; cols[i * 4 + 2] = c[i].blue; cols[i * 4 + 3] = 1f
-        }
+        put(0, c0); put(1, c1); put(2, c2); put(3, c3); put(4, c4)
         shader.setFloatUniform("C", cols)
+    }
+
+    private fun put(i: Int, c: Color) {
+        cols[i * 4] = c.red; cols[i * 4 + 1] = c.green; cols[i * 4 + 2] = c.blue; cols[i * 4 + 3] = 1f
     }
 }

@@ -197,7 +197,7 @@ fun HomeScreen(
             contentPadding = PaddingValues(top = u * HOME_TOP, bottom = LocalPlayerPillHeight.current + u * 24f),
         ) {
             // The four albums played last, two by two.
-            itemsIndexed(recentPairs, key = { _, pair -> "recent_${pair.joinToString("_") { it.id.toString() }}" }) { row, pair ->
+            itemsIndexed(recentPairs, key = { _, pair -> "recent_${pair.joinToString("_") { it.id.toString() }}" }, contentType = { _, _ -> "recent_pair" }) { row, pair ->
                 if (row > 0) Spacer(Modifier.height(u * 18f))
                 Row(Modifier.padding(horizontal = u * 40f), horizontalArrangement = Arrangement.spacedBy(u * 20f)) {
                     pair.forEach { album ->
@@ -215,7 +215,7 @@ fun HomeScreen(
             }
 
             if (mixes.isNotEmpty()) {
-                item(key = "mixes_header_and_row") {
+                item(key = "mixes_header_and_row", contentType = "mixes") {
                     Spacer(Modifier.height(u * 54f))
                     Row(
                         Modifier.fillMaxWidth().height(u * 56f).padding(horizontal = u * 40f).heroRipple(fast = true),
@@ -263,7 +263,7 @@ fun HomeScreen(
             }
 
             // What is played again and what the external sources offer for it, in rows of the same form as the mixes.
-            items(state.sections, key = { it.id }) { section ->
+            items(state.sections, key = { it.id }, contentType = { "section" }) { section ->
                 HomeSectionBlock(
                     section = section,
                     navController = navController,

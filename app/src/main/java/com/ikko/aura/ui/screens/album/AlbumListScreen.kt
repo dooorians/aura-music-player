@@ -65,7 +65,7 @@ fun AlbumListScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(uiState.albums, key = { it.id }) { album ->
+                items(uiState.albums, key = { it.id }, contentType = { "album" }) { album ->
                     Column {
                         SquircleCard(
                             modifier = Modifier

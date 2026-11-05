@@ -14,6 +14,7 @@ package com.ikko.aura.data.lyrics
  * [endMs] the last one's end. Whole words are what the sweep needs — a
  * highlight that ran across "e" and "nough" separately reads as a stutter.
  */
+@androidx.compose.runtime.Immutable
 data class LyricWord(val startMs: Long, val endMs: Long, val text: String)
 
 /**
@@ -37,6 +38,7 @@ data class LyricWord(val startMs: Long, val endMs: Long, val text: String)
  * underneath the lead on its own clock. Never nested: a background line's own
  * [background] is always null.
  */
+@androidx.compose.runtime.Immutable
 data class LyricLine(
     val timeMs: Long,
     val text: String,

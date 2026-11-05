@@ -49,6 +49,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -283,22 +284,24 @@ private fun LyricsPanel(
                 .scrollTopBlur(topInset = statusBarTop) { 1_000_000f }
                 // The lines melt away under the status bar and above the foot instead of running into the clock and icons.
                 .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
+                // The mask depends on the size and the insets only: built once for them, not on each of the frames the
+                // sweep and the scrolling redraw this layer.
+                .drawWithCache {
                     val top = statusBarTop.toPx()
                     val bottom = navBarBottom.toPx()
                     val h = size.height.coerceAtLeast(1f)
-                    drawRect(
-                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            ((top + 12.dp.toPx()) / h).coerceIn(0f, 0.35f) to Color.Transparent,
-                            ((top + 76.dp.toPx()) / h).coerceIn(0f, 0.45f) to Color.Black,
-                            (1f - (bottom + 68.dp.toPx()) / h).coerceIn(0.55f, 1f) to Color.Black,
-                            (1f - (bottom + 8.dp.toPx()) / h).coerceIn(0.65f, 1f) to Color.Transparent,
-                            1f to Color.Transparent,
-                        ),
-                        blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                    val mask = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        ((top + 12.dp.toPx()) / h).coerceIn(0f, 0.35f) to Color.Transparent,
+                        ((top + 76.dp.toPx()) / h).coerceIn(0f, 0.45f) to Color.Black,
+                        (1f - (bottom + 68.dp.toPx()) / h).coerceIn(0.55f, 1f) to Color.Black,
+                        (1f - (bottom + 8.dp.toPx()) / h).coerceIn(0.65f, 1f) to Color.Transparent,
+                        1f to Color.Transparent,
                     )
+                    onDrawWithContent {
+                        drawContent()
+                        drawRect(brush = mask, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+                    }
                 },
             // Room above and below the first and last lines to reach the resting place, so the sung line is where the eye
             // expects it from the first line to the last.
@@ -309,7 +312,7 @@ private fun LyricsPanel(
                 end = 22.dp,
             ),
         ) {
-            itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
+            itemsIndexed(lines, key = { index, _ -> index }, contentType = { _, line -> if (line.isWordSynced) "line_words" else "line" }) { index, line ->
                 val isActive by remember(index) { derivedStateOf { activeIndex.intValue == index } }
 
                 val lineHero = com.ikko.aura.ui.components.LocalHero.current
