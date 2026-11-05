@@ -26,3 +26,9 @@
 -dontwarn javax.script.**
 -dontwarn javax.lang.model.**
 -dontwarn jdk.**
+
+# The playlist assistant's JNI bridge: llama_bridge.cpp exports Java_com_ikko_aura_ai_slm_LlamaBridge_* by name, so the
+# class and its native methods keep theirs.
+-keepclasseswithmembernames class com.ikko.aura.ai.slm.LlamaBridge {
+    native <methods>;
+}
