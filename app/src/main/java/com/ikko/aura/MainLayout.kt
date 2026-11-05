@@ -1156,10 +1156,12 @@ fun MainLayout() {
                     // whole: a transparent fade that does nothing but keep the page alive for as long.
                     val fromTabs = initialState.destination.route == AuraDestination.Tabs.route
                     val fromArtist = isArtistRoute(initialState.destination.route)
-                    if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist) &&
+                    // An album that opens its artist's page leaves the way an artist's page leaves for an album.
+                    val albumToArtist = isAlbumKind(initialState.destination.route) && isArtistRoute(targetState.destination.route)
+                    if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist || albumToArtist) &&
                         hero.matchesEntry(targetState.destination.route, targetState.arguments)
                     ) {
-                        if (fromArtist) {
+                        if (fromArtist || albumToArtist) {
                             fadeOut(tween(110, easing = androidx.compose.animation.core.FastOutLinearInEasing))
                         } else {
                             fadeOut(tween(HERO_KEEP_ALIVE_MS, easing = LinearEasing), targetAlpha = 0.999f)
@@ -1185,7 +1187,8 @@ fun MainLayout() {
                     }
                     // Back to the list: it is there, and each item comes back by itself from the one that was touched.
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
-                        isArtistRoute(targetState.destination.route)
+                        isArtistRoute(targetState.destination.route) ||
+                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route))
                     if (isAlbumRoute(initialState) && toHeroList &&
                         hero.matchesEntry(initialState.destination.route, initialState.arguments) &&
                         (hero.canClose || hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing)
@@ -1209,7 +1212,8 @@ fun MainLayout() {
                         else -> popExit()
                     }
                     val toHeroList = targetState.destination.route == AuraDestination.Tabs.route ||
-                        isArtistRoute(targetState.destination.route)
+                        isArtistRoute(targetState.destination.route) ||
+                        (isArtistRoute(initialState.destination.route) && isAlbumKind(targetState.destination.route))
                     if (returningToPlayer && (matchesClosing || isLyricsOrAlbum(initialState))) {
                         fadeOut(tween(PLAYER_RETURN_FADE_MS + 40, easing = LinearEasing), targetAlpha = 0.999f)
                     } else if (matchesClosing && hero.phase == com.ikko.aura.ui.components.HeroPhase.Closing && hero.scrolledFallbackClose) {

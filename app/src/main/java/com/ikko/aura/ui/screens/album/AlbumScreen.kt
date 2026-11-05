@@ -2,6 +2,7 @@ package com.ikko.aura.ui.screens.album
 
 import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.heroAnchor
 import com.ikko.aura.ui.components.coverArrival
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.suppressEdgeBackRipple
@@ -326,7 +327,12 @@ fun AlbumPageContent(
                     verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     item(key = "header", contentType = "header") {
+                        val firstTrack = uiState.tracks.firstOrNull()
+                        val streamedArtist = firstTrack != null && com.ikko.aura.source.ytm.YtmLibrary.isStreamed(firstTrack)
                         AlbumHeader(
+                            // The artist's page opens the way an album's does: the name travels, the page rises round it.
+                            artistTripKey = firstTrack?.let { if (streamedArtist) "artist:${it.artist}" else "artist:${it.artistId}" },
+                            artistTripAnyOfKind = streamedArtist,
                             onArtist = {
                                 uiState.tracks.firstOrNull()?.let { t ->
                                     navController.navigate(
@@ -624,6 +630,8 @@ private fun AlbumHeader(
     downloadSlot: @Composable () -> Unit = {},
     hasDownload: Boolean = false,
     onArtist: () -> Unit = {},
+    artistTripKey: String? = null,
+    artistTripAnyOfKind: Boolean = false,
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
@@ -661,6 +669,8 @@ private fun AlbumHeader(
             // An album of a source: the cover the trip carried stays, with the key it was drawn under while the page loaded. Switching
             // to the first song's own picture, under that song's key, drew the placeholder in between (normal, grey, normal).
             val keepTripCover = uiState.coverUri != null && uiState.tracks.firstOrNull()?.let(com.ikko.aura.source.ytm.YtmLibrary::isStreamed) == true
+            val artistAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+            val artistColor = androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f)
             AlbumArt(
                 uri = if (keepTripCover) uiState.coverUri else uiState.tracks.firstOrNull()?.artworkUri ?: uiState.coverUri,
                 contentDescription = uiState.title,
@@ -706,7 +716,32 @@ private fun AlbumHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .heroTarget(heroKey, isSub = true, text = com.ikko.aura.ui.components.HeroText(uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, androidx.compose.ui.graphics.lerp(accentInk, Color.White, 0.55f)))
-                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onArtist),
+                        .then(
+                            if (artistTripKey != null) Modifier.heroAnchor(artistTripKey, artistAnchor, com.ikko.aura.ui.components.HeroState.ROLE_TITLE)
+                            else Modifier,
+                        )
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {
+                                if (artistTripKey == null) {
+                                    onArtist()
+                                } else if (activeHero.begin(
+                                        key = artistTripKey,
+                                        uri = null,
+                                        cacheKey = null,
+                                        cover = com.ikko.aura.ui.components.HeroAnchor(),
+                                        radiusPx = 0f,
+                                        title = artistAnchor to com.ikko.aura.ui.components.HeroText(
+                                            uiState.artist.trim(), androidx.compose.ui.geometry.Rect.Zero, heroSubStyle, artistColor,
+                                        ),
+                                        sub = null,
+                                        drawCover = false,
+                                        anyOfKind = artistTripAnyOfKind,
+                                    )
+                                ) onArtist()
+                            },
+                        ),
                 )
                 if (uiState.loading) {
                     Box(Modifier.height(u * 40f).heroRise(0), contentAlignment = Alignment.CenterStart) { com.ikko.aura.ui.components.SkeletonBar(Modifier.fillMaxWidth(0.3f).height(u * 24f)) }
