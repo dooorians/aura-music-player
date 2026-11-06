@@ -7,6 +7,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -295,11 +296,6 @@ private fun HomeSectionBlock(
     resolveSong: suspend (com.ikko.aura.data.home.SectionAlbum) -> com.ikko.aura.data.model.Track?,
 ) {
     val u = designUnit()
-    // The radio of one artist whose long press asked to stop recommending them: confirmed before it is done.
-    var artistToBlock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val hero = LocalHero.current
     val ink = Color.White.copy(alpha = 0.62f)
     val soft = Color.White.copy(alpha = 0.42f)
     val coverShape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover
@@ -321,8 +317,22 @@ private fun HomeSectionBlock(
     }
     val lead = section.albums.first()
     Spacer(Modifier.height(u * 54f))
+    // The heading opens the page of everything the row holds, as a row of the settings opens its page: a trip from the heading, the
+    // rest of Home stepping back from it and coming back to it.
+    val hero = LocalHero.current
+    val allKey = com.ikko.aura.navigation.settingsTripKey("homesection/${section.id}")
+    val allAnchor = remember { HeroAnchor() }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = u * 40f).heroRipple(fast = true),
+        Modifier.fillMaxWidth().padding(horizontal = u * 40f).heroRipple(fast = true)
+            .heroAnchor(allKey, allAnchor)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                com.ikko.aura.ui.screens.settings.HomeSectionAll.section = section
+                if (hero.begin(
+                        key = allKey, uri = null, cacheKey = null, cover = allAnchor, radiusPx = 0f,
+                        title = null, sub = null, drawCover = false,
+                    )
+                ) navController.navigate(com.ikko.aura.navigation.AuraDestination.HomeSectionPattern.route(section.id)) { launchSingleTop = true }
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(u * 24f),
     ) {
@@ -356,6 +366,8 @@ private fun HomeSectionBlock(
                 )
             }
         }
+        // Where the heading leads: to the whole row, at the right edge.
+        Icon(CupertinoIcons.ChevronRight, contentDescription = null, tint = soft, modifier = Modifier.size(u * 40f))
     }
     Spacer(Modifier.height(u * 24f))
     val albumRows = remember(section.albums) { section.albums.chunked(com.ikko.aura.data.home.HomeSections.PER_ROW) }
@@ -364,171 +376,242 @@ private fun HomeSectionBlock(
         // Three by three, as the library's grid: tiles of 316 with 26 between them.
         Row(Modifier.padding(horizontal = u * 40f), horizontalArrangement = Arrangement.spacedBy(u * 26f)) {
             pair.forEach { item ->
-                val local = item.album
-                // An album of a source has no page key yet: it is given one of the kind, the page answers to it by its kind.
-                val heroKey = "album:" + (local?.id?.toString() ?: "ext-${item.key}")
-                val coverAnchor = remember { HeroAnchor() }
-                val titleAnchor = remember { HeroAnchor() }
-                val subAnchor = remember { HeroAnchor() }
-                // The finger going down on an album of a source: its page is found and read already, so the tap opens it at once.
-                val warmOnTouch = Modifier.pointerInput(item.key) {
-                    if (local != null || item.isArtist || item.playsItems) return@pointerInput
-                    awaitPointerEventScope {
-                        while (true) {
-                            awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            scope.launch { (item.ref ?: resolveRef(item))?.let { prepareRef(it) } }
-                            waitForUpOrCancellation(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                        }
-                    }
-                }
-                val onItemClick: () -> Unit = {
-                    if (item.isArtist) {
-                        navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.title))
-                    } else if (local != null) {
-                        hero.begin(
-                            key = heroKey, uri = local.artworkUri, cacheKey = local.id.toString(), cover = coverAnchor,
-                            radiusPx = with(density) { 8.dp.toPx() },
-                            title = titleAnchor to HeroText(local.title, Rect.Zero, titleStyle, ink),
-                            sub = subAnchor to HeroText(local.artist, Rect.Zero, subStyle, soft),
-                            sizeDp = u * 316f,
-                            visibleFromY = with(density) { (u * 236f).toPx() },
-                            anyOfKind = local.remoteId != null,
-                        )
-                        navController.navigate(local.route())
-                    } else if (item.playsItems) {
-                        // A radio or a mood: its songs play, there is no page to open.
-                        val songs = item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }
-                        val radioOf = item.blockableArtist
-                        // A radio of one artist is that artist's own songs, with a little of what is close to them.
-                        if (radioOf != null) playerViewModel.startArtistRadio(radioOf, songs, section.id)
-                        else playerViewModel.playQueue(songs, 0, context = section.id)
-                    } else {
-                        // An album of a source opens its page, and nothing else. Its page is the one the source gave, or found from its title and
-                        // its artist; either way the trip of the cover and the words goes with it, there and back.
-                        fun openOnline(ref: String) {
-                            hero.begin(
-                                key = heroKey, uri = item.artworkUrl.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
-                                cacheKey = "sec:${item.key}", cover = coverAnchor,
-                                radiusPx = with(density) { 8.dp.toPx() },
-                                title = titleAnchor to HeroText(item.title, Rect.Zero, titleStyle, ink),
-                                sub = subAnchor to HeroText(item.artist, Rect.Zero, subStyle, soft),
-                                sizeDp = u * 316f,
-                                visibleFromY = with(density) { (u * 236f).toPx() },
-                                anyOfKind = true,
-                            )
-                            navController.navigate(com.ikko.aura.navigation.streamedAlbumRoute(ref, online = true))
-                        }
-                        val directRef = item.ref
-                        if (directRef != null) {
-                            openOnline(directRef)
-                        } else {
-                            scope.launch {
-                                val ref = resolveRef(item)
-                                if (ref != null) {
-                                    openOnline(ref)
-                                } else if (item.items.isNotEmpty()) {
-                                    // No page exists for it (a source that gives none): its songs are all there is to open.
-                                    playerViewModel.playQueue(item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }, 0, context = section.id)
-                                } else {
-                                    // No album page on the source and no songs came with the tile: a single or a remix has none. Its song, if the source has
-                                    // it, is what to open; failing that, the artist's page, since a tap that does nothing reads as a broken app.
-                                    val song = resolveSong(item)
-                                    if (song != null) playerViewModel.playQueue(listOf(song), 0, context = section.id)
-                                    else if (item.artist.isNotBlank()) navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.artist))
-                                }
-                            }
-                        }
-                    }
-                }
-                val onItemLongClick: () -> Unit = {
-                    if (item.blockableArtist != null) artistToBlock = item.blockableArtist
-                    else if (local != null) onLongPress(LibraryContextTarget.AlbumTarget(local, tracksOf(local.id)))
-                    else if (!item.playsItems && !item.isArtist) scope.launch {
-                        // An album of a source: the menu acts on its songs, fetched when an action needs them.
-                        val ref = resolveRef(item)
-                        val own = item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }
-                        if (ref != null || own.isNotEmpty()) {
-                            onLongPress(LibraryContextTarget.RemoteAlbumTarget(ref, item.title, item.artist, item.artworkUrl.takeIf { u -> u.isNotEmpty() }, own))
-                        }
-                    }
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .heroRipple(heroKey)
-                        .then(warmOnTouch)
-                        .combinedClickable(onClick = onItemClick, onLongClick = onItemLongClick),
-                    verticalArrangement = Arrangement.spacedBy(u * 12f),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .heroAnchor(heroKey, coverAnchor)
-                            .clip(coverShape),
-                    ) {
-                        if (item.isArtist) {
-                            // The artist's own photo, never an album's cover (it would not look like them); a plain disc with
-                            // their initial while the photo is not known.
-                            val photo = com.ikko.aura.data.rememberArtistImage(item.title)
-                            if (photo != null) {
-                                AlbumArt(
-                                    uri = photo, contentDescription = item.title, shape = CircleShape, modifier = Modifier.fillMaxSize(),
-                                    targetSizeDp = u * 316f, cacheKey = photo.toString(),
-                                )
-                            } else {
-                                Box(Modifier.fillMaxSize().clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        item.title.take(1).uppercase(), color = Color.White.copy(alpha = 0.5f),
-                                        style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = designSp(110f)),
-                                    )
-                                }
-                            }
-                        } else if (item.artist == "Station") {
-                            RadioStationTile(
-                                item = item,
-                                targetSizeDp = u * 316f,
-                                shape = coverShape,
-                            )
-                        } else {
-                            AlbumArt(
-                                uri = local?.artworkUri ?: item.effectiveCover()?.let(android.net.Uri::parse),
-                                contentDescription = item.title, shape = coverShape, modifier = Modifier.fillMaxSize(),
-                                targetSizeDp = u * 316f, cacheKey = local?.id?.toString() ?: "sec:${item.key}",
-                            )
-                        }
-                    }
-                    Column {
-                        val isStation = item.artist == "Station"
-                        Text(
-                            item.title, color = ink, style = titleStyle,
-                            maxLines = if (isStation) 2 else 1,
-                            softWrap = isStation,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.heroAnchor(heroKey, titleAnchor, HeroState.ROLE_TITLE),
-                        )
-                        if (isStation) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(u * 8f),
-                                modifier = Modifier.heroAnchor(heroKey, subAnchor, HeroState.ROLE_SUB),
-                            ) {
-                                StationWaveIcon(color = soft, size = u * 28f)
-                                Text(
-                                    "Station", color = soft, style = subStyle,
-                                    maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        } else {
-                            Text(
-                                item.artist, color = soft, style = subStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.heroAnchor(heroKey, subAnchor, HeroState.ROLE_SUB),
-                            )
-                        }
-                    }
-                }
+                SectionTile(
+                    item = item, section = section, modifier = Modifier.weight(1f), navController = navController,
+                    playerViewModel = playerViewModel, resolveRef = resolveRef, onLongPress = onLongPress, tracksOf = tracksOf,
+                    onBlockArtist = onBlockArtist, prepareRef = prepareRef, resolveSong = resolveSong,
+                )
             }
             repeat(com.ikko.aura.data.home.HomeSections.PER_ROW - pair.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+/**
+ * One tile of a row of Home (an album of the library, an album of a source, an artist, a radio): its cover, its title and its
+ * line, what a tap and a long press do, and the trip of the cover and the words to the page it opens. Shared by the rows of
+ * Home and by the page of all the albums of a row ([pageKey]: the hero page the tile lives in, when it is not Home itself).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun SectionTile(
+    item: com.ikko.aura.data.home.SectionAlbum,
+    section: com.ikko.aura.data.home.HomeSection,
+    modifier: Modifier,
+    navController: NavHostController,
+    playerViewModel: PlayerViewModel,
+    resolveRef: suspend (com.ikko.aura.data.home.SectionAlbum) -> String?,
+    onLongPress: (LibraryContextTarget) -> Unit,
+    tracksOf: (Long) -> List<com.ikko.aura.data.model.Track>,
+    onBlockArtist: (String) -> Unit,
+    prepareRef: suspend (String) -> Unit,
+    resolveSong: suspend (com.ikko.aura.data.home.SectionAlbum) -> com.ikko.aura.data.model.Track?,
+    pageKey: String? = null,
+) {
+    val u = designUnit()
+    // The radio of one artist whose long press asked to stop recommending them: confirmed before it is done.
+    var artistToBlock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val hero = LocalHero.current
+    val ink = Color.White.copy(alpha = 0.62f)
+    val soft = Color.White.copy(alpha = 0.42f)
+    val coverShape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover
+    val titleFontSize = designSp(34f)
+    val titleLineHeight = designSp(42f)
+    val titleStyle = remember(titleFontSize, titleLineHeight) {
+        TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = titleFontSize, lineHeight = titleLineHeight)
+    }
+    val subFontSize = designSp(30f)
+    val subLineHeight = designSp(38f)
+    val subStyle = remember(subFontSize, subLineHeight) {
+        TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.SemiBold, fontSize = subFontSize, lineHeight = subLineHeight)
+    }
+    val local = item.album
+    // An album of a source has no page key yet: it is given one of the kind, the page answers to it by its kind.
+    val heroKey = "album:" + (local?.id?.toString() ?: "ext-${item.key}")
+    val coverAnchor = remember { HeroAnchor() }
+    val titleAnchor = remember { HeroAnchor() }
+    val subAnchor = remember { HeroAnchor() }
+    // The finger going down on an album of a source: its page is found and read already, so the tap opens it at once.
+    val warmOnTouch = Modifier.pointerInput(item.key) {
+        if (local != null || item.isArtist || item.playsItems) return@pointerInput
+        awaitPointerEventScope {
+            while (true) {
+                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                scope.launch { (item.ref ?: resolveRef(item))?.let { prepareRef(it) } }
+                waitForUpOrCancellation(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            }
+        }
+    }
+    // One tap opens one page. A tile of a source is looked up before it opens (a second or two), and a finger that taps again meanwhile
+    // used to start a second page, and a third, each on top of the other with a trip of its own. Taps are ignored while a page is
+    // being opened, and once this page is no longer the one in front.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var opening by remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(lifecycleOwner) {
+        // Back in front (the page it opened has been left): it can open another.
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) { opening = false }
+    }
+    val onItemClick: () -> Unit = click@{
+        if (opening || !lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@click
+        if (item.isArtist) {
+            opening = true
+            navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.title))
+        } else if (local != null) {
+            if (hero.begin(
+                    key = heroKey, uri = local.artworkUri, cacheKey = local.id.toString(), cover = coverAnchor,
+                    radiusPx = with(density) { 8.dp.toPx() },
+                    title = titleAnchor to HeroText(local.title, Rect.Zero, titleStyle, ink),
+                    sub = subAnchor to HeroText(local.artist, Rect.Zero, subStyle, soft),
+                    sizeDp = u * 316f,
+                    visibleFromY = with(density) { (u * 236f).toPx() },
+                    anyOfKind = local.remoteId != null,
+                )
+            ) {
+                opening = true
+                navController.navigate(local.route())
+            }
+        } else if (item.playsItems) {
+            // A radio or a mood: its songs play, there is no page to open.
+            val songs = item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }
+            val radioOf = item.blockableArtist
+            // A radio of one artist is that artist's own songs, with a little of what is close to them.
+            if (radioOf != null) playerViewModel.startArtistRadio(radioOf, songs, section.id)
+            else playerViewModel.playQueue(songs, 0, context = section.id)
+        } else {
+            // An album of a source opens its page, and nothing else. Its page is the one the source gave, or found from its title and
+            // its artist; either way the trip of the cover and the words goes with it, there and back.
+            var went = false
+            fun openOnline(ref: String) {
+                if (hero.begin(
+                        key = heroKey, uri = item.artworkUrl.takeIf { it.isNotEmpty() }?.let(android.net.Uri::parse),
+                        cacheKey = "sec:${item.key}", cover = coverAnchor,
+                        radiusPx = with(density) { 8.dp.toPx() },
+                        title = titleAnchor to HeroText(item.title, Rect.Zero, titleStyle, ink),
+                        sub = subAnchor to HeroText(item.artist, Rect.Zero, subStyle, soft),
+                        sizeDp = u * 316f,
+                        visibleFromY = with(density) { (u * 236f).toPx() },
+                        anyOfKind = true,
+                    )
+                ) {
+                    went = true
+                    navController.navigate(com.ikko.aura.navigation.streamedAlbumRoute(ref, online = true))
+                }
+            }
+            opening = true
+            val directRef = item.ref
+            if (directRef != null) {
+                openOnline(directRef)
+                if (!went) opening = false
+            } else {
+                scope.launch {
+                    val ref = resolveRef(item)
+                    if (ref != null) {
+                        openOnline(ref)
+                    } else if (item.items.isNotEmpty()) {
+                        // No page exists for it (a source that gives none): its songs are all there is to open.
+                        playerViewModel.playQueue(item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }, 0, context = section.id)
+                    } else {
+                        // No album page on the source and no songs came with the tile: a single or a remix has none. Its song, if the source has
+                        // it, is what to open; failing that, the artist's page, since a tap that does nothing reads as a broken app.
+                        val song = resolveSong(item)
+                        if (song != null) playerViewModel.playQueue(listOf(song), 0, context = section.id)
+                        else if (item.artist.isNotBlank()) {
+                            went = true
+                            navController.navigate(com.ikko.aura.navigation.AuraDestination.YtmArtistPattern.route(item.artist))
+                        }
+                    }
+                    // Nothing was opened (songs played, or nothing found): the tile can be tapped again.
+                    if (!went) opening = false
+                }
+            }
+        }
+    }
+    val onItemLongClick: () -> Unit = {
+        if (item.blockableArtist != null) artistToBlock = item.blockableArtist
+        else if (local != null) onLongPress(LibraryContextTarget.AlbumTarget(local, tracksOf(local.id)))
+        else if (!item.playsItems && !item.isArtist) scope.launch {
+            // An album of a source: the menu acts on its songs, fetched when an action needs them.
+            val ref = resolveRef(item)
+            val own = item.items.map { with(com.ikko.aura.reco.RecoItemTracks) { it.toTrack() } }
+            if (ref != null || own.isNotEmpty()) {
+                onLongPress(LibraryContextTarget.RemoteAlbumTarget(ref, item.title, item.artist, item.artworkUrl.takeIf { u -> u.isNotEmpty() }, own))
+            }
+        }
+    }
+    Column(
+        modifier
+            .heroRipple(heroKey, pageKey = pageKey)
+            .then(warmOnTouch)
+            .combinedClickable(onClick = onItemClick, onLongClick = onItemLongClick),
+        verticalArrangement = Arrangement.spacedBy(u * 12f),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .heroAnchor(heroKey, coverAnchor)
+                .clip(coverShape),
+        ) {
+            if (item.isArtist) {
+                // The artist's own photo, never an album's cover (it would not look like them); a plain disc with
+                // their initial while the photo is not known.
+                val photo = com.ikko.aura.data.rememberArtistImage(item.title)
+                if (photo != null) {
+                    AlbumArt(
+                        uri = photo, contentDescription = item.title, shape = CircleShape, modifier = Modifier.fillMaxSize(),
+                        targetSizeDp = u * 316f, cacheKey = photo.toString(),
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                        Text(
+                            item.title.take(1).uppercase(), color = Color.White.copy(alpha = 0.5f),
+                            style = TextStyle(fontFamily = AuraFontFamily, fontWeight = FontWeight.ExtraBold, fontSize = designSp(110f)),
+                        )
+                    }
+                }
+            } else if (item.artist == "Station") {
+                RadioStationTile(
+                    item = item,
+                    targetSizeDp = u * 316f,
+                    shape = coverShape,
+                )
+            } else {
+                AlbumArt(
+                    uri = local?.artworkUri ?: item.effectiveCover()?.let(android.net.Uri::parse),
+                    contentDescription = item.title, shape = coverShape, modifier = Modifier.fillMaxSize(),
+                    targetSizeDp = u * 316f, cacheKey = local?.id?.toString() ?: "sec:${item.key}",
+                )
+            }
+        }
+        Column {
+            val isStation = item.artist == "Station"
+            Text(
+                item.title, color = ink, style = titleStyle,
+                maxLines = if (isStation) 2 else 1,
+                softWrap = isStation,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.heroAnchor(heroKey, titleAnchor, HeroState.ROLE_TITLE),
+            )
+            if (isStation) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(u * 8f),
+                    modifier = Modifier.heroAnchor(heroKey, subAnchor, HeroState.ROLE_SUB),
+                ) {
+                    StationWaveIcon(color = soft, size = u * 28f)
+                    Text(
+                        "Station", color = soft, style = subStyle,
+                        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Text(
+                    item.artist, color = soft, style = subStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.heroAnchor(heroKey, subAnchor, HeroState.ROLE_SUB),
+                )
+            }
         }
     }
     artistToBlock?.let { artist ->

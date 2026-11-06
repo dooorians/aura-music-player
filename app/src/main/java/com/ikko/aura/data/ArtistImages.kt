@@ -413,3 +413,19 @@ fun rememberArtistImage(name: String): Uri? {
     val url by produceState(images.peek(name), name) { value = images.urlFor(name) }
     return url?.let(Uri::parse)
 }
+
+/** An artist's photo and whether the lookup is over: a null [uri] with [resolved] true is an artist that has none. */
+data class ArtistImageState(val uri: Uri?, val resolved: Boolean)
+
+/** Like [rememberArtistImage], but says when the answer is final, so a page can keep the photo's place until then and no longer. */
+@Composable
+fun rememberArtistImageState(name: String): ArtistImageState {
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val images = androidx.compose.runtime.remember(context) {
+        dagger.hilt.EntryPoints.get(context, ArtistImagesEntryPoint::class.java).artistImages()
+    }
+    val state by produceState(images.peek(name).let { ArtistImageState(it?.let(Uri::parse), it != null) }, name) {
+        value = ArtistImageState(images.urlFor(name)?.let(Uri::parse), true)
+    }
+    return state
+}

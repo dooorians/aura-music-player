@@ -17,6 +17,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -137,31 +145,73 @@ private fun SourceSwitch(
     activeInk: Color,
 ) {
     val u = designUnit()
-    Row(
+    // One pill for the active side, that slides from a segment to the other (and not a fill that fades out of one and into the
+    // other). Where each segment is, relative to the switch, is measured as they are laid out.
+    var origin by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var onlineX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var onlineW by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var localX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var localW by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val pillX = remember { androidx.compose.animation.core.Animatable(0f) }
+    val pillW = remember { androidx.compose.animation.core.Animatable(0f) }
+    val placed = remember { BooleanArray(1) }
+    androidx.compose.runtime.LaunchedEffect(online, onlineX, onlineW, localX, localW) {
+        if (onlineW <= 0f || localW <= 0f) return@LaunchedEffect
+        val x = if (online) onlineX else localX
+        val w = if (online) onlineW else localW
+        if (!placed[0]) {
+            // First time: it is already where it belongs.
+            pillX.snapTo(x); pillW.snapTo(w); placed[0] = true
+        } else {
+            val spec = androidx.compose.animation.core.tween<Float>(170, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+            kotlinx.coroutines.coroutineScope {
+                launch { pillX.animateTo(x, spec) }
+                launch { pillW.animateTo(w, spec) }
+            }
+        }
+    }
+    Box(
         modifier = Modifier
             .height(u * BUTTON_U)
             .glassSurface(CircleShape)
             .clip(CircleShape)
-            .padding(u * 7f),
-        verticalAlignment = Alignment.CenterVertically,
+            .onGloballyPositioned { origin = it.positionInRoot().x },
     ) {
-        Segment("En ligne", selected = online, enabled = onlineAvailable, fill = activeFill, ink = activeInk) { onSource(true) }
-        Segment("Local", selected = !online, enabled = localAvailable, fill = activeFill, ink = activeInk) { onSource(false) }
+        if (pillW.value > 0f) {
+            val pillHeight = u * (BUTTON_U - 14f)
+            Box(
+                Modifier
+                    .offset { androidx.compose.ui.unit.IntOffset(pillX.value.roundToInt(), (u * 7f).roundToPx()) }
+                    .size(width = with(androidx.compose.ui.platform.LocalDensity.current) { pillW.value.toDp() }, height = pillHeight)
+                    .clip(CircleShape)
+                    .background(activeFill),
+            )
+        }
+        Row(
+            modifier = Modifier.height(u * BUTTON_U).padding(u * 7f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Segment(
+                "En ligne", selected = online, enabled = onlineAvailable, ink = activeInk,
+                modifier = Modifier.onGloballyPositioned { onlineX = it.positionInRoot().x - origin; onlineW = it.size.width.toFloat() },
+            ) { onSource(true) }
+            Segment(
+                "Local", selected = !online, enabled = localAvailable, ink = activeInk,
+                modifier = Modifier.onGloballyPositioned { localX = it.positionInRoot().x - origin; localW = it.size.width.toFloat() },
+            ) { onSource(false) }
+        }
     }
 }
 
 @Composable
-private fun Segment(label: String, selected: Boolean, enabled: Boolean, fill: Color, ink: Color, onClick: () -> Unit) {
+private fun Segment(label: String, selected: Boolean, enabled: Boolean, ink: Color, modifier: Modifier, onClick: () -> Unit) {
     val u = designUnit()
-    // Read while drawing: the fill's fade redraws the segment, it does not recompose it.
-    val background = animateColorAsState(if (selected) fill else Color.Transparent, label = "segment-fill")
     val text by animateColorAsState(if (selected) ink else Color.White.copy(alpha = 0.78f), label = "segment-ink")
     Box(
-        modifier = Modifier
+        modifier = modifier
             .height(u * (BUTTON_U - 14f))
             .clip(CircleShape)
-            .drawBehind { drawRect(background.value) }
-            .alpha(if (enabled) 1f else 0.4f)
+            .alpha(if (enabled) 1f else 0.3f)
             .clickable(enabled = enabled && !selected, onClick = onClick)
             .padding(horizontal = u * 30f),
         contentAlignment = Alignment.Center,

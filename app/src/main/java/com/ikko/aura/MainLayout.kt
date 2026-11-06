@@ -1162,7 +1162,10 @@ fun MainLayout() {
                     val albumToArtist = isAlbumKind(initialState.destination.route) && isArtistRoute(targetState.destination.route)
                     // A settings page that opens another one (the hub opens its pages, a page opens its menus) leaves the same way.
                     val settingsToSettings = com.ikko.aura.navigation.isSettingsPageRoute(initialState.destination.route) &&
-                        com.ikko.aura.navigation.isSettingsPageRoute(targetState.destination.route)
+                        (com.ikko.aura.navigation.isSettingsPageRoute(targetState.destination.route) ||
+                            // The page of all an artist's releases opens albums: it leaves for them as an artist's page does.
+                            ((initialState.destination.route.orEmpty().startsWith("releases/") || initialState.destination.route.orEmpty().startsWith("homesection/")) &&
+                                isAlbumKind(targetState.destination.route)))
                     if (hero.armed && isAlbumRoute(targetState) && (fromTabs || fromArtist || albumToArtist || settingsToSettings) &&
                         hero.matchesEntry(targetState.destination.route, targetState.arguments)
                     ) {
@@ -1210,6 +1213,10 @@ fun MainLayout() {
                     val matchesClosing = !albumOverAlbum && isHeroPageRoute(initialState.destination.route) &&
                         hero.matchesEntry(initialState.destination.route, initialState.arguments)
                     if (matchesClosing && hero.canClose) hero.startClosing()
+                    // Left before the return of the page above it ended: it is closed as soon as that return is over.
+                    else if (!matchesClosing && !albumOverAlbum && isHeroPageRoute(initialState.destination.route)) {
+                        hero.closeParentAfterReturn(initialState.destination.route, initialState.arguments)
+                    }
                     val returningToPlayer = isSheet(targetState) || isUnderPlayer(targetState)
                     val base: ExitTransition = when {
                         isSheet(initialState) -> AuraMotion.sheetExit
@@ -1273,6 +1280,26 @@ fun MainLayout() {
                     }
                 }
                 composable(AuraDestination.Equalizer.route) { UnderSheet { EqualizerScreen(navController) } }
+                composable(AuraDestination.RankingPattern.route) {
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { com.ikko.aura.ui.screens.settings.RankingScreen(navController, playerViewModel) }
+                    }
+                }
+                composable(AuraDestination.HomeSectionPattern.route) {
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { com.ikko.aura.ui.screens.settings.HomeSectionScreen(navController, playerViewModel) }
+                    }
+                }
+                composable(AuraDestination.ReleasesPattern.route) {
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { com.ikko.aura.ui.screens.settings.ReleasesScreen(navController, playerViewModel) }
+                    }
+                }
+                composable(AuraDestination.SimilarPattern.route) {
+                    CompositionLocalProvider(com.ikko.aura.ui.components.LocalEctoPalette provides ectoPalette) {
+                        UnderSheet { com.ikko.aura.ui.screens.settings.SimilarArtistsScreen(navController) }
+                    }
+                }
                 composable(AuraDestination.LikedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.LikedArtistsScreen(navController) } }
                 composable(AuraDestination.BlockedArtists.route) { UnderSheet { com.ikko.aura.ui.screens.settings.BlockedArtistsScreen(navController) } }
                 composable(AuraDestination.TastePicker.route) { UnderSheet { com.ikko.aura.ui.screens.taste.TastePickerScreen(navController) } }

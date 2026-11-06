@@ -702,7 +702,7 @@ private fun LibraryTrackRow(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryListRow(
+internal fun LibraryListRow(
     coverUri: android.net.Uri?, coverKey: String, coverDescription: String?,
     title: String, subtitle: String, trailingText: String?,
     playing: Boolean, accent: Color, compact: Boolean,
@@ -844,6 +844,50 @@ private fun AlbumGrid(
         ) {
             itemsIndexed(albums, key = { _, album -> album.id }, contentType = { _, _ -> if (isList) "album_row" else "album_cell" }) { albumIndex, album ->
                 Box(Modifier.tabStagger(albumIndex, 12, 300, risePx = 16f, baseMs = 0)) {
+                    AlbumGridCell(album, isList, columns, navController, onAlbumLongPress)
+                }
+            }
+        }
+    }
+}
+
+/** One album of the album grid, as the library draws it: a row in the list layout, a cover with its title and artist in the grids. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun AlbumGridCell(
+    album: Album,
+    isList: Boolean,
+    columns: Int,
+    navController: NavHostController,
+    onAlbumLongPress: (Album) -> Unit,
+    /** The hero page this grid lives in, when it is not a list of the library's own: its cells then stay while the trip that came to it rests. */
+    pageKey: String? = null,
+) {
+    val u = com.ikko.aura.ui.components.designUnit()
+    val coverShape = com.ikko.aura.ui.theme.AuraShapes.AlbumCover
+    val titleFontSize = com.ikko.aura.ui.components.designSp(34f)
+    val titleLineHeight = com.ikko.aura.ui.components.designSp(42f)
+    val artistFontSize = com.ikko.aura.ui.components.designSp(30f)
+    val artistLineHeight = com.ikko.aura.ui.components.designSp(38f)
+    val titleStyle = remember(titleFontSize, titleLineHeight) {
+        androidx.compose.ui.text.TextStyle(
+            fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+            color = LibInk,
+            fontSize = titleFontSize,
+            lineHeight = titleLineHeight,
+            fontWeight = FontWeight.ExtraBold,
+        )
+    }
+    val artistStyle = remember(artistFontSize, artistLineHeight) {
+        androidx.compose.ui.text.TextStyle(
+            fontFamily = com.ikko.aura.ui.theme.AuraFontFamily,
+            color = LibMuted,
+            fontSize = artistFontSize,
+            lineHeight = artistLineHeight,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    val targetArtDp = if (columns == 2) 260.dp else 180.dp
                 if (isList) {
                     AlbumListItem(
                         album = album,
@@ -859,7 +903,7 @@ private fun AlbumGrid(
                     val subAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
                     val tileDensity = androidx.compose.ui.platform.LocalDensity.current
                     Column(
-                        modifier = Modifier.heroRipple(heroKey),
+                        modifier = Modifier.heroRipple(heroKey, pageKey = pageKey),
                         verticalArrangement = Arrangement.spacedBy(u * 12f),
                     ) { // 316 px cover, 12 px under it
                         Box(
@@ -914,10 +958,6 @@ private fun AlbumGrid(
                         }
                     }
                 }
-                }
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

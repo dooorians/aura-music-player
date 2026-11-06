@@ -2,6 +2,7 @@ package com.ikko.aura.ui.screens.album
 
 import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.arrivesAfterLoading
 import com.ikko.aura.ui.components.heroAnchor
 import com.ikko.aura.ui.components.heroRipple
 import com.ikko.aura.ui.components.coverArrival
@@ -239,6 +240,10 @@ fun AlbumPageContent(
     var onlineTracks by remember { mutableStateOf<List<Track>?>(null) }
     val localInput = uiState
     val uiState = if (streamed == null && showOnline) onlineTracks?.let { localInput.copy(tracks = it) } ?: localInput else localInput
+    // A page that opened as placeholders: what comes in once it has loaded arrives softly, in the places the placeholders held.
+    val beganLoading = remember { uiState.loading }
+    val loadedAt = remember { LongArray(1) }
+    if (beganLoading && !uiState.loading && loadedAt[0] == 0L) loadedAt[0] = System.nanoTime()
     val knownRef = localInput.tracks.firstNotNullOfOrNull { it.remoteAlbumId }
     val fullAlbum: (() -> Unit)? = when {
         streamed != null -> streamed.onShowFullAlbum
@@ -409,7 +414,7 @@ fun AlbumPageContent(
                         }
                     }
                     itemsIndexed(uiState.tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
-                        Box(Modifier.heroRipple(pageKey = "album:").heroRise(index, rows = true)) {
+                        Box(Modifier.heroRipple(pageKey = "album:").heroRise(index, rows = true).arrivesAfterLoading(index, loadedAt, beganLoading)) {
                         AlbumTrackRow(
                             number = index + 1,
                             track = track,
@@ -637,6 +642,10 @@ private fun AlbumHeader(
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val meta = remember(uiState.tracks, fileTags) { albumMeta(uiState.tracks, fileTags) }
+    // What the header's line of facts shows once the page has loaded arrives softly where its placeholder was.
+    val beganLoading = remember { uiState.loading }
+    val loadedAt = remember { LongArray(1) }
+    if (beganLoading && !uiState.loading && loadedAt[0] == 0L) loadedAt[0] = System.nanoTime()
 
     // As the design: the cover on the left, the title / artist (in the accent) / count beside it, then one row of actions.
     Column(
@@ -758,7 +767,7 @@ private fun AlbumHeader(
                     lineHeight = com.ikko.aura.ui.components.designSp(40f),
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
-                    modifier = Modifier.heroRise(0),
+                    modifier = Modifier.heroRise(0).arrivesAfterLoading(0, loadedAt, beganLoading),
                 )
               }
             }

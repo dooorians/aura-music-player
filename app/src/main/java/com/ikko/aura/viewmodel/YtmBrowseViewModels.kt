@@ -53,6 +53,12 @@ data class YtmArtistState(
     val types: Map<String, com.ikko.aura.reco.authority.ReleaseType> = emptyMap(),
     /** The year each album of [albums] came out, by its id, when the discography says. */
     val years: Map<String, Int> = emptyMap(),
+    /** The album each song of [tracks] is on, by the song's id, as the page finds them on the source. */
+    val albumOf: Map<String, String> = emptyMap(),
+    /** The whole line under each of the first songs ("Album - Single · 2026"), by the song's id, when the catalogue gave it with the page. */
+    val subtitleOf: Map<String, String> = emptyMap(),
+    /** Artists close to this one, the closest first. */
+    val similar: List<SimilarArtist> = emptyList(),
 )
 
 @HiltViewModel
@@ -101,7 +107,14 @@ class YtmAlbumViewModel @Inject constructor(
         .mapLatest { track -> track?.let { AlbumPage(buildAlbumTheme(context, it), FileTags()) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    init { load() }
+    init {
+        load()
+        // The "Local" side opens as soon as a song of this album is on the device (downloaded), and closes when the last one goes:
+        // it is not worked out once, when the page opens.
+        viewModelScope.launch {
+            library.observeDoneKeys().collect { _hasLocal.value = library.downloadedOfAlbum(albumId).isNotEmpty() }
+        }
+    }
 
     fun toggleFavorite() {
         _state.value.tracks.firstOrNull()?.let { favoritesStore.toggle(it.albumId) }
@@ -160,16 +173,17 @@ class YtmArtistViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     client: YtmClient,
     discographies: com.ikko.aura.reco.authority.ArtistDiscographies,
+    deezer: com.ikko.aura.data.deezer.DeezerClient,
 ) : ViewModel() {
     private val name: String = savedStateHandle.get<String>("name").orEmpty()
-    private val page = OnlineArtistPage(name, client, discographies, viewModelScope)
+    private val page = OnlineArtistPage(name, client, discographies, viewModelScope, deezer)
     val state: StateFlow<YtmArtistState> = page.state
 
     /** The same state a local artist page is drawn from. */
     val uiState: StateFlow<ArtistUiState> = state.map { s -> artistUiStateOf(s) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ArtistUiState(name = name))
+        .stateIn(viewModelScope, SharingStarted.Eagerly, artistUiStateOf(page.state.value))
 
-    init { load() }
+    init { page.start() }
 
     fun load() = page.load()
 }
@@ -189,5 +203,5 @@ internal fun artistUiStateOf(s: YtmArtistState): ArtistUiState {
     val (small, full) = s.albums.partition { s.types[it.id].let { t -> t == com.ikko.aura.reco.authority.ReleaseType.SINGLE || t == com.ikko.aura.reco.authority.ReleaseType.EP } }
     // The most recent first; the ones with no year known after those that have one.
     fun newestFirst(list: List<YtmAlbumRef>) = list.map(::albumOf).sortedByDescending { it.year }
-    return ArtistUiState(name = s.name, albums = newestFirst(full), singles = newestFirst(small), tracks = s.tracks)
+    return ArtistUiState(name = s.name, albums = newestFirst(full), singles = newestFirst(small), tracks = s.tracks, albumOf = s.albumOf, subtitleOf = s.subtitleOf, similar = s.similar)
 }

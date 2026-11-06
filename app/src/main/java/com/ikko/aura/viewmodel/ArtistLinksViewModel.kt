@@ -29,6 +29,7 @@ class ArtistLinksViewModel @Inject constructor(
     private val client: YtmClient,
     private val discographies: ArtistDiscographies,
     private val engine: com.ikko.aura.reco.RecommendationEngine,
+    private val deezer: com.ikko.aura.data.deezer.DeezerClient,
 ) : ViewModel() {
     /** The keys of the artists the listener likes (the taste picker's choice, the ones typed in) and of the ones they blocked. */
     val likedKeys: StateFlow<Set<String>> = engine.seedArtists
@@ -73,7 +74,7 @@ class ArtistLinksViewModel @Inject constructor(
 
     /** The artist's page on the sources, loaded once when first asked for. */
     fun online(name: String): StateFlow<YtmArtistState> {
-        val page = onlinePage?.takeIf { onlineName == name } ?: OnlineArtistPage(name, client, discographies, viewModelScope).also {
+        val page = onlinePage?.takeIf { onlineName == name } ?: OnlineArtistPage(name, client, discographies, viewModelScope, deezer).also {
             onlinePage = it
             onlineName = name
         }
@@ -90,8 +91,13 @@ class ArtistLinksViewModel @Inject constructor(
         localFlow?.takeIf { localName == name }?.let { return it }
         localName = name
         viewModelScope.launch(Dispatchers.IO) { discography.value = runCatching { discographies.of(name) }.getOrNull() }
+        // Its first value is worked out at once, not null: a null would read as "no such artist here", and the page that asked
+        // would show the other side's songs in the place of the library's for a frame.
+        val first = localIdOf(name)?.let { id ->
+            localArtistUiState(id, repository.tracks.value, repository.albums.value, discography.value, emptyList())
+        }
         return combine(repository.tracks, repository.albums, repository.artists, discography) { tracks, albums, _, d ->
             localIdOf(name)?.let { id -> localArtistUiState(id, tracks, albums, d, emptyList()) }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, null).also { localFlow = it }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, first).also { localFlow = it }
     }
 }

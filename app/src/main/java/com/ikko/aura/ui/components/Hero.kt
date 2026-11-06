@@ -353,12 +353,12 @@ class HeroState {
     /** Whether [k] names this trip's element. Defaults to [matchesSource] to avoid cross-element match bleed. */
     fun matches(k: String): Boolean = matchesSource(k)
 
-    /** Whether the current trip targets the given navigation route and arguments. */
-    fun matchesEntry(route: String?, args: android.os.Bundle?): Boolean {
-        if (route == null) return false
+    /** The trip key a navigation route and its arguments stand for, null for a route no trip goes to. */
+    private fun entryKey(route: String?, args: android.os.Bundle?): String? {
+        if (route == null) return null
         fun argStr(name: String): String? =
             args?.getString(name) ?: @Suppress("DEPRECATION") args?.get(name)?.toString()
-        val k = when {
+        return when {
             route.startsWith("album/") -> argStr("albumId")?.let { "album:$it" } ?: "album:"
             route.startsWith("playlist/") -> argStr("playlistId")?.let { "playlist:$it" } ?: "playlist:"
             route.startsWith("artist/") -> argStr("artistId")?.let { "artist:$it" } ?: "artist:"
@@ -369,12 +369,32 @@ class HeroState {
             route == "queue" -> "queue"
             // The settings' pages: the hub, the pages it opens, the pages those open. Matched whole, never by kind.
             com.ikko.aura.navigation.isSettingsPageRoute(route) ->
-                com.ikko.aura.navigation.settingsTripKey(if (route.startsWith("settings/")) "settings/" + (argStr("page") ?: "") else route)
-            else -> return false
+                com.ikko.aura.navigation.settingsTripKey(com.ikko.aura.navigation.settingsTripPath(route) { argStr(it) })
+            else -> null
         }
+    }
+
+    /** Whether the current trip targets the given navigation route and arguments. */
+    fun matchesEntry(route: String?, args: android.os.Bundle?): Boolean {
+        val k = entryKey(route, args) ?: return false
         val mine = key ?: return false
         if (mine == k) return true
         return (anyPageOfKind || k.endsWith(':')) && mine.substringBefore(':') == k.substringBefore(':')
+    }
+
+    /**
+     * The page of the trip that waits under the one now returning is being left (back pressed twice in a row, the second before
+     * the first return ended): the first return is cut short, the trip under it put back, and its own return starts at once. It
+     * used to be refused, and the trip stayed open for good with its list's item hidden.
+     */
+    fun closeParentAfterReturn(route: String?, args: android.os.Bundle?) {
+        if (phase != HeroPhase.Closing) return
+        val parent = savedTrips.lastOrNull() ?: return
+        val k = entryKey(route, args) ?: return
+        if (parent.key == k || ((parent.anyPageOfKind || k.endsWith(':')) && parent.key?.substringBefore(':') == k.substringBefore(':'))) {
+            reset()
+            startClosing()
+        }
     }
 
     /** The album whose card, among an artist's, the cover lands on: set for a trip from the player to an artist. */
@@ -1107,7 +1127,9 @@ fun Modifier.heroRise(index: Int, hero: HeroState = LocalHero.current, rows: Boo
         // Only the trip this page came with is its own: a page opened without one (-1) is not closing when the album it opened is.
         val isClosingMine = !hero.fromPlayer && hero.phase == HeroPhase.Closing && myTripId != -1 && hero.tripId == myTripId
         if (isClosingMine) left[0] = true
-        else if (hero.phase == HeroPhase.Opening || hero.phase == HeroPhase.Settled) left[0] = false
+        // A trip that is only restored (the one this page's own was opened from, put back as the return ends) does not bring a
+        // page that has left back for the frames it is still kept: only a new trip does, or its own, resting again.
+        else if (hero.phase == HeroPhase.Opening || (hero.phase == HeroPhase.Settled && hero.tripId == myTripId)) left[0] = false
         val out = if (isClosingMine || left[0]) EaseIn.transform(if (isClosingMine) hero.contentOut.value else 1f) else 0f
         alpha = p.value * (1f - out)
         // Rows rise less than the page's other parts (14 against 28 design px): enough to read as arriving, not enough to
@@ -1149,7 +1171,7 @@ fun Modifier.heroPageOut(hero: HeroState = LocalHero.current): Modifier {
             left[0] = true
             alpha = 1f - EaseIn.transform(hero.contentOut.value)
         } else if (left[0]) {
-            if (hero.phase == HeroPhase.Opening || hero.phase == HeroPhase.Settled) left[0] = false else alpha = 0f
+            if (hero.phase == HeroPhase.Opening || (hero.phase == HeroPhase.Settled && hero.tripId == myTripId)) left[0] = false else alpha = 0f
         }
     }
 }
@@ -1171,7 +1193,9 @@ fun rememberHeroGround(hero: HeroState = LocalHero.current): State<Float> {
     val left = remember { BooleanArray(1) }
     LaunchedEffect(hero.phase, hero.tripId) {
         when (hero.phase) {
-            HeroPhase.Opening, HeroPhase.Settled -> if (a.value < 1f) {
+            // Not for a page that has left while the trip put back under it is only being restored: its ground would fade back in
+            // for the frames the page is still kept, and the old page would show again.
+            HeroPhase.Opening, HeroPhase.Settled -> if (a.value < 1f && !(left[0] && hero.tripId != myTripId)) {
                 if (hero.phase == HeroPhase.Opening && hero.tripId == myTripId) delay(100)
                 a.animateTo(1f, tween(460, easing = FastOutSlowInEasing))
             }

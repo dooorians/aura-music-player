@@ -368,6 +368,15 @@ class DeezerClient(
         return DeezerTrackFeatures(page.optDouble("bpm", 0.0), gain, page.optString("preview").ifBlank { null }).also { featuresCache[key] = it }
     }
 
+    /** The title of the album Deezer puts a song of [artist] on, found by a search of the song; null when it finds none. */
+    suspend fun songAlbumOf(title: String, artist: String): String? = runCatching {
+        val q = URLEncoder.encode("artist:\"${artist.trim()}\" track:\"${title.trim()}\"", "UTF-8")
+        val data = JSONObject(fetch("$BASE_URL/search?q=$q&limit=3")).optJSONArray("data") ?: return@runCatching null
+        (0 until data.length()).firstNotNullOfOrNull { i ->
+            data.getJSONObject(i).optJSONObject("album")?.optString("title")?.takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
     suspend fun getRelatedArtists(artistId: Long, limit: Int = 30): List<DeezerArtistProfile> {
         if (artistId <= 0) return emptyList()
         relatedCache[artistId]?.let { return it }

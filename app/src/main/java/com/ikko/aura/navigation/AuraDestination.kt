@@ -75,6 +75,26 @@ sealed class AuraDestination(val route: String) {
         fun route(page: String) = "settings/$page"
     }
 
+    /** An artist's songs in their ranking (the most played, or the source's own order): [page] is the artist's name. */
+    data object RankingPattern : AuraDestination("ranking/{page}") {
+        fun route(name: String) = "ranking/${android.net.Uri.encode(name)}"
+    }
+
+    /** Everything one row of Home holds: [page] is the row's id. */
+    data object HomeSectionPattern : AuraDestination("homesection/{page}") {
+        fun route(sectionId: String) = "homesection/${android.net.Uri.encode(sectionId)}"
+    }
+
+    /** All the albums (or all the singles) of an artist: [page] is `albums:` or `singles:` and the artist's name. */
+    data object ReleasesPattern : AuraDestination("releases/{page}") {
+        fun route(kind: String, name: String) = "releases/${android.net.Uri.encode("$kind:$name")}"
+    }
+
+    /** The artists close to an artist: [page] is that artist's name. */
+    data object SimilarPattern : AuraDestination("similar/{page}") {
+        fun route(name: String) = "similar/${android.net.Uri.encode(name)}"
+    }
+
     companion object {
         /** Routes with no mini-player pill at all (their own full-bleed player UI). */
         /** Reached from the player and part of it: the mini player has no business on any of them. */
@@ -123,10 +143,23 @@ private val SETTINGS_PAGE_ROUTES = setOf(
 )
 
 fun isSettingsPageRoute(route: String?): Boolean =
-    route != null && (route in SETTINGS_PAGE_ROUTES || route.startsWith("settings/"))
+    route != null && (route in SETTINGS_PAGE_ROUTES || route.startsWith("settings/") || route.startsWith("ranking/") || route.startsWith("similar/") || route.startsWith("releases/") || route.startsWith("homesection/"))
 
 /**
  * The key of a trip to a settings page, from its route as it is navigated to (`settings/APPEARANCE`, `equalizer`…): what a row
  * that opens the page and the page's own title agree on.
  */
 fun settingsTripKey(route: String): String = "settings:$route"
+
+/**
+ * The route of a settings-like page as a trip names it: the pattern's argument filled in (`settings/APPEARANCE`, `ranking/<artist>`),
+ * the route itself for the pages that have none. [arg] reads a navigation argument by name.
+ */
+fun settingsTripPath(route: String, arg: (String) -> String?): String = when {
+    route.startsWith("settings/") -> "settings/" + (arg("page") ?: "")
+    route.startsWith("ranking/") -> "ranking/" + (arg("page") ?: "")
+    route.startsWith("similar/") -> "similar/" + (arg("page") ?: "")
+    route.startsWith("releases/") -> "releases/" + (arg("page") ?: "")
+    route.startsWith("homesection/") -> "homesection/" + (arg("page") ?: "")
+    else -> route
+}

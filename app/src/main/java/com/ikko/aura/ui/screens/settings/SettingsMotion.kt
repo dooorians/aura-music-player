@@ -38,7 +38,7 @@ internal fun rememberSettingsPageKey(): String? {
     return remember(entry) {
         val route = entry.destination.route
         if (!isSettingsPageRoute(route)) null
-        else settingsTripKey(if (route!!.startsWith("settings/")) "settings/" + (entry.arguments?.getString("page") ?: "") else route)
+        else settingsTripKey(com.ikko.aura.navigation.settingsTripPath(route!!) { entry.arguments?.getString(it) })
     }
 }
 

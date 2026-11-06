@@ -4,6 +4,7 @@ import com.ikko.aura.ui.components.heroPageOut
 import com.ikko.aura.ui.components.heroAnchor
 import com.ikko.aura.ui.components.heroRipple
 import com.ikko.aura.ui.components.heroRise
+import com.ikko.aura.ui.components.softArrival
 import com.ikko.aura.ui.components.heroTarget
 import com.ikko.aura.ui.components.suppressEdgeBackRipple
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -14,6 +15,8 @@ import com.ikko.aura.ui.components.topScrollPx
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -106,12 +109,28 @@ fun ArtistPageContent(
     val noLocal = remember { kotlinx.coroutines.flow.MutableStateFlow<com.ikko.aura.viewmodel.ArtistUiState?>(null) }
     val otherOnline by (if (showOnline && !online) links.online(routeState.name) else noOnline).collectAsStateWithLifecycle()
     val otherLocal by (if (!showOnline && online) links.local(routeState.name) else noLocal).collectAsStateWithLifecycle()
-    val uiState = when {
+    val sideState = when {
         showOnline == online -> routeState
         showOnline -> com.ikko.aura.viewmodel.artistUiStateOf(otherOnline).copy(name = routeState.name)
-        else -> otherLocal ?: routeState
+        // Never the online songs under the library's side: an artist the library does not have is an empty page.
+        else -> otherLocal ?: com.ikko.aura.viewmodel.ArtistUiState(name = routeState.name)
     }
-    val loading = if (showOnline != online && showOnline) otherOnline.loading else routeLoading
+    // Only the side that is being fetched is loading: the library's side never is, whatever the page's own side is doing.
+    val sideLoading = when {
+        showOnline == online -> routeLoading
+        showOnline -> otherOnline.loading
+        else -> false
+    }
+    // The other side is still being fetched when the switch moves: the page keeps what it shows (the switch already on its new
+    // side) until that side is there, instead of dropping to grey placeholders and bringing its parts back one by one: the page
+    // flashed. Only a page that has shown a side of itself has something to keep.
+    val lastShown = remember { arrayOfNulls<com.ikko.aura.viewmodel.ArtistUiState>(1) }
+    val keepLast = sideLoading && showOnline != online && lastShown[0] != null
+    val uiState = if (keepLast) lastShown[0]!! else sideState
+    val loading = sideLoading
+    // The header keeps its real parts (and the switch, already on its new side) while the sections below show their placeholders.
+    val headerLoading = loading && !keepLast
+    if (!loading) lastShown[0] = uiState
     val density = androidx.compose.ui.platform.LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -150,7 +169,18 @@ fun ArtistPageContent(
     val loadedAt = remember { LongArray(1) }
     if (beganLoading && !loading && loadedAt[0] == 0L) loadedAt[0] = System.nanoTime()
     // As an album page is lit with its cover, this page is lit with the artist's picture: the background and the buttons take its colours.
-    val photo = com.ikko.aura.data.rememberArtistImage(uiState.name)
+    val photoState = com.ikko.aura.data.rememberArtistImageState(uiState.name)
+    val photo = photoState.uri
+    // The picture was not there when the page opened: it comes in softly when it arrives.
+    val photoLate = remember(uiState.name) { photoState.uri == null }
+    // The picture of an artist never seen comes a moment after the page: its place is kept (a grey disc) until the lookup is over,
+    // so the name beside it does not move left and then right again. A lookup that never ends lets go of the place after a while.
+    var photoWaitOver by remember(uiState.name) { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(uiState.name) {
+        kotlinx.coroutines.delay(15_000)
+        photoWaitOver = true
+    }
+    val photoPending = !photoState.resolved && !photoWaitOver
     val theme by androidx.compose.runtime.produceState<com.ikko.aura.ui.components.AlbumTheme?>(null, photo) {
         value = photo?.let { uri ->
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -183,6 +213,100 @@ fun ArtistPageContent(
         val hasAlbumsSection = uiState.albums.isNotEmpty() || loading
         val hasSinglesSection = uiState.singles.isNotEmpty() && !loading
         fun sectionTitlePadding(first: Boolean) = PaddingValues(start = 16.dp, end = 16.dp, top = if (first) 5.dp else 12.dp, bottom = 12.dp)
+        // The five songs that lead the artist's page, in the order the page has them (a source's own is its ranking).
+        // A local artist's: the songs played most. An artist of a source: the source's own order.
+        val fullRanking = remember(uiState.tracks, uiState.ranked) { uiState.ranked.ifEmpty { uiState.tracks } }
+        val ranking = remember(fullRanking) { fullRanking.take(5) }
+        // The ranking appears whole: while the line under one of its five songs is still being found (a song of a source has no album of
+        // its own) it stays as grey shapes, and its rows come in together, each with its line. After a while it is shown as it is.
+        var rankingWaitOver by remember(uiState.name) { androidx.compose.runtime.mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(uiState.name) {
+            kotlinx.coroutines.delay(4500)
+            rankingWaitOver = true
+        }
+        val rankingKnown = ranking.all { t ->
+            (t.album.isNotBlank() && t.album != "YouTube Music") || uiState.subtitleOf.containsKey(t.id) || uiState.albumOf.containsKey(t.id)
+        }
+        val rankingReady = rankingKnown || rankingWaitOver
+        val hasRanking = !loading && ranking.isNotEmpty() && rankingReady
+        val showRankingSkeleton = loading || (ranking.isNotEmpty() && !rankingReady)
+        // The ranking came in after the page (its lines were waited for): its rows fade in as they arrive.
+        val rankingLate = remember { !hasRanking }
+        val rankAccent = com.ikko.aura.ui.components.rememberPlayerAccent()
+        // Artists close to this one come from another source, often after the rest of the page: when they arrive late they fade in.
+        val similarLate = remember { uiState.similar.isEmpty() }
+        // What a side of the page brings in when the switch moves (its sections, not the header the switch is in) arrives softly: it
+        // fades in and rises a little, instead of standing there all at once.
+        val sideArrival = remember { androidx.compose.animation.core.Animatable(1f) }
+        val firstSide = remember { showOnline }
+        val switchedOnce = remember { BooleanArray(1) }
+        androidx.compose.runtime.LaunchedEffect(showOnline, loading) {
+            if (showOnline != firstSide) switchedOnce[0] = true
+            if (!switchedOnce[0]) return@LaunchedEffect
+            sideArrival.snapTo(0f)
+            sideArrival.animateTo(1f, androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.16f, 1f, 0.3f, 1f)))
+        }
+        val sideRise = with(density) { 12.dp.toPx() }
+        val sideIn = Modifier.graphicsLayer {
+            val p = sideArrival.value
+            alpha = p
+            translationY = (1f - p) * sideRise
+        }
+        // The title of the albums (or the singles): its arrow opens the page of all of them, as the ranking's opens its page. Not
+        // while the page is still loading: there is nothing to open yet.
+        @Composable
+        fun ReleasesTitle(text: String, kind: String, list: List<Album>, rise: Int, first: Boolean) {
+            val tripKey = com.ikko.aura.navigation.settingsTripKey("releases/$kind:${uiState.name}")
+            val titleAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+            val open = !loading && list.isNotEmpty()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(sideIn)
+                    .heroRipple(pageKey = rippleKey)
+                    .then(if (open) Modifier.heroAnchor(tripKey, titleAnchor) else Modifier)
+                    .heroRise(rise).arriving(rise, loadedAt, beganLoading)
+                    .then(
+                        if (open) Modifier.clickable {
+                            com.ikko.aura.ui.screens.settings.ArtistReleases.title = text
+                            com.ikko.aura.ui.screens.settings.ArtistReleases.albums = list
+                            if (hero.begin(
+                                    key = tripKey, uri = null, cacheKey = null, cover = titleAnchor, radiusPx = 0f,
+                                    title = null, sub = null, drawCover = false,
+                                )
+                            ) navController.navigate(AuraDestination.ReleasesPattern.route(kind, uiState.name)) { launchSingleTop = true }
+                        } else Modifier,
+                    )
+                    .padding(sectionTitlePadding(first = first)),
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = AuraColors.TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (open) Icon(CupertinoIcons.ChevronRight, contentDescription = null, tint = AuraColors.TextSecondary, modifier = Modifier.size(22.dp))
+            }
+        }
+        fun rankingSubtitle(track: com.ikko.aura.data.model.Track): String {
+            // The line the catalogue gave whole, with the page: the album, its kind and its year at once.
+            uiState.subtitleOf[track.id]?.let { return it }
+            // A streamed song carries no album of its own ("YouTube Music" is the source, not an album): the page looks it up.
+            val looked = uiState.albumOf[track.id]
+            // Still being looked for: nothing yet. Looked for and not found: the artist, as the library's rows have.
+            val albumName = track.album.takeUnless { it.isBlank() || it == "YouTube Music" }
+                ?: looked?.ifBlank { null } ?: return if (looked == null && !rankingWaitOver) "" else track.artist
+            val small = uiState.singles.firstOrNull { it.title.equals(albumName, ignoreCase = true) }
+            val release = small ?: uiState.albums.firstOrNull { it.title.equals(albumName, ignoreCase = true) }
+            val kind = when {
+                small == null -> ""
+                small.title.equals(track.title, ignoreCase = true) -> " - Single"
+                else -> " - EP"
+            }
+            val year = release?.year?.takeIf { it > 0 } ?: track.year.takeIf { it > 0 }
+            return albumName + kind + (year?.let { " · $it" } ?: "")
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -195,13 +319,23 @@ fun ArtistPageContent(
                     // As the album pages: the picture on the left, the name and the counts beside it, then one row of actions.
                     val u = com.ikko.aura.ui.components.designUnit()
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        photo?.let { photo ->
-                            com.ikko.aura.ui.components.AlbumArt(
-                                uri = photo, contentDescription = uiState.name, shape = RoundedCornerShape(50),
-                                // Arrives with the name beside it (the same clock): it used to stand there, whole, over the page the trip
-                                // was leaving, while the rest of the header was still to rise.
-                                modifier = Modifier.size(u * 240f).heroRise(0), targetSizeDp = u * 240f, cacheKey = photo.toString(),
-                            )
+                        // The picture's place: a grey disc while it is not known (one never played comes a moment after the page), and the
+                        // picture itself, which fades in over the disc when it comes late, instead of standing there all at once.
+                        if (photo != null || headerLoading || photoPending) {
+                            Box(Modifier.size(u * 240f).heroRise(0)) {
+                                if (photo == null || photoLate) LoadingBar(Modifier.fillMaxSize(), CircleShape)
+                                photo?.let { photo ->
+                                    val fade = remember { androidx.compose.animation.core.Animatable(if (photoLate) 0f else 1f) }
+                                    androidx.compose.runtime.LaunchedEffect(photo) {
+                                        if (photoLate) fade.animateTo(1f, androidx.compose.animation.core.tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                                    }
+                                    com.ikko.aura.ui.components.AlbumArt(
+                                        uri = photo, contentDescription = uiState.name, shape = RoundedCornerShape(50),
+                                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
+                                        targetSizeDp = u * 240f, cacheKey = photo.toString(),
+                                    )
+                                }
+                            }
                             Spacer(Modifier.width(u * 40f))
                         }
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(u * 6f)) {
@@ -232,7 +366,7 @@ fun ArtistPageContent(
                                     ),
                                 ),
                             )
-                            if (loading) {
+                            if (headerLoading) {
                                 // The real line's own height (a transparent space in its style), the grey bar inside it.
                                 Box(Modifier.heroRise(0), contentAlignment = Alignment.CenterStart) {
                                     Text("\u00A0", style = MaterialTheme.typography.bodyLarge, color = androidx.compose.ui.graphics.Color.Transparent, maxLines = 1)
@@ -253,10 +387,9 @@ fun ArtistPageContent(
 
                     Spacer(Modifier.height(u * 40f))
 
-                    if (loading) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.heroRise(1)) {
-                        LoadingBar(Modifier.size(width = 122.dp, height = 44.dp), RoundedCornerShape(16.dp))
-                        LoadingBar(Modifier.size(width = 130.dp, height = 44.dp), RoundedCornerShape(16.dp))
-                    } else {
+                    // The real row of actions stands there while the page loads (the switch, the buttons): they are the same on every
+                    // artist, so grey shapes in their place only had to be swapped for them a moment later.
+                    run {
                         val localId = links.localIdOf(routeState.name)
                         val toast = androidx.compose.ui.platform.LocalContext.current
                         com.ikko.aura.ui.components.ActionBar(
@@ -270,7 +403,7 @@ fun ArtistPageContent(
                             localAvailable = localId != null || !online,
                             onShuffle = { if (uiState.tracks.isNotEmpty()) playerViewModel.playShuffled(uiState.tracks) },
                             onPlay = { if (uiState.tracks.isNotEmpty()) playerViewModel.playQueue(uiState.tracks, 0) },
-                            modifier = Modifier.heroRise(1).arriving(1, loadedAt, beganLoading),
+                            modifier = Modifier.heroRise(1),
                             // The three dots: like this artist, or block them.
                             add = {
                                 val liked by links.likedKeys.collectAsStateWithLifecycle()
@@ -299,20 +432,103 @@ fun ArtistPageContent(
                 }
             }
 
+            // While the page loads: the same section as grey shapes, in the places the real one will take.
+            if (showRankingSkeleton) {
+                item(key = "artist_ranking_title_loading", contentType = "section_title") {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().heroRise(2).padding(sectionTitlePadding(first = true)),
+                    ) {
+                        Text(
+                            text = "Classement des morceaux",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = AuraColors.TextPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(CupertinoIcons.ChevronRight, contentDescription = null, tint = AuraColors.TextSecondary, modifier = Modifier.size(22.dp))
+                    }
+                }
+                items(5, key = { "ranking_skeleton_$it" }, contentType = { "track_skeleton" }) { index ->
+                    // The row of the library's songs, as shapes: its cover and its two lines.
+                    val u = com.ikko.aura.ui.components.designUnit()
+                    Row(
+                        Modifier.fillMaxWidth().then(sideIn).height(u * 138f).padding(horizontal = 16.dp).heroRise(index, rows = true),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(u * 28f),
+                    ) {
+                        LoadingBar(Modifier.size(u * 116f), com.ikko.aura.ui.theme.AuraShapes.AlbumCover)
+                        Column {
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                Text(" ", fontSize = com.ikko.aura.ui.components.designSp(40f), lineHeight = com.ikko.aura.ui.components.designSp(48f), color = androidx.compose.ui.graphics.Color.Transparent, maxLines = 1)
+                                LoadingBar(Modifier.width(170.dp).height(14.dp))
+                            }
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                Text(" ", fontSize = com.ikko.aura.ui.components.designSp(32f), lineHeight = com.ikko.aura.ui.components.designSp(40f), color = androidx.compose.ui.graphics.Color.Transparent, maxLines = 1)
+                                LoadingBar(Modifier.width(110.dp).height(11.dp))
+                            }
+                        }
+                    }
+                }
+                item(key = "artist_ranking_gap_loading", contentType = "gap") { Spacer(Modifier.height(16.dp)) }
+            }
+
+            if (hasRanking) {
+                item(key = "artist_ranking_title", contentType = "section_title") {
+                    val tripKey = com.ikko.aura.navigation.settingsTripKey("ranking/${uiState.name}")
+                    val titleAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heroRipple(pageKey = rippleKey)
+                            .heroAnchor(tripKey, titleAnchor)
+                            .heroRise(2).arriving(0, loadedAt, beganLoading)
+                            // The arrow opens the page of the whole ranking, as a row of the settings opens its page: a trip from the title.
+                            .clickable {
+                                com.ikko.aura.ui.screens.settings.ArtistRanking.tracks = fullRanking
+                                com.ikko.aura.ui.screens.settings.ArtistRanking.subtitles = fullRanking.associate { it.id to rankingSubtitle(it) }
+                                if (hero.begin(
+                                        key = tripKey, uri = null, cacheKey = null, cover = titleAnchor, radiusPx = 0f,
+                                        title = null, sub = null, drawCover = false,
+                                    )
+                                ) navController.navigate(AuraDestination.RankingPattern.route(uiState.name)) { launchSingleTop = true }
+                            }
+                            .padding(sectionTitlePadding(first = true)),
+                    ) {
+                        Text(
+                            text = "Classement des morceaux",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = AuraColors.TextPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(CupertinoIcons.ChevronRight, contentDescription = null, tint = AuraColors.TextSecondary, modifier = Modifier.size(22.dp))
+                    }
+                }
+                itemsIndexed(ranking, key = { _, it -> "ranking_${it.id}" }, contentType = { _, _ -> "track" }) { index, track ->
+                    Box(Modifier.then(sideIn).heroRipple(pageKey = rippleKey).heroRise(index, rows = true).arriving(index, loadedAt, beganLoading).then(if (rankingLate) Modifier.softArrival(index) else Modifier).padding(horizontal = 16.dp)) {
+                    // The very row of the library's songs; under the title, the album as the sources name it (a single says so) and its year.
+                    com.ikko.aura.ui.screens.library.LibraryListRow(
+                        coverUri = track.artworkUri, coverKey = track.albumId.toString(), coverDescription = track.album,
+                        title = track.title, subtitle = rankingSubtitle(track), trailingText = null,
+                        playing = nowPlayingId == track.id, accent = rankAccent, compact = false,
+                        onClick = { playerViewModel.playQueue(ranking, index) },
+                        onLongClick = { menu.show(track) },
+                    )
+                    }
+                }
+                item(key = "artist_ranking_gap", contentType = "gap") { Spacer(Modifier.height(16.dp)) }
+            }
+
             if (uiState.albums.isNotEmpty() || loading) {
                 item(key = "artist_albums_title", contentType = "section_title") {
-                    Text(
-                        text = "Albums",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(2).padding(sectionTitlePadding(first = hasAlbumsSection)),
-                    )
+                    ReleasesTitle("Albums", "albums", uiState.albums, 3, !(hasRanking || showRankingSkeleton))
                 }
                 item(key = "artist_albums_row", contentType = "album_row") {
                     // From the player, the playing song's album is already there, with its own cover, for the copy to
                     // land on; the others are grey until the page has them.
                     val landingId = if (hero.fromPlayer) hero.coverAlbumId else null
                     LazyRow(
+                        modifier = Modifier.then(sideIn).arriving(0, loadedAt, beganLoading),
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -364,15 +580,11 @@ fun ArtistPageContent(
 
             if (uiState.singles.isNotEmpty() && !loading) {
                 item(key = "artist_singles_title", contentType = "section_title") {
-                    Text(
-                        text = "Singles & EP",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = AuraColors.TextPrimary,
-                        modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(4).padding(sectionTitlePadding(first = !hasAlbumsSection)),
-                    )
+                    ReleasesTitle("Singles & EP", "singles", uiState.singles, 5, !(hasRanking || showRankingSkeleton) && !hasAlbumsSection)
                 }
                 item(key = "artist_singles_row", contentType = "album_row") {
                     LazyRow(
+                        modifier = Modifier.then(sideIn).arriving(0, loadedAt, beganLoading),
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -396,45 +608,71 @@ fun ArtistPageContent(
                 item(key = "artist_singles_gap", contentType = "gap") { Spacer(Modifier.height(16.dp)) }
             }
 
-            item(key = "artist_tracks_title", contentType = "section_title") {
-                Text(
-                    text = "Titres",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = AuraColors.TextPrimary,
-                    modifier = Modifier.heroRipple(pageKey = rippleKey).heroRise(5).padding(sectionTitlePadding(first = !hasAlbumsSection && !hasSinglesSection)),
-                )
-            }
-
-            if (loading) items(6, key = { "track_skeleton_$it" }, contentType = { "track_skeleton" }) { index ->
-                // The row's own measures (68 dp, the cover 4 dp in, the words 12 dp after it, 20.4 and 16 dp lines).
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heroRise(index, rows = true),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Spacer(Modifier.width(4.dp))
-                    LoadingBar(Modifier.size(56.dp), RoundedCornerShape(8.dp))
-                    Column(Modifier.padding(start = 12.dp)) {
-                        Box(Modifier.height(20.4.dp), contentAlignment = Alignment.CenterStart) { LoadingBar(Modifier.width(170.dp).height(14.dp)) }
-                        Box(Modifier.height(16.dp), contentAlignment = Alignment.CenterStart) { LoadingBar(Modifier.width(110.dp).height(11.dp)) }
+            // Artists close to this one (an artist of a source only: a page of the library has nothing here).
+            if (!loading && uiState.similar.isNotEmpty()) {
+                item(key = "artist_similar_title", contentType = "section_title") {
+                    val tripKey = com.ikko.aura.navigation.settingsTripKey("similar/${uiState.name}")
+                    val titleAnchor = remember { com.ikko.aura.ui.components.HeroAnchor() }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heroRipple(pageKey = rippleKey)
+                            .then(sideIn)
+                            .then(if (similarLate) Modifier.softArrival(0) else Modifier)
+                            .heroAnchor(tripKey, titleAnchor)
+                            .heroRise(6)
+                            .clickable {
+                                com.ikko.aura.ui.screens.settings.SimilarArtists.list = uiState.similar
+                                if (hero.begin(
+                                        key = tripKey, uri = null, cacheKey = null, cover = titleAnchor, radiusPx = 0f,
+                                        title = null, sub = null, drawCover = false,
+                                    )
+                                ) navController.navigate(AuraDestination.SimilarPattern.route(uiState.name)) { launchSingleTop = true }
+                            }
+                            .padding(sectionTitlePadding(first = !(hasRanking || showRankingSkeleton) && !hasAlbumsSection && !hasSinglesSection)),
+                    ) {
+                        Text(
+                            text = "Artistes similaires",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = AuraColors.TextPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(CupertinoIcons.ChevronRight, contentDescription = null, tint = AuraColors.TextSecondary, modifier = Modifier.size(22.dp))
                     }
                 }
-            }
-            if (!loading) itemsIndexed(uiState.tracks, key = { _, it -> it.id }, contentType = { _, _ -> "track" }) { index, track ->
-                TrackListItem(
-                    track = track,
-                    onClick = {
-                        playerViewModel.playQueue(uiState.tracks, index)
-                    },
-                    artSize = 56.dp,
-                    // The artist is the page's own title: the album is what tells the rows apart.
-                    subtitle = track.album,
-                    isPlayingTrack = nowPlayingId == track.id,
-                    onLongClick = { menu.show(track) },
-                    modifier = Modifier
-                        .heroRipple(pageKey = rippleKey)
-                        .heroRise(index, rows = true)
-                        .padding(horizontal = 16.dp),
-                )
+                item(key = "artist_similar_row", contentType = "similar_row") {
+                    Row(
+                        Modifier.fillMaxWidth().then(sideIn).then(if (similarLate) Modifier.softArrival(1) else Modifier).padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        uiState.similar.take(3).forEachIndexed { index, artist ->
+                            Column(
+                                Modifier
+                                    .weight(1f)
+                                    .heroRipple(pageKey = rippleKey)
+                                    .heroRise(7 + index)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { navController.navigate(AuraDestination.YtmArtistPattern.route(artist.name)) },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                AlbumArt(
+                                    uri = artist.pictureUrl?.let(android.net.Uri::parse), contentDescription = artist.name,
+                                    shape = CircleShape, modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                    targetSizeDp = 140.dp, cacheKey = artist.pictureUrl ?: artist.name,
+                                )
+                                Text(
+                                    text = artist.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = AuraColors.TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
         }
